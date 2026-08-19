@@ -7,6 +7,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Android APK & Web
@@ -27,6 +30,9 @@ jobs:
         with:
           channel: 'stable'
           cache: true
+
+      - name: Ensure Android & Web platform scaffolding exists
+        run: flutter create . --platforms=android,web
 
       - name: Get dependencies
         run: flutter pub get
