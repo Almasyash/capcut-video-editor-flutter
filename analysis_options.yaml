@@ -1,0 +1,21 @@
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_const_literals_to_create_immutables: true
+    avoid_unnecessary_containers: true
+    use_key_in_widget_constructors: true
+    prefer_final_fields: true
+    unnecessary_this: true
+    prefer_is_empty: true
+    prefer_is_not_empty: true
