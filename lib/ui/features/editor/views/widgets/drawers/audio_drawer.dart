@@ -70,8 +70,11 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
   }
 
   void _openDeviceAudioPicker() {
-    final controller = TextEditingController(text: 'My_Background_Song');
-    int durationSec = 25;
+    final controller = TextEditingController(text: 'AUD_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}');
+    int durationSec = 28;
+    String selectedCategory = 'Music';
+
+    final categories = ['Music', 'Downloads', 'Voice Memos', 'Podcasts'];
 
     showDialog(
       context: context,
@@ -86,44 +89,61 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
               Text('Import Device Audio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ],
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Select or name your local audio file (.mp3 / .wav):', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                decoration: InputDecoration(
-                  labelText: 'Track Title',
-                  hintText: 'e.g. Favorite_Song',
-                  filled: true,
-                  fillColor: AppColors.surfaceLight,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  prefixIcon: const Icon(Icons.music_note_rounded, color: AppColors.secondary, size: 20),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Audio Source / Folder:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  children: categories.map((cat) {
+                    final isSel = cat == selectedCategory;
+                    return ChoiceChip(
+                      label: Text(cat),
+                      selected: isSel,
+                      selectedColor: AppColors.secondary,
+                      backgroundColor: AppColors.surfaceLight,
+                      labelStyle: TextStyle(color: isSel ? Colors.white : Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                      onSelected: (selected) {
+                        if (selected) setDialogState(() => selectedCategory = cat);
+                      },
+                    );
+                  }).toList(),
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Track Length:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                  Text('${durationSec}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.secondary)),
-                ],
-              ),
-              Slider(
-                value: durationSec.toDouble(),
-                min: 5.0,
-                max: 120.0,
-                divisions: 115,
-                activeColor: AppColors.secondary,
-                onChanged: (val) {
-                  setDialogState(() => durationSec = val.round());
-                },
-              ),
-            ],
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    labelText: 'Track Title (.mp3 / .wav)',
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    prefixIcon: const Icon(Icons.music_note_rounded, color: AppColors.secondary, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Track Length:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    Text('${durationSec}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.secondary)),
+                  ],
+                ),
+                Slider(
+                  value: durationSec.toDouble(),
+                  min: 5.0,
+                  max: 120.0,
+                  divisions: 115,
+                  activeColor: AppColors.secondary,
+                  onChanged: (val) {
+                    setDialogState(() => durationSec = val.round());
+                  },
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -137,12 +157,13 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () {
+                final trackName = controller.text.trim().isEmpty ? 'Device_Audio_Track' : controller.text.trim();
                 final result = DeviceMediaService.createCustomAudioResult(
-                  name: controller.text.trim().isEmpty ? 'Device_Audio_Track' : controller.text.trim(),
+                  name: trackName,
                   duration: Duration(seconds: durationSec),
                 );
 
-                _addMusic(result.fileName, result.estimatedDuration.inSeconds, artist: 'Device Storage');
+                _addMusic(result.fileName, result.estimatedDuration.inSeconds, artist: '$selectedCategory Storage');
                 Navigator.of(ctx).pop();
               },
               child: const Text('Import & Use', style: TextStyle(fontWeight: FontWeight.bold)),

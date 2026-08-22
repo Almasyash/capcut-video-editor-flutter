@@ -192,8 +192,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
   }
 
   void _openDeviceFilePicker() {
-    final controller = TextEditingController(text: 'My_Video_Recording');
-    int durationSec = 10;
+    final controller = TextEditingController(text: 'VID_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}');
+    int durationSec = 12;
+    String selectedFolder = 'Camera (DCIM)';
+    bool isVideo = true;
+
+    final folders = DeviceMediaService.getDeviceStorageFolders();
 
     showDialog(
       context: context,
@@ -205,47 +209,104 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
             children: [
               Icon(Icons.folder_open_rounded, color: AppColors.primary, size: 24),
               SizedBox(width: 8),
-              Text('Upload Device Media', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              Text('Browse Device Storage', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             ],
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Select or name your local file:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: controller,
-                autofocus: true,
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-                decoration: InputDecoration(
-                  labelText: 'File Name',
-                  hintText: 'e.g. Vacation_Vlog',
-                  filled: true,
-                  fillColor: AppColors.surfaceLight,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                  prefixIcon: const Icon(Icons.video_file_rounded, color: AppColors.primary, size: 20),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Choose Folder / Album:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: folders.take(4).map((f) {
+                    final isSel = f['name'] == selectedFolder;
+                    return InkWell(
+                      onTap: () => setDialogState(() => selectedFolder = f['name'] as String),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isSel ? AppColors.primary.withOpacity(0.2) : AppColors.surfaceLight,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: isSel ? AppColors.primary : AppColors.divider),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(f['icon'] as IconData, size: 12, color: isSel ? AppColors.primary : Colors.white70),
+                            const SizedBox(width: 4),
+                            Text(
+                              f['name'] as String,
+                              style: TextStyle(fontSize: 10, fontWeight: isSel ? FontWeight.bold : FontWeight.normal, color: isSel ? AppColors.primary : Colors.white),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Estimated Duration:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
-                  Text('${durationSec}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.videocam_rounded, size: 14), SizedBox(width: 4), Text('Video')]),
+                        selected: isVideo,
+                        selectedColor: AppColors.primary,
+                        backgroundColor: AppColors.surfaceLight,
+                        labelStyle: TextStyle(color: isVideo ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                        onSelected: (val) => setDialogState(() => isVideo = true),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.photo_rounded, size: 14), SizedBox(width: 4), Text('Photo')]),
+                        selected: !isVideo,
+                        selectedColor: AppColors.primary,
+                        backgroundColor: AppColors.surfaceLight,
+                        labelStyle: TextStyle(color: !isVideo ? Colors.black : Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                        onSelected: (val) => setDialogState(() => isVideo = false),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  decoration: InputDecoration(
+                    labelText: 'File Name',
+                    filled: true,
+                    fillColor: AppColors.surfaceLight,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    prefixIcon: Icon(isVideo ? Icons.video_file_rounded : Icons.image_rounded, color: AppColors.primary, size: 20),
+                  ),
+                ),
+                if (isVideo) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Video Duration:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                      Text('${durationSec}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                    ],
+                  ),
+                  Slider(
+                    value: durationSec.toDouble(),
+                    min: 2.0,
+                    max: 60.0,
+                    divisions: 58,
+                    activeColor: AppColors.primary,
+                    onChanged: (val) => setDialogState(() => durationSec = val.round()),
+                  ),
                 ],
-              ),
-              Slider(
-                value: durationSec.toDouble(),
-                min: 3.0,
-                max: 60.0,
-                divisions: 57,
-                activeColor: AppColors.primary,
-                onChanged: (val) {
-                  setDialogState(() => durationSec = val.round());
-                },
-              ),
-            ],
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -259,10 +320,10 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () {
-                final result = DeviceMediaService.createCustomVideoResult(
-                  name: controller.text.trim().isEmpty ? 'Uploaded_Media' : controller.text.trim(),
-                  duration: Duration(seconds: durationSec),
-                );
+                final fileName = controller.text.trim().isEmpty ? (isVideo ? 'Device_Video' : 'Device_Photo') : controller.text.trim();
+                final result = isVideo
+                    ? DeviceMediaService.createCustomVideoResult(name: fileName, duration: Duration(seconds: durationSec))
+                    : DeviceMediaService.createCustomPhotoResult(name: fileName, duration: const Duration(seconds: 4));
 
                 if (widget.isReplacing) {
                   widget.viewModel.replaceSelectedClip(
@@ -282,7 +343,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                 Navigator.of(ctx).pop();
                 Navigator.of(context).pop();
               },
-              child: const Text('Upload & Add', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('Import & Insert', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -293,7 +354,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.76,
+      height: MediaQuery.of(context).size.height * 0.78,
       decoration: const BoxDecoration(
         color: AppColors.background,
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppDimensions.radiusLg)),

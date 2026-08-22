@@ -1,11 +1,11 @@
 {
-    "name": "capcut_video_editor",
-    "short_name": "capcut_video_editor",
+    "name": "Mahmas Studio",
+    "short_name": "Mahmas Studio",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0F0F12",
+    "theme_color": "#00E5FF",
+    "description": "Mahmas Studio - Mobile & Web Video Editor",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
