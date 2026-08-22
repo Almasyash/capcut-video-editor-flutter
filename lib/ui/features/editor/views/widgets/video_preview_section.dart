@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
@@ -205,6 +207,58 @@ class VideoPreviewSection extends StatelessWidget {
   }
 
   Widget _buildMainVideoCanvas(dynamic activeClip, ColorFilter? filter, ColorFilter? adjustments) {
+    final hasLocalFile = activeClip.assetPath != null &&
+        !kIsWeb &&
+        File(activeClip.assetPath!).existsSync();
+
+    Widget canvasChild;
+
+    if (hasLocalFile) {
+      canvasChild = Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.file(
+            File(activeClip.assetPath!),
+            fit: BoxFit.contain,
+            errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(activeClip),
+          ),
+          Positioned(
+            bottom: 8,
+            left: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.65),
+                borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                border: Border.all(color: AppColors.primary.withOpacity(0.5), width: 0.8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, size: 12, color: AppColors.primary),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      activeClip.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ),
+                  Text(
+                    'PLAYING FROM STORAGE',
+                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.primary.withOpacity(0.9)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      canvasChild = _buildPlaceholderGraphic(activeClip);
+    }
+
     Widget videoContent = Opacity(
       opacity: activeClip.opacity,
       child: Transform(
@@ -215,77 +269,7 @@ class VideoPreviewSection extends StatelessWidget {
             activeClip.flipHorizontal ? -1.0 : 1.0,
             activeClip.flipVertical ? -1.0 : 1.0,
           ),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: activeClip.previewGradient,
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  activeClip.previewIcon,
-                  size: 48,
-                  color: Colors.white.withOpacity(0.85),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.4),
-                    borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            activeClip.title,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                          if (activeClip.isReversed)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 4.0),
-                              child: Icon(Icons.fast_rewind_rounded, size: 12, color: AppColors.secondary),
-                            ),
-                          if (activeClip.isFrozen)
-                            const Padding(
-                              padding: EdgeInsets.only(left: 4.0),
-                              child: Icon(Icons.ac_unit_rounded, size: 12, color: AppColors.primary),
-                            ),
-                        ],
-                      ),
-                      if (activeClip.assetPath != null) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          activeClip.assetPath!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 8,
-                            color: AppColors.primary.withOpacity(0.8),
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        child: canvasChild,
       ),
     );
 
@@ -308,6 +292,80 @@ class VideoPreviewSection extends StatelessWidget {
     }
 
     return videoContent;
+  }
+
+  Widget _buildPlaceholderGraphic(dynamic activeClip) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: activeClip.previewGradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              activeClip.previewIcon,
+              size: 48,
+              color: Colors.white.withOpacity(0.85),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        activeClip.title,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
+                      if (activeClip.isReversed)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4.0),
+                          child: Icon(Icons.fast_rewind_rounded, size: 12, color: AppColors.secondary),
+                        ),
+                      if (activeClip.isFrozen)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4.0),
+                          child: Icon(Icons.ac_unit_rounded, size: 12, color: AppColors.primary),
+                        ),
+                    ],
+                  ),
+                  if (activeClip.assetPath != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      activeClip.assetPath!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 8,
+                        color: AppColors.primary.withOpacity(0.8),
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildOverlayLayer(dynamic overlay) {

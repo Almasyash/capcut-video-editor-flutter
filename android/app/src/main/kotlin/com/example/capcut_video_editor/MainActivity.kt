@@ -13,6 +13,9 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.mahmas.studio/file_picker"
@@ -124,7 +127,7 @@ class MainActivity : FlutterActivity() {
         if (requestCode == FILE_PICKER_REQUEST_CODE) {
             if (resultCode == Activity.RESULT_OK && data?.data != null) {
                 val uri: Uri = data.data!!
-                var displayName = "Imported_File"
+                var displayName = "Imported_Media"
                 var fileSize: Long = 0
 
                 contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -141,8 +144,31 @@ class MainActivity : FlutterActivity() {
                 }
 
                 val mimeType = contentResolver.getType(uri) ?: ""
+
+                // Cache file to local app storage for direct filesystem and image loading
+                var localFilePath = uri.toString()
+                try {
+                    val sanitizedName = displayName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+                    val targetFile = File(cacheDir, sanitizedName)
+                    val inputStream: InputStream? = contentResolver.openInputStream(uri)
+                    if (inputStream != null) {
+                        val outputStream = FileOutputStream(targetFile)
+                        inputStream.use { input ->
+                            outputStream.use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        if (targetFile.exists() && targetFile.length() > 0) {
+                            localFilePath = targetFile.absolutePath
+                        }
+                    }
+                } catch (e: Exception) {
+                    // fallback to content URI
+                }
+
                 val responseMap = mapOf(
                     "uri" to uri.toString(),
+                    "path" to localFilePath,
                     "name" to displayName,
                     "size" to fileSize,
                     "mimeType" to mimeType

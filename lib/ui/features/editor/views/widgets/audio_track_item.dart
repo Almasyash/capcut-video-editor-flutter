@@ -101,6 +101,28 @@ class AudioTrackItem extends StatelessWidget {
                 ),
               ),
 
+              // Real Local Audio indicator
+              if (audioTrack.filePath != null)
+                Positioned(
+                  bottom: 2,
+                  left: 14,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.sd_storage_rounded, size: 8, color: AppColors.secondary),
+                        SizedBox(width: 2),
+                        Text('LOCAL AUDIO', style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: AppColors.secondary)),
+                      ],
+                    ),
+                  ),
+                ),
+
               // 3. Left & Right Interactive Amber Trim Handles when Selected
               if (isSelected) ...[
                 Positioned(

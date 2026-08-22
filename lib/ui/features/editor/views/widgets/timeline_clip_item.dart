@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
@@ -56,6 +58,19 @@ class TimelineClipItem extends StatelessWidget {
                 ),
                 child: Stack(
                   children: [
+                    // Real image thumbnail if assetPath is available
+                    if (clip.assetPath != null && !kIsWeb)
+                      Positioned.fill(
+                        child: Opacity(
+                          opacity: 0.6,
+                          child: Image.file(
+                            File(clip.assetPath!),
+                            fit: BoxFit.cover,
+                            errorBuilder: (ctx, err, stack) => const SizedBox.shrink(),
+                          ),
+                        ),
+                      ),
+
                     // Simulated Filmstrip frame dividers
                     Positioned.fill(
                       child: CustomPaint(
@@ -103,6 +118,29 @@ class TimelineClipItem extends StatelessWidget {
                         ],
                       ),
                     ),
+
+                    // Bottom-Left: Real File Source Badge if local file
+                    if (clip.assetPath != null)
+                      Positioned(
+                        bottom: 3,
+                        left: isSelected ? AppDimensions.trimHandleWidth + 4 : 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.7),
+                            borderRadius: BorderRadius.circular(2),
+                            border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 0.5),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.folder_open_rounded, size: 8, color: AppColors.primary),
+                              SizedBox(width: 2),
+                              Text('LOCAL FILE', style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                            ],
+                          ),
+                        ),
+                      ),
 
                     // Bottom-Right: Speed Badge if != 1.0
                     if ((clip.speed - 1.0).abs() > 0.05)
