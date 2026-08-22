@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
+import 'package:capcut_video_editor/core/services/device_media_service.dart';
 import 'package:capcut_video_editor/domain/models/audio_track.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
@@ -49,13 +50,14 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
     super.dispose();
   }
 
-  void _addMusic(String title, int durationSec) {
+  void _addMusic(String title, int durationSec, {String artist = 'Original Audio'}) {
     final random = math.Random(title.hashCode);
     final waveform = List.generate(40, (_) => 0.2 + random.nextDouble() * 0.8);
 
     final track = AudioTrack(
       id: 'audio_${DateTime.now().millisecondsSinceEpoch}',
       title: title,
+      artist: artist,
       duration: Duration(seconds: durationSec),
       waveformPoints: waveform,
       volume: 0.85,
@@ -67,12 +69,96 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
     );
   }
 
+  void _openDeviceAudioPicker() {
+    final controller = TextEditingController(text: 'My_Background_Song');
+    int durationSec = 25;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surfaceElevated,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.audio_file_rounded, color: AppColors.secondary, size: 24),
+              SizedBox(width: 8),
+              Text('Import Device Audio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Select or name your local audio file (.mp3 / .wav):', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'Track Title',
+                  hintText: 'e.g. Favorite_Song',
+                  filled: true,
+                  fillColor: AppColors.surfaceLight,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  prefixIcon: const Icon(Icons.music_note_rounded, color: AppColors.secondary, size: 20),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Track Length:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  Text('${durationSec}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.secondary)),
+                ],
+              ),
+              Slider(
+                value: durationSec.toDouble(),
+                min: 5.0,
+                max: 120.0,
+                divisions: 115,
+                activeColor: AppColors.secondary,
+                onChanged: (val) {
+                  setDialogState(() => durationSec = val.round());
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.secondary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                final result = DeviceMediaService.createCustomAudioResult(
+                  name: controller.text.trim().isEmpty ? 'Device_Audio_Track' : controller.text.trim(),
+                  duration: Duration(seconds: durationSec),
+                );
+
+                _addMusic(result.fileName, result.estimatedDuration.inSeconds, artist: 'Device Storage');
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('Import & Use', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final audio = widget.viewModel.audioTrack;
 
     return Container(
-      height: 220,
+      height: 250,
       decoration: const BoxDecoration(
         color: AppColors.surface,
         border: Border(top: BorderSide(color: AppColors.divider, width: 0.8)),
@@ -123,10 +209,38 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
             ),
           ),
 
+          // Import from Device Button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 4),
+            child: InkWell(
+              onTap: _openDeviceAudioPicker,
+              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.secondary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                  border: Border.all(color: AppColors.secondary.withOpacity(0.4)),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.upload_file_rounded, color: AppColors.secondary, size: 16),
+                    SizedBox(width: 6),
+                    Text(
+                      'Import Audio File from Device Storage',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.secondary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
           // Tabs: Sounds / Effects / Voiceover
           Container(
-            height: 34,
-            margin: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 6),
+            height: 32,
+            margin: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 4),
             decoration: BoxDecoration(
               color: AppColors.surfaceLight,
               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),

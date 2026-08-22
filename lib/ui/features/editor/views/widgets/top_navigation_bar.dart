@@ -6,7 +6,7 @@ import 'package:capcut_video_editor/domain/enums/aspect_ratio_preset.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'export_modal_sheet.dart';
 
-/// Top bar in CapCut containing Back, Aspect Ratio switcher, Undo/Redo, and 1080P Export badge
+/// Top bar in Mahmas Studio containing Brand Badge, Aspect Ratio switcher, Undo/Redo, and 1080P Export badge
 class TopNavigationBar extends StatelessWidget {
   final EditorViewModel viewModel;
 
@@ -16,7 +16,7 @@ class TopNavigationBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: AppDimensions.topBarHeight,
-      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md),
+      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.sm),
       decoration: const BoxDecoration(
         color: AppColors.background,
         border: Border(bottom: BorderSide(color: AppColors.divider, width: 0.8)),
@@ -24,20 +24,10 @@ class TopNavigationBar extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Left: Close / Back icon
-          IconButton(
-            icon: const Icon(Icons.close_rounded, color: AppColors.iconDefault, size: 22),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Project saved locally.'),
-                  duration: Duration(seconds: 1),
-                  backgroundColor: AppColors.surfaceElevated,
-                ),
-              );
-            },
-            tooltip: 'Close Editor',
-          ),
+          // Left: Mahmas Studio Brand Badge
+          _buildBrandBadge(context),
+
+          const SizedBox(width: 4),
 
           // Center-Left: Aspect Ratio Selector Dropdown/Badge
           _buildAspectRatioSelector(context),
@@ -47,10 +37,37 @@ class TopNavigationBar extends StatelessWidget {
           // Center-Right: Undo & Redo Buttons
           _buildUndoRedoButtons(),
 
-          const SizedBox(width: AppDimensions.sm),
+          const SizedBox(width: 4),
 
           // Right: Resolution & Export Button
           _buildExportButton(context),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBrandBadge(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+        border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 1.0),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.movie_filter_rounded, size: 14, color: AppColors.primary),
+          SizedBox(width: 4),
+          Text(
+            'Mahmas Studio',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.2,
+              color: AppColors.textPrimary,
+            ),
+          ),
         ],
       ),
     );
@@ -94,7 +111,7 @@ class TopNavigationBar extends StatelessWidget {
         }).toList();
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
           color: AppColors.surfaceElevated,
           borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
@@ -103,17 +120,17 @@ class TopNavigationBar extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.aspect_ratio_rounded, size: 14, color: AppColors.primary),
-            const SizedBox(width: 5),
+            const Icon(Icons.aspect_ratio_rounded, size: 13, color: AppColors.primary),
+            const SizedBox(width: 4),
             Text(
               viewModel.aspectRatio.label,
               style: const TextStyle(
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary,
               ),
             ),
-            const Icon(Icons.arrow_drop_down_rounded, size: 16, color: AppColors.textSecondary),
+            const Icon(Icons.arrow_drop_down_rounded, size: 14, color: AppColors.textSecondary),
           ],
         ),
       ),
@@ -127,18 +144,22 @@ class TopNavigationBar extends StatelessWidget {
         IconButton(
           icon: Icon(
             Icons.undo_rounded,
-            size: 20,
+            size: 18,
             color: viewModel.canUndo ? AppColors.iconDefault : AppColors.iconDisabled,
           ),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
           onPressed: viewModel.canUndo ? viewModel.undo : null,
           tooltip: 'Undo',
         ),
         IconButton(
           icon: Icon(
             Icons.redo_rounded,
-            size: 20,
+            size: 18,
             color: viewModel.canRedo ? AppColors.iconDefault : AppColors.iconDisabled,
           ),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
           onPressed: viewModel.canRedo ? viewModel.redo : null,
           tooltip: 'Redo',
         ),
@@ -157,14 +178,14 @@ class TopNavigationBar extends StatelessWidget {
         );
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           gradient: AppColors.exportGradient,
           borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
           boxShadow: [
             BoxShadow(
               color: AppColors.primary.withOpacity(0.3),
-              blurRadius: 8,
+              blurRadius: 6,
               offset: const Offset(0, 2),
             ),
           ],
@@ -176,8 +197,8 @@ class TopNavigationBar extends StatelessWidget {
               viewModel.exportSettings.resolution.label,
               style: AppTypography.badgeText,
             ),
-            const SizedBox(width: 4),
-            const Icon(Icons.arrow_upward_rounded, size: 16, color: Colors.black),
+            const SizedBox(width: 3),
+            const Icon(Icons.arrow_upward_rounded, size: 14, color: Colors.black),
           ],
         ),
       ),

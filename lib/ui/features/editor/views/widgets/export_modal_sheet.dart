@@ -197,11 +197,11 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text('Codec / Format', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                          const Text('Render Engine', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
                           const SizedBox(height: 2),
-                          Text(
-                            viewModel.exportSettings.format,
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                          const Text(
+                            'Mahmas Studio Engine (H.264)',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                           ),
                         ],
                       ),

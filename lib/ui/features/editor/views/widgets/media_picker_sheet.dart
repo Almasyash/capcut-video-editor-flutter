@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
+import 'package:capcut_video_editor/core/services/device_media_service.dart';
 import 'package:capcut_video_editor/core/utils/time_formatter.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
@@ -99,33 +100,33 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
       category: 'Photo',
     ),
     MediaPickerItem(
-      title: 'Mountain Landscape',
+      title: 'Mountain Landscapes',
       duration: Duration(seconds: 4),
-      gradient: [Color(0xFF2C3E50), Color(0xFF4CA1AF)],
+      gradient: [Color(0xFF56AB2F), Color(0xFFA8E063)],
       icon: Icons.landscape_rounded,
       category: 'Photo',
     ),
     MediaPickerItem(
       title: 'Studio Lighting Setup',
       duration: Duration(seconds: 4),
-      gradient: [Color(0xFFFF8008), Color(0xFFFFC837)],
-      icon: Icons.photo_camera_rounded,
+      gradient: [Color(0xFF614385), Color(0xFF516395)],
+      icon: Icons.camera_rounded,
       category: 'Photo',
     ),
   ];
 
   static const List<MediaPickerItem> _mockCanvases = [
     MediaPickerItem(
-      title: 'Pure Black Screen',
+      title: 'Solid Black Background',
       duration: Duration(seconds: 5),
-      gradient: [Color(0xFF141414), Color(0xFF0A0A0A)],
-      icon: Icons.crop_square_rounded,
+      gradient: [Color(0xFF141414), Color(0xFF000000)],
+      icon: Icons.check_box_outline_blank_rounded,
       category: 'Canvas',
     ),
     MediaPickerItem(
       title: 'Cyan Glow Gradient',
       duration: Duration(seconds: 5),
-      gradient: [Color(0xFF00E5FF), Color(0xFF0052D4)],
+      gradient: [Color(0xFF00E5FF), Color(0xFF0077B6)],
       icon: Icons.gradient_rounded,
       category: 'Canvas',
     ),
@@ -133,14 +134,14 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
       title: 'Neon Pink Backdrop',
       duration: Duration(seconds: 5),
       gradient: [Color(0xFFFF007F), Color(0xFF7928CA)],
-      icon: Icons.brush_rounded,
+      icon: Icons.light_mode_rounded,
       category: 'Canvas',
     ),
     MediaPickerItem(
       title: 'Emerald Green Screen',
       duration: Duration(seconds: 5),
-      gradient: [Color(0xFF00B09B), Color(0xFF96C93D)],
-      icon: Icons.shield_rounded,
+      gradient: [Color(0xFF00E676), Color(0xFF00C853)],
+      icon: Icons.crop_square_rounded,
       category: 'Canvas',
     ),
   ];
@@ -190,10 +191,109 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
     }
   }
 
+  void _openDeviceFilePicker() {
+    final controller = TextEditingController(text: 'My_Video_Recording');
+    int durationSec = 10;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppColors.surfaceElevated,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.folder_open_rounded, color: AppColors.primary, size: 24),
+              SizedBox(width: 8),
+              Text('Upload Device Media', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Select or name your local file:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'File Name',
+                  hintText: 'e.g. Vacation_Vlog',
+                  filled: true,
+                  fillColor: AppColors.surfaceLight,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  prefixIcon: const Icon(Icons.video_file_rounded, color: AppColors.primary, size: 20),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Estimated Duration:', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  Text('${durationSec}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                ],
+              ),
+              Slider(
+                value: durationSec.toDouble(),
+                min: 3.0,
+                max: 60.0,
+                divisions: 57,
+                activeColor: AppColors.primary,
+                onChanged: (val) {
+                  setDialogState(() => durationSec = val.round());
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                final result = DeviceMediaService.createCustomVideoResult(
+                  name: controller.text.trim().isEmpty ? 'Uploaded_Media' : controller.text.trim(),
+                  duration: Duration(seconds: durationSec),
+                );
+
+                if (widget.isReplacing) {
+                  widget.viewModel.replaceSelectedClip(
+                    title: result.fileName,
+                    duration: result.estimatedDuration,
+                    gradient: result.gradient,
+                    icon: result.icon,
+                  );
+                } else {
+                  widget.viewModel.addNewClipFromMedia(
+                    title: result.fileName,
+                    duration: result.estimatedDuration,
+                    gradient: result.gradient,
+                    icon: result.icon,
+                  );
+                }
+                Navigator.of(ctx).pop();
+                Navigator.of(context).pop();
+              },
+              child: const Text('Upload & Add', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.72,
+      height: MediaQuery.of(context).size.height * 0.76,
       decoration: const BoxDecoration(
         color: AppColors.background,
         borderRadius: BorderRadius.vertical(top: Radius.circular(AppDimensions.radiusLg)),
@@ -215,7 +315,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
 
           // Header
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 6),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -231,9 +331,39 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
             ),
           ),
 
+          // Device Upload Button
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 4),
+            child: InkWell(
+              onTap: _openDeviceFilePicker,
+              borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.5), width: 1.2),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.upload_file_rounded, color: AppColors.primary, size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Upload File from Device Storage',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 4),
+
           // Tabs (Videos / Photos / Canvases)
           Container(
-            height: 40,
+            height: 38,
             margin: const EdgeInsets.symmetric(horizontal: AppDimensions.md),
             decoration: BoxDecoration(
               color: AppColors.surface,
@@ -254,13 +384,12 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                 Tab(text: 'Photos'),
                 Tab(text: 'Canvases'),
               ],
-              onTap: (_) => setState(() => _selectedIndex = null),
             ),
           ),
 
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
 
-          // Media Grid
+          // Tab views
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -272,33 +401,36 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
             ),
           ),
 
-          // Bottom Action Bar
+          // Bottom Action Bar (Add to Timeline)
           Container(
             padding: const EdgeInsets.all(AppDimensions.md),
             decoration: const BoxDecoration(
               color: AppColors.surface,
-              border: Border(top: BorderSide(color: AppColors.divider, width: 0.5)),
+              border: Border(top: BorderSide(color: AppColors.divider, width: 0.8)),
             ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.check_circle_rounded, size: 18),
-                    label: Text(
-                      _selectedIndex != null
-                          ? (widget.isReplacing ? 'Replace Clip' : 'Add to Timeline (1)')
-                          : 'Select a clip above',
+            child: SafeArea(
+              top: false,
+              child: SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton(
+                  onPressed: _selectedIndex != null ? _handleImport : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _selectedIndex != null ? AppColors.primary : AppColors.surfaceLight,
+                    foregroundColor: Colors.black,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppDimensions.radiusFull)),
+                    elevation: _selectedIndex != null ? 3 : 0,
+                  ),
+                  child: Text(
+                    widget.isReplacing ? 'Replace Selected Clip' : 'Add to Timeline',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: _selectedIndex != null ? Colors.black : AppColors.textMuted,
                     ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _selectedIndex != null ? AppColors.primary : AppColors.surfaceLight,
-                      foregroundColor: _selectedIndex != null ? Colors.black : AppColors.textMuted,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppDimensions.radiusMd)),
-                    ),
-                    onPressed: _selectedIndex != null ? _handleImport : null,
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ],
@@ -308,7 +440,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
 
   Widget _buildMediaGrid(List<MediaPickerItem> items) {
     return GridView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md),
+      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 8),
+      physics: const BouncingScrollPhysics(),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 10,
@@ -320,62 +453,68 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
         final item = items[index];
         final isSelected = _selectedIndex == index;
 
-        return GestureDetector(
-          onTap: () => setState(() => _selectedIndex = index),
-          child: Container(
+        return InkWell(
+          onTap: () {
+            setState(() {
+              _selectedIndex = isSelected ? null : index;
+            });
+          },
+          borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
               gradient: LinearGradient(
                 colors: item.gradient,
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
+              borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
               border: Border.all(
-                color: isSelected ? AppColors.primary : Colors.transparent,
-                width: isSelected ? 3.0 : 1.0,
+                color: isSelected ? AppColors.primary : Colors.white12,
+                width: isSelected ? 2.5 : 1.0,
               ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: AppColors.primary.withOpacity(0.4),
+                        blurRadius: 10,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
             ),
             child: Stack(
               children: [
                 Center(
-                  child: Icon(item.icon, size: 36, color: Colors.white38),
+                  child: Icon(item.icon, size: 36, color: Colors.white70),
                 ),
                 Positioned(
-                  bottom: 8,
-                  left: 8,
-                  right: 8,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        item.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          shadows: [Shadow(blurRadius: 3, color: Colors.black)],
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.6),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: Text(
-                              TimeFormatter.formatSeconds(item.duration.inMilliseconds / 1000.0, showMilliseconds: false),
-                              style: const TextStyle(fontSize: 10, color: AppColors.primary, fontWeight: FontWeight.bold),
-                            ),
+                  bottom: 6,
+                  left: 6,
+                  right: 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.65),
+                      borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
                           ),
-                        ],
-                      ),
-                    ],
+                        ),
+                        Text(
+                          TimeFormatter.formatSeconds(item.duration.inSeconds.toDouble()),
+                          style: const TextStyle(fontSize: 9, color: AppColors.primary, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
                 if (isSelected)
@@ -384,11 +523,8 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                     right: 6,
                     child: Container(
                       padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: AppColors.primary,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.check_rounded, size: 14, color: Colors.black),
+                      decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
+                      child: const Icon(Icons.check, size: 12, color: Colors.black),
                     ),
                   ),
               ],

@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:capcut_video_editor/core/services/device_media_service.dart';
 import 'package:capcut_video_editor/domain/enums/aspect_ratio_preset.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/domain/models/color_adjustments.dart';
 import 'package:capcut_video_editor/domain/models/editor_filter.dart';
+import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
 import 'package:capcut_video_editor/domain/models/sticker_item.dart';
+import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
 void main() {
@@ -144,6 +147,59 @@ void main() {
 
       viewModel.setCanvasBlurSigma(10.0);
       expect(viewModel.canvasBlurSigma, equals(10.0));
+    });
+
+    test('Universal Timeline Trimming and Dragging on Audio, PIP, Text, and Stickers', () {
+      // 1. Audio Track Timing Update
+      expect(viewModel.audioTrack, isNotNull);
+      viewModel.updateAudioTrackTiming(const Duration(seconds: 2), const Duration(seconds: 14));
+      expect(viewModel.audioTrack!.startTimeInSeconds, equals(2.0));
+      expect(viewModel.audioTrack!.durationInSeconds, equals(14.0));
+
+      // 2. Text Overlay Timing Update
+      final textId = viewModel.textOverlays.first.id;
+      viewModel.updateTextOverlayTiming(textId, const Duration(seconds: 3), const Duration(seconds: 6));
+      final updatedText = viewModel.textOverlays.firstWhere((t) => t.id == textId);
+      expect(updatedText.startTimeInSeconds, equals(3.0));
+      expect(updatedText.durationInSeconds, equals(6.0));
+
+      // 3. PIP Overlay Timing Update
+      final overlay = const OverlayClip(
+        id: 'pip_test_1',
+        title: 'PIP Test',
+        startTime: Duration(seconds: 1),
+        duration: Duration(seconds: 5),
+        previewGradient: [Colors.red, Colors.orange],
+      );
+      viewModel.addOverlayClip(overlay);
+      viewModel.updateOverlayClipTiming('pip_test_1', const Duration(seconds: 2), const Duration(seconds: 8));
+      final updatedOverlay = viewModel.overlayClips.firstWhere((o) => o.id == 'pip_test_1');
+      expect(updatedOverlay.startTimeInSeconds, equals(2.0));
+      expect(updatedOverlay.durationInSeconds, equals(8.0));
+
+      // 4. Sticker Timing Update
+      viewModel.addSticker(StickerPreset.catalog.first);
+      final stickerId = viewModel.stickerOverlays.first.id;
+      viewModel.updateStickerTiming(stickerId, const Duration(seconds: 4), const Duration(seconds: 5));
+      final updatedSticker = viewModel.stickerOverlays.firstWhere((s) => s.id == stickerId);
+      expect(updatedSticker.startTimeInSeconds, equals(4.0));
+      expect(updatedSticker.durationInSeconds, equals(5.0));
+    });
+
+    test('DeviceMediaService creates valid video, photo, and audio media results', () {
+      final videoResult = DeviceMediaService.createCustomVideoResult(name: 'Trip_Vlog', duration: const Duration(seconds: 15));
+      expect(videoResult.fileName, equals('Trip_Vlog.mp4'));
+      expect(videoResult.fileType, equals('video'));
+      expect(videoResult.estimatedDuration.inSeconds, equals(15));
+
+      final audioResult = DeviceMediaService.createCustomAudioResult(name: 'Theme_Song', duration: const Duration(seconds: 30));
+      expect(audioResult.fileName, equals('Theme_Song.mp3'));
+      expect(audioResult.fileType, equals('audio'));
+      expect(audioResult.estimatedDuration.inSeconds, equals(30));
+
+      final photoResult = DeviceMediaService.createCustomPhotoResult(name: 'Selfie');
+      expect(photoResult.fileName, equals('Selfie.jpg'));
+      expect(photoResult.fileType, equals('photo'));
     });
   });
 }

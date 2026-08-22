@@ -22,6 +22,7 @@ class _EditorSnapshot {
   final List<OverlayClip> overlayClips;
   final List<StickerOverlay> stickerOverlays;
   final List<TextOverlay> textOverlays;
+  final AudioTrack? audioTrack;
   final int? selectedIndex;
   final double playheadPosition;
   final EditorFilter activeFilter;
@@ -33,6 +34,7 @@ class _EditorSnapshot {
     required this.overlayClips,
     required this.stickerOverlays,
     required this.textOverlays,
+    required this.audioTrack,
     required this.selectedIndex,
     required this.playheadPosition,
     required this.activeFilter,
@@ -41,9 +43,8 @@ class _EditorSnapshot {
   });
 }
 
-/// Comprehensive ViewModel managing the CapCut video editor state, timeline playback,
-/// clip modifications (split, trim, delete, duplicate, layers), undo/redo history,
-/// visual effects, color filters/adjustments, stickers, and export.
+/// Comprehensive ViewModel managing the Mahmas Studio video editor state, timeline playback,
+/// universal multi-track trimming and dragging, undo/redo history, and export.
 class EditorViewModel extends ChangeNotifier {
   EditorViewModel() {
     _initializeProject();
@@ -59,6 +60,10 @@ class EditorViewModel extends ChangeNotifier {
 
   int? _selectedClipIndex;
   int? _selectedOverlayIndex;
+  String? _selectedTextId;
+  String? _selectedStickerId;
+  bool _isAudioSelected = false;
+
   double _playheadPosition = 0.0; // In seconds
   bool _isPlaying = false;
   bool _isLooping = true; // Auto-loop playback for video editors
@@ -97,6 +102,9 @@ class EditorViewModel extends ChangeNotifier {
 
   int? get selectedClipIndex => _selectedClipIndex;
   int? get selectedOverlayIndex => _selectedOverlayIndex;
+  String? get selectedTextId => _selectedTextId;
+  String? get selectedStickerId => _selectedStickerId;
+  bool get isAudioSelected => _isAudioSelected;
 
   VideoClip? get selectedClip =>
       (_selectedClipIndex != null && _selectedClipIndex! >= 0 && _selectedClipIndex! < _videoClips.length)
@@ -200,6 +208,7 @@ class EditorViewModel extends ChangeNotifier {
         overlayClips: List.from(_overlayClips),
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
+        audioTrack: _audioTrack,
         selectedIndex: _selectedClipIndex,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
@@ -221,6 +230,7 @@ class EditorViewModel extends ChangeNotifier {
         overlayClips: List.from(_overlayClips),
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
+        audioTrack: _audioTrack,
         selectedIndex: _selectedClipIndex,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
@@ -234,6 +244,7 @@ class EditorViewModel extends ChangeNotifier {
     _overlayClips = List.from(snapshot.overlayClips);
     _stickerOverlays = List.from(snapshot.stickerOverlays);
     _textOverlays = List.from(snapshot.textOverlays);
+    _audioTrack = snapshot.audioTrack;
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
@@ -252,6 +263,7 @@ class EditorViewModel extends ChangeNotifier {
         overlayClips: List.from(_overlayClips),
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
+        audioTrack: _audioTrack,
         selectedIndex: _selectedClipIndex,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
@@ -265,6 +277,7 @@ class EditorViewModel extends ChangeNotifier {
     _overlayClips = List.from(snapshot.overlayClips);
     _stickerOverlays = List.from(snapshot.stickerOverlays);
     _textOverlays = List.from(snapshot.textOverlays);
+    _audioTrack = snapshot.audioTrack;
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
@@ -341,7 +354,7 @@ class EditorViewModel extends ChangeNotifier {
       final clip = _videoClips[i];
       final clipEnd = accumulated + clip.durationInSeconds;
       if (_playheadPosition >= accumulated && _playheadPosition <= clipEnd) {
-        if (_selectedClipIndex != i) {
+        if (_selectedClipIndex != i && _selectedOverlayIndex == null && !_isAudioSelected && _selectedTextId == null && _selectedStickerId == null) {
           _selectedClipIndex = i;
         }
         break;
@@ -350,12 +363,15 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
-  // --- Clip Selection ---
+  // --- Element Selection ---
 
   void selectClip(int index) {
     if (index >= 0 && index < _videoClips.length) {
       _selectedClipIndex = index;
       _selectedOverlayIndex = null;
+      _isAudioSelected = false;
+      _selectedTextId = null;
+      _selectedStickerId = null;
       notifyListeners();
     }
   }
@@ -364,13 +380,46 @@ class EditorViewModel extends ChangeNotifier {
     if (index >= 0 && index < _overlayClips.length) {
       _selectedOverlayIndex = index;
       _selectedClipIndex = null;
+      _isAudioSelected = false;
+      _selectedTextId = null;
+      _selectedStickerId = null;
       notifyListeners();
     }
+  }
+
+  void selectAudio() {
+    _isAudioSelected = true;
+    _selectedClipIndex = null;
+    _selectedOverlayIndex = null;
+    _selectedTextId = null;
+    _selectedStickerId = null;
+    notifyListeners();
+  }
+
+  void selectText(String id) {
+    _selectedTextId = id;
+    _selectedClipIndex = null;
+    _selectedOverlayIndex = null;
+    _isAudioSelected = false;
+    _selectedStickerId = null;
+    notifyListeners();
+  }
+
+  void selectSticker(String id) {
+    _selectedStickerId = id;
+    _selectedClipIndex = null;
+    _selectedOverlayIndex = null;
+    _isAudioSelected = false;
+    _selectedTextId = null;
+    notifyListeners();
   }
 
   void clearSelection() {
     _selectedClipIndex = null;
     _selectedOverlayIndex = null;
+    _isAudioSelected = false;
+    _selectedTextId = null;
+    _selectedStickerId = null;
     notifyListeners();
   }
 
@@ -391,6 +440,63 @@ class EditorViewModel extends ChangeNotifier {
 
   void closeDrawer() {
     _activeDrawer = null;
+    notifyListeners();
+  }
+
+  // --- Universal Timeline Trimming & Dragging ---
+
+  /// Trims or moves audio track timing
+  void updateAudioTrackTiming(Duration newStart, Duration newDuration) {
+    if (_audioTrack == null) return;
+    if (newDuration.inMilliseconds < 400) return; // Minimum 0.4s
+    _saveSnapshot();
+
+    _audioTrack = _audioTrack!.copyWith(
+      startTime: newStart,
+      duration: newDuration,
+    );
+    notifyListeners();
+  }
+
+  /// Trims or moves text overlay timing
+  void updateTextOverlayTiming(String id, Duration newStart, Duration newDuration) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    if (newDuration.inMilliseconds < 300) return; // Minimum 0.3s
+    _saveSnapshot();
+
+    _textOverlays[index] = _textOverlays[index].copyWith(
+      startTime: newStart,
+      duration: newDuration,
+    );
+    notifyListeners();
+  }
+
+  /// Trims or moves PIP overlay layer timing
+  void updateOverlayClipTiming(String id, Duration newStart, Duration newDuration) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    if (newDuration.inMilliseconds < 400) return; // Minimum 0.4s
+    _saveSnapshot();
+
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      startTime: newStart,
+      duration: newDuration,
+    );
+    notifyListeners();
+  }
+
+  /// Trims or moves sticker overlay timing
+  void updateStickerTiming(String id, Duration newStart, Duration newDuration) {
+    final index = _stickerOverlays.indexWhere((s) => s.id == id);
+    if (index == -1) return;
+    if (newDuration.inMilliseconds < 300) return; // Minimum 0.3s
+    _saveSnapshot();
+
+    _stickerOverlays[index] = _stickerOverlays[index].copyWith(
+      startTime: newStart,
+      duration: newDuration,
+    );
     notifyListeners();
   }
 
@@ -747,6 +853,7 @@ class EditorViewModel extends ChangeNotifier {
   void removeAudioTrack() {
     _saveSnapshot();
     _audioTrack = null;
+    _isAudioSelected = false;
     notifyListeners();
   }
 
@@ -768,6 +875,7 @@ class EditorViewModel extends ChangeNotifier {
   void removeTextOverlay(String id) {
     _saveSnapshot();
     _textOverlays.removeWhere((t) => t.id == id);
+    if (_selectedTextId == id) _selectedTextId = null;
     notifyListeners();
   }
 
@@ -799,6 +907,7 @@ class EditorViewModel extends ChangeNotifier {
   void removeSticker(String id) {
     _saveSnapshot();
     _stickerOverlays.removeWhere((s) => s.id == id);
+    if (_selectedStickerId == id) _selectedStickerId = null;
     notifyListeners();
   }
 
@@ -846,7 +955,7 @@ class EditorViewModel extends ChangeNotifier {
   // --- Zoom, Aspect Ratio & Export ---
 
   void setZoomScale(double pps) {
-    _pixelsPerSecond = pps.clamp(AppDimensions.minPixelsPerSecond, AppDimensions.maxPixelsPerSecond);
+    _pixelsPerSecond = pps.clamp(AppDimensions.minPixelsPerSecond, AppDimensions.maxPixelsPerSecond).toDouble();
     notifyListeners();
   }
 

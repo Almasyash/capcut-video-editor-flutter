@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/action_toolbar.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/audio_track_item.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/adjust_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/audio_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/canvas_drawer.dart';
@@ -12,9 +13,26 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/fil
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/stickers_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/top_navigation_bar.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_preview_section.dart';
 
 void main() {
+  testWidgets('TopNavigationBar renders Mahmas Studio branding', (WidgetTester tester) async {
+    final viewModel = EditorViewModel();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TopNavigationBar(viewModel: viewModel),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Mahmas Studio'), findsOneWidget);
+    expect(find.byIcon(Icons.movie_filter_rounded), findsOneWidget);
+  });
+
   testWidgets('ActionToolbar smoke test', (WidgetTester tester) async {
     final viewModel = EditorViewModel();
 
@@ -46,6 +64,25 @@ void main() {
     await tester.pump();
 
     expect(find.byType(VideoPreviewSection), findsOneWidget);
+  });
+
+  testWidgets('AudioTrackItem renders waveform and handles selection', (WidgetTester tester) async {
+    final viewModel = EditorViewModel();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AudioTrackItem(
+            audioTrack: viewModel.audioTrack!,
+            pixelsPerSecond: viewModel.pixelsPerSecond,
+            viewModel: viewModel,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.textContaining('Midnight Beats'), findsOneWidget);
   });
 
   testWidgets('All 8 Category Drawers render properly', (WidgetTester tester) async {
@@ -92,7 +129,7 @@ void main() {
     expect(find.byType(AdjustDrawer), findsOneWidget);
   });
 
-  testWidgets('MediaPickerSheet renders video, photo, and canvas tabs', (WidgetTester tester) async {
+  testWidgets('MediaPickerSheet renders video, photo, canvas tabs and device upload button', (WidgetTester tester) async {
     final viewModel = EditorViewModel();
 
     await tester.pumpWidget(
@@ -107,5 +144,6 @@ void main() {
     expect(find.text('Videos'), findsOneWidget);
     expect(find.text('Photos'), findsOneWidget);
     expect(find.text('Canvases'), findsOneWidget);
+    expect(find.text('Upload File from Device Storage'), findsOneWidget);
   });
 }

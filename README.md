@@ -1,119 +1,62 @@
-# CapCut-Style Mobile Video Editing App (Flutter)
+# Mahmas Studio - Mobile & Web Video Editor (Flutter)
 
-A modern, high-performance mobile video editor application built with Flutter, inspired by CapCut.
+A modern, high-performance video editor application built with Flutter, branded as **Mahmas Studio**.
 
-## 🚀 Features
+## 🚀 Key Features
 
-- **Top Video Preview Screen**:
+- **🎬 Video Preview Canvas**:
   - Multi-aspect ratio canvas supporting **9:16** (TikTok, Reels, Shorts), **16:9** (YouTube), **1:1** (Instagram Square), and **4:5** (Portrait Feed).
   - High-precision timecode indicator (`00:04.12 / 00:20.00`).
   - Active subtitle / text overlay rendering on top of the live video.
-  - Interactive tap-to-play / pause toggle.
+  - Picture-in-Picture (PIP) secondary layers preview.
+  - Interactive tap-to-play / pause toggle with smooth looping.
 
-- **Middle Action Toolbar**:
-  - ✂️ **Split**: Intelligently splits the selected clip at the exact playhead position into two continuous segments with frame-accurate offsets.
-  - 📐 **Trim Left & Trim Right**: Quick one-tap trimming to playhead position.
-  - 🗑️ **Delete**: Remove selected clip from timeline.
-  - 📋 **Duplicate**: Duplicate selected clip instantly.
-  - ⚡ **Speed**: Adjust playback speed (0.5x, 1x, 1.5x, 2x, 3x).
-  - 🔊 **Volume**: Fine-tune audio volume from 0% to 100%.
-  - ➕ **Add Clip**: Append new media assets to timeline.
-  - 📤 **Export**: Quick export trigger.
+- **📁 Device Media & Audio Importing**:
+  - Direct device storage upload for **Videos**, **Photos**, and **Audio Tracks**.
+  - Dynamic duration, thumbnail gradient, and waveform generation for imported files.
 
-- **Interactive Multi-Track Timeline (Bottom)**:
-  - Scrollable time ruler with millisecond and second tick marks.
+- **✂️ Universal Multi-Track Timeline Trimming & Dragging**:
+  - Interactive amber/cyan trim handles on all timeline tracks:
+    - **Main Video Clips**: Draggable filmstrips and trim handles.
+    - **Audio Tracks**: Draggable position and dual-handle duration trimming.
+    - **PIP Overlay Layers**: Drag repositioning and edge resizing.
+    - **Text / Subtitles**: Drag repositioning and edge resizing.
+    - **Stickers & Badges**: Drag repositioning and edge resizing.
+  - Scrollable time ruler with millisecond tick marks.
   - Fixed center playhead needle with cyan marker and white line.
-  - Main video track with filmstrip preview and draggable amber trim handles.
-  - Audio track with rendered audio waveform visualizer.
-  - Subtitle / Text track.
-  - Pinch / slider zoom scale (`pixelsPerSecond`).
 
-- **Undo / Redo History**:
-  - Full state snapshot history stack supporting undo and redo across all timeline edits.
+- **🗂️ 8 Fully Functional Category Drawers**:
+  - **Edit**: Split, Speed (0.5x–3.0x), Volume, Rotate 90°, Flip H/V, Opacity, Replace, Reverse, Freeze, Delete.
+  - **Audio**: Music library (Lofi, Pop, Cinematic, EDM), Sound Effects, Voiceover Recording, and Device Audio Import.
+  - **Text**: Subtitles with customizable styling, swatches, and Auto-Captions.
+  - **Stickers**: Emojis, Vlog badges, Neon arrows, and Subscribe overlays.
+  - **Effects**: Glitch Art, VHS Cam, RGB Split, Zoom Blur, Sparkles, Shake, Film Grain.
+  - **Filters**: Color LUTs (Cinematic, Moody, Cyberpunk, Teal & Orange, Vintage, Sunset, B&W) with Intensity Slider.
+  - **Canvas**: Background colors, Blur sigma (Soft, Med, High), and Aspect Ratio presets.
+  - **Adjust**: Brightness, Contrast, Saturation, Exposure, Temperature, and Vignette color grading.
 
-- **Export & Rendering Engine**:
+- **📤 Export & Rendering Engine**:
   - Resolution presets (720P, 1080P, 2K, 4K).
-  - Frame rate presets (24 FPS Cinematic, 30 FPS Standard, 60 FPS Ultra Smooth).
-  - Live export rendering modal with progress percentage indicator and completion confirmation.
-
----
-
-## 📁 Architecture & Folder Structure
-
-Adheres strictly to the layered **MVVM (Model-View-ViewModel)** pattern:
-
-```text
-capcut_video_editor/
-├── pubspec.yaml
-├── analysis_options.yaml
-├── README.md
-├── lib/
-│   ├── main.dart                               # App entrypoint
-│   ├── app.dart                                # MaterialApp & Theme config
-│   ├── core/
-│   │   ├── constants/
-│   │   │   ├── app_colors.dart                 # Dark theme palette & gradients
-│   │   │   ├── app_dimensions.dart             # Layout & sizing constraints
-│   │   │   └── app_typography.dart             # Text styles & tabular figures
-│   │   ├── theme/
-│   │   │   └── app_theme.dart                  # Global ThemeData
-│   │   └── utils/
-│   │       └── time_formatter.dart             # Timecode formatting utilities
-│   ├── domain/
-│   │   ├── enums/
-│   │   │   ├── aspect_ratio_preset.dart        # 9:16, 16:9, 1:1, 4:5
-│   │   │   ├── tool_action_type.dart           # Split, Trim, Delete, etc.
-│   │   │   └── export_resolution.dart          # 720p, 1080p, 4k, 60fps
-│   │   └── models/
-│   │       ├── video_clip.dart                 # Video segment model
-│   │       ├── audio_track.dart                # BGM track & waveform model
-│   │       ├── text_overlay.dart               # Subtitles model
-│   │       └── export_settings.dart            # Export render config
-│   ├── data/
-│   │   └── repositories/
-│   │       └── mock_media_repository.dart      # Demo assets generator
-│   └── ui/
-│       └── features/
-│           └── editor/
-│               ├── view_models/
-│               │   └── editor_view_model.dart  # State management & edit actions
-│               └── views/
-│                   ├── editor_screen.dart      # Main screen layout
-│                   └── widgets/
-│                       ├── top_navigation_bar.dart
-│                       ├── video_preview_section.dart
-│                       ├── action_toolbar.dart
-│                       ├── timeline_section.dart
-│                       ├── timeline_ruler.dart
-│                       ├── timeline_clip_item.dart
-│                       ├── audio_track_item.dart
-│                       ├── export_modal_sheet.dart
-│                       └── bottom_tool_selector.dart
-└── test/
-    ├── unit/
-    │   ├── time_formatter_test.dart
-    │   └── editor_view_model_test.dart
-    └── widget/
-        └── editor_screen_test.dart
-```
+  - Frame rate presets (24 FPS, 30 FPS, 60 FPS).
+  - Live export modal with progress percentage indicator and Mahmas Studio Render Engine.
 
 ---
 
 ## 🛠️ Running the Project
 
-1. Navigate to the project workspace:
-   ```bash
-   cd C:\Users\almas\.gemini\antigravity\scratch\capcut_video_editor
-   ```
-2. Fetch dependencies:
-   ```bash
-   flutter pub get
-   ```
-3. Run on your connected device, emulator, or Chrome:
-   ```bash
-   flutter run
-   ```
-4. Run automated tests:
-   ```bash
-   flutter test
-   ```
+```bash
+cd C:\Users\almas\.gemini\antigravity\scratch\capcut_video_editor
+flutter run -d edge
+```
+Or run on Web:
+```bash
+flutter run -d web-server --web-port 8080
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+flutter test
+```

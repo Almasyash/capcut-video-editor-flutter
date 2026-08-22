@@ -3,16 +3,19 @@ import 'package:capcut_video_editor/core/theme/app_theme.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/editor_screen.dart';
 
 /// Root application widget
-class CapCutVideoEditorApp extends StatelessWidget {
-  const CapCutVideoEditorApp({super.key});
+class MahmasStudioApp extends StatelessWidget {
+  const MahmasStudioApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CapCut Video Editor',
+      title: 'Mahmas Studio',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       home: const EditorScreen(),
     );
   }
 }
+
+// Backward compatibility alias for existing test runners
+typedef CapCutVideoEditorApp = MahmasStudioApp;

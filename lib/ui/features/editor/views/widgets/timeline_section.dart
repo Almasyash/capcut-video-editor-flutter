@@ -2,51 +2,49 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
+import 'package:capcut_video_editor/core/constants/app_typography.dart';
 import 'package:capcut_video_editor/core/utils/time_formatter.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/audio_track_item.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/timeline_clip_item.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/timeline_ruler.dart';
+import 'audio_track_item.dart';
+import 'media_picker_sheet.dart';
+import 'timeline_clip_item.dart';
+import 'timeline_ruler.dart';
 
-/// Multi-track timeline section containing Ruler, Main Video Track,
-/// Overlay/PIP Layer Track, Audio Track, Subtitles Track, Sticker Track, and fixed Playhead.
+/// CapCut-style Multi-Track Interactive Timeline with universal trimming and dragging
+/// for Video clips, Audio tracks, PIP Overlays, Text layers, and Stickers.
 class TimelineSection extends StatefulWidget {
   final EditorViewModel viewModel;
 
-  const TimelineSection({
-    super.key,
-    required this.viewModel,
-  });
+  const TimelineSection({super.key, required this.viewModel});
 
   @override
   State<TimelineSection> createState() => _TimelineSectionState();
 }
 
 class _TimelineSectionState extends State<TimelineSection> {
-  final ScrollController _scrollController = ScrollController();
+  late final ScrollController _scrollController;
   bool _isUserScrolling = false;
 
   @override
   void initState() {
     super.initState();
-    widget.viewModel.addListener(_onViewModelUpdated);
+    _scrollController = ScrollController();
+    widget.viewModel.addListener(_onViewModelChanged);
   }
 
   @override
   void dispose() {
-    widget.viewModel.removeListener(_onViewModelUpdated);
+    widget.viewModel.removeListener(_onViewModelChanged);
     _scrollController.dispose();
     super.dispose();
   }
 
-  void _onViewModelUpdated() {
-    // Synchronize scroll position during active playback ONLY when user isn't manually dragging
+  void _onViewModelChanged() {
+    if (!mounted) return;
+
     if (widget.viewModel.isPlaying && !_isUserScrolling && _scrollController.hasClients) {
       final targetScroll = widget.viewModel.playheadPosition * widget.viewModel.pixelsPerSecond;
-      if ((_scrollController.offset - targetScroll).abs() > 2.0) {
-        _scrollController.jumpTo(targetScroll.clamp(0.0, _scrollController.position.maxScrollExtent));
-      }
+      _scrollController.jumpTo(targetScroll.clamp(0.0, _scrollController.position.maxScrollExtent));
     }
   }
 
@@ -57,34 +55,27 @@ class _TimelineSectionState extends State<TimelineSection> {
     final halfScreenWidth = screenWidth / 2;
 
     return Container(
+      width: double.infinity,
       color: AppColors.timelineTrackBg,
       child: Column(
         children: [
-          // 1. Timeline Top Bar (Duration, Zoom buttons, Clear selection)
-          _buildTimelineHeader(viewModel),
+          // 1. Timeline Top Control Bar (Zoom slider, Duration badge, Clear Selection)
+          _buildTimelineControlBar(viewModel),
 
-          // 2. Interactive Scrollable Multi-Track Canvas with Fixed Playhead Needle
+          // 2. Multi-Track Scrollable Timeline Canvas
           Expanded(
             child: Stack(
               children: [
-                // Scrollable Tracks Area
                 NotificationListener<ScrollNotification>(
                   onNotification: (notification) {
-                    // Only pause when USER drags (dragDetails != null), not on programmatic jumpTo
                     if (notification is ScrollStartNotification && notification.dragDetails != null) {
                       _isUserScrolling = true;
                       if (viewModel.isPlaying) {
                         viewModel.pause();
                       }
-                    } else if (notification is ScrollUpdateNotification) {
-                      if (_scrollController.hasClients && _isUserScrolling) {
-                        final newPosSeconds = _scrollController.offset / viewModel.pixelsPerSecond;
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) {
-                            viewModel.seekTo(newPosSeconds);
-                          }
-                        });
-                      }
+                    } else if (notification is ScrollUpdateNotification && _isUserScrolling) {
+                      final newPlayhead = _scrollController.offset / viewModel.pixelsPerSecond;
+                      viewModel.seekTo(newPlayhead);
                     } else if (notification is ScrollEndNotification) {
                       _isUserScrolling = false;
                     }
@@ -93,7 +84,7 @@ class _TimelineSectionState extends State<TimelineSection> {
                   child: SingleChildScrollView(
                     controller: _scrollController,
                     scrollDirection: Axis.horizontal,
-                    physics: const ClampingScrollPhysics(),
+                    physics: const BouncingScrollPhysics(),
                     child: Padding(
                       padding: EdgeInsets.symmetric(horizontal: halfScreenWidth),
                       child: Column(
@@ -123,6 +114,7 @@ class _TimelineSectionState extends State<TimelineSection> {
                             AudioTrackItem(
                               audioTrack: viewModel.audioTrack!,
                               pixelsPerSecond: viewModel.pixelsPerSecond,
+                              viewModel: viewModel,
                             ),
 
                           // Stickers Track
@@ -134,7 +126,8 @@ class _TimelineSectionState extends State<TimelineSection> {
                           const SizedBox(height: 4),
 
                           // Text / Subtitle Track
-                          _buildTextTrack(viewModel),
+                          if (viewModel.textOverlays.isNotEmpty)
+                            _buildTextTrack(viewModel),
                         ],
                       ),
                     ),
@@ -151,23 +144,33 @@ class _TimelineSectionState extends State<TimelineSection> {
     );
   }
 
-  Widget _buildTimelineHeader(EditorViewModel viewModel) {
+  Widget _buildTimelineControlBar(EditorViewModel viewModel) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 4),
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md),
       decoration: const BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.timelineRulerBg,
         border: Border(bottom: BorderSide(color: AppColors.divider, width: 0.5)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Left: Zoom In / Out Controls
+          // Zoom Scale Slider
           Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.zoom_out_rounded, size: 16, color: AppColors.textMuted),
               SizedBox(
-                width: 110,
-                child: ExcludeSemantics(
+                width: 80,
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 2,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
+                    activeTrackColor: AppColors.primary,
+                    inactiveTrackColor: AppColors.surfaceHighlight,
+                    thumbColor: AppColors.primary,
+                  ),
                   child: Slider(
                     value: viewModel.pixelsPerSecond,
                     min: AppDimensions.minPixelsPerSecond,
@@ -180,76 +183,41 @@ class _TimelineSectionState extends State<TimelineSection> {
             ],
           ),
 
-          // Center-Right: Selected Clip Duration or Helper
+          // Center-Right: Selected Element Duration or Helper
           if (viewModel.selectedClip != null)
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: AppColors.selectionBorder, width: 0.8),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.content_cut_rounded, size: 11, color: AppColors.primary),
-                      const SizedBox(width: 4),
-                      Text(
-                        TimeFormatter.formatSeconds(viewModel.selectedClip!.durationInSeconds),
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                InkWell(
-                  onTap: viewModel.clearSelection,
-                  child: const Padding(
-                    padding: EdgeInsets.all(4.0),
-                    child: Icon(Icons.close_rounded, size: 16, color: AppColors.textMuted),
-                  ),
-                ),
-              ],
+            _buildSelectionBadge(
+              icon: Icons.content_cut_rounded,
+              color: AppColors.selectionBorder,
+              text: 'Clip: ${TimeFormatter.formatSeconds(viewModel.selectedClip!.durationInSeconds)}',
+              onClear: viewModel.clearSelection,
             )
           else if (viewModel.selectedOverlay != null)
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: AppColors.secondary, width: 0.8),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.layers_rounded, size: 11, color: AppColors.secondary),
-                      const SizedBox(width: 4),
-                      Text(
-                        'PIP: ${TimeFormatter.formatSeconds(viewModel.selectedOverlay!.durationInSeconds)}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.secondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                InkWell(
-                  onTap: viewModel.clearSelection,
-                  child: const Padding(
-                    padding: EdgeInsets.all(4.0),
-                    child: Icon(Icons.close_rounded, size: 16, color: AppColors.textMuted),
-                  ),
-                ),
-              ],
+            _buildSelectionBadge(
+              icon: Icons.layers_rounded,
+              color: AppColors.secondary,
+              text: 'PIP: ${TimeFormatter.formatSeconds(viewModel.selectedOverlay!.durationInSeconds)}',
+              onClear: viewModel.clearSelection,
+            )
+          else if (viewModel.isAudioSelected && viewModel.audioTrack != null)
+            _buildSelectionBadge(
+              icon: Icons.music_note_rounded,
+              color: AppColors.secondary,
+              text: 'Audio: ${TimeFormatter.formatSeconds(viewModel.audioTrack!.durationInSeconds)}',
+              onClear: viewModel.clearSelection,
+            )
+          else if (viewModel.selectedTextId != null)
+            _buildSelectionBadge(
+              icon: Icons.title_rounded,
+              color: AppColors.accentPurple,
+              text: 'Text Layer Selected',
+              onClear: viewModel.clearSelection,
+            )
+          else if (viewModel.selectedStickerId != null)
+            _buildSelectionBadge(
+              icon: Icons.star_rounded,
+              color: Colors.amber,
+              text: 'Sticker Selected',
+              onClear: viewModel.clearSelection,
             )
           else
             Text(
@@ -258,6 +226,44 @@ class _TimelineSectionState extends State<TimelineSection> {
             ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSelectionBadge({
+    required IconData icon,
+    required Color color,
+    required String text,
+    required VoidCallback onClear,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: color, width: 0.8),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 11, color: color),
+              const SizedBox(width: 4),
+              Text(
+                text,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 6),
+        InkWell(
+          onTap: onClear,
+          child: const Padding(
+            padding: EdgeInsets.all(4.0),
+            child: Icon(Icons.close_rounded, size: 16, color: AppColors.textMuted),
+          ),
+        ),
+      ],
     );
   }
 
@@ -305,7 +311,7 @@ class _TimelineSectionState extends State<TimelineSection> {
                   builder: (ctx) => MediaPickerSheet(viewModel: viewModel),
                 );
               },
-              tooltip: 'Add Video Clip from Gallery',
+              tooltip: 'Add Media from Gallery or Device',
             ),
           ),
         ],
@@ -324,7 +330,7 @@ class _TimelineSectionState extends State<TimelineSection> {
           final idx = entry.key;
           final overlay = entry.value;
           final isSelected = viewModel.selectedOverlayIndex == idx;
-          final width = math.max(overlay.durationInSeconds * viewModel.pixelsPerSecond, 30.0);
+          final width = math.max(overlay.durationInSeconds * viewModel.pixelsPerSecond, 40.0);
           final startOffset = overlay.startTimeInSeconds * viewModel.pixelsPerSecond;
 
           return Positioned(
@@ -334,8 +340,17 @@ class _TimelineSectionState extends State<TimelineSection> {
             width: width,
             child: GestureDetector(
               onTap: () => viewModel.selectOverlay(idx),
+              onHorizontalDragUpdate: (details) {
+                // Middle drag: slide position across timeline
+                final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
+                final newStartSec = math.max(0.0, overlay.startTimeInSeconds + deltaSec);
+                viewModel.updateOverlayClipTiming(
+                  overlay.id,
+                  Duration(milliseconds: (newStartSec * 1000).round()),
+                  overlay.duration,
+                );
+              },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceElevated,
                   borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
@@ -344,18 +359,68 @@ class _TimelineSectionState extends State<TimelineSection> {
                     width: isSelected ? 2.0 : 1.0,
                   ),
                 ),
-                child: Row(
+                child: Stack(
                   children: [
-                    const Icon(Icons.layers_rounded, size: 12, color: AppColors.secondary),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        overlay.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                    Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.layers_rounded, size: 12, color: AppColors.secondary),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              overlay.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                    if (isSelected) ...[
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: _buildHandle(
+                          isLeft: true,
+                          color: AppColors.secondary,
+                          onDrag: (dx) {
+                            final deltaSec = dx / viewModel.pixelsPerSecond;
+                            final curStart = overlay.startTimeInSeconds;
+                            final curDur = overlay.durationInSeconds;
+                            final newStart = math.max(0.0, curStart + deltaSec);
+                            final newDur = curDur - (newStart - curStart);
+                            if (newDur >= 0.4) {
+                              viewModel.updateOverlayClipTiming(
+                                overlay.id,
+                                Duration(milliseconds: (newStart * 1000).round()),
+                                Duration(milliseconds: (newDur * 1000).round()),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: _buildHandle(
+                          isLeft: false,
+                          color: AppColors.secondary,
+                          onDrag: (dx) {
+                            final deltaSec = dx / viewModel.pixelsPerSecond;
+                            final newDur = math.max(0.4, overlay.durationInSeconds + deltaSec);
+                            viewModel.updateOverlayClipTiming(
+                              overlay.id,
+                              overlay.startTime,
+                              Duration(milliseconds: (newDur * 1000).round()),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -371,10 +436,11 @@ class _TimelineSectionState extends State<TimelineSection> {
 
     return SizedBox(
       width: totalTrackWidth,
-      height: 30,
+      height: 32,
       child: Stack(
         children: viewModel.stickerOverlays.map((sticker) {
-          final width = math.max(sticker.durationInSeconds * viewModel.pixelsPerSecond, 24.0);
+          final isSelected = viewModel.selectedStickerId == sticker.id;
+          final width = math.max(sticker.durationInSeconds * viewModel.pixelsPerSecond, 36.0);
           final startOffset = sticker.startTimeInSeconds * viewModel.pixelsPerSecond;
 
           return Positioned(
@@ -382,33 +448,93 @@ class _TimelineSectionState extends State<TimelineSection> {
             top: 2,
             bottom: 2,
             width: width,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceLight,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.amber.withOpacity(0.5)),
-              ),
-              child: Row(
-                children: [
-                  if (sticker.preset.isEmoji)
-                    Text(sticker.preset.content, style: const TextStyle(fontSize: 12))
-                  else
-                    Icon(sticker.preset.icon ?? Icons.star, size: 12, color: Colors.amber),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      sticker.preset.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 9, color: Colors.white70),
+            child: GestureDetector(
+              onTap: () => viewModel.selectSticker(sticker.id),
+              onHorizontalDragUpdate: (details) {
+                final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
+                final newStartSec = math.max(0.0, sticker.startTimeInSeconds + deltaSec);
+                viewModel.updateStickerTiming(
+                  sticker.id,
+                  Duration(milliseconds: (newStartSec * 1000).round()),
+                  sticker.duration,
+                );
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: isSelected ? Colors.amber : Colors.amber.withOpacity(0.5),
+                    width: isSelected ? 2.0 : 1.0,
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (sticker.preset.isEmoji)
+                            Text(sticker.preset.content, style: const TextStyle(fontSize: 12))
+                          else
+                            Icon(sticker.preset.icon ?? Icons.star, size: 12, color: Colors.amber),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              sticker.preset.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 9, color: Colors.white70),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  InkWell(
-                    onTap: () => viewModel.removeSticker(sticker.id),
-                    child: const Icon(Icons.close, size: 10, color: Colors.white54),
-                  ),
-                ],
+                    if (isSelected) ...[
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: _buildHandle(
+                          isLeft: true,
+                          color: Colors.amber,
+                          onDrag: (dx) {
+                            final deltaSec = dx / viewModel.pixelsPerSecond;
+                            final curStart = sticker.startTimeInSeconds;
+                            final curDur = sticker.durationInSeconds;
+                            final newStart = math.max(0.0, curStart + deltaSec);
+                            final newDur = curDur - (newStart - curStart);
+                            if (newDur >= 0.3) {
+                              viewModel.updateStickerTiming(
+                                sticker.id,
+                                Duration(milliseconds: (newStart * 1000).round()),
+                                Duration(milliseconds: (newDur * 1000).round()),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: _buildHandle(
+                          isLeft: false,
+                          color: Colors.amber,
+                          onDrag: (dx) {
+                            final deltaSec = dx / viewModel.pixelsPerSecond;
+                            final newDur = math.max(0.3, sticker.durationInSeconds + deltaSec);
+                            viewModel.updateStickerTiming(
+                              sticker.id,
+                              sticker.startTime,
+                              Duration(milliseconds: (newDur * 1000).round()),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           );
@@ -418,8 +544,6 @@ class _TimelineSectionState extends State<TimelineSection> {
   }
 
   Widget _buildTextTrack(EditorViewModel viewModel) {
-    if (viewModel.textOverlays.isEmpty) return const SizedBox.shrink();
-
     final totalTrackWidth = (viewModel.totalDurationInSeconds + 5.0) * viewModel.pixelsPerSecond;
 
     return SizedBox(
@@ -427,7 +551,8 @@ class _TimelineSectionState extends State<TimelineSection> {
       height: AppDimensions.textTrackHeight,
       child: Stack(
         children: viewModel.textOverlays.map((text) {
-          final width = text.durationInSeconds * viewModel.pixelsPerSecond;
+          final isSelected = viewModel.selectedTextId == text.id;
+          final width = math.max(text.durationInSeconds * viewModel.pixelsPerSecond, 36.0);
           final startOffset = text.startTimeInSeconds * viewModel.pixelsPerSecond;
 
           return Positioned(
@@ -435,34 +560,124 @@ class _TimelineSectionState extends State<TimelineSection> {
             top: 2,
             bottom: 2,
             width: width,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              decoration: BoxDecoration(
-                color: AppColors.textTrackBg,
-                borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                border: Border.all(color: AppColors.textTrackAccent.withOpacity(0.5)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.title_rounded, size: 12, color: AppColors.textTrackAccent),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      text.text,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: text.color,
+            child: GestureDetector(
+              onTap: () => viewModel.selectText(text.id),
+              onHorizontalDragUpdate: (details) {
+                final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
+                final newStartSec = math.max(0.0, text.startTimeInSeconds + deltaSec);
+                viewModel.updateTextOverlayTiming(
+                  text.id,
+                  Duration(milliseconds: (newStartSec * 1000).round()),
+                  text.duration,
+                );
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppColors.textTrackBg,
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                  border: Border.all(
+                    color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withOpacity(0.5),
+                    width: isSelected ? 2.0 : 1.0,
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.title_rounded, size: 12, color: AppColors.textTrackAccent),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              text.text,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: text.color,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                  ),
-                ],
+                    if (isSelected) ...[
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: _buildHandle(
+                          isLeft: true,
+                          color: AppColors.accentPurple,
+                          onDrag: (dx) {
+                            final deltaSec = dx / viewModel.pixelsPerSecond;
+                            final curStart = text.startTimeInSeconds;
+                            final curDur = text.durationInSeconds;
+                            final newStart = math.max(0.0, curStart + deltaSec);
+                            final newDur = curDur - (newStart - curStart);
+                            if (newDur >= 0.3) {
+                              viewModel.updateTextOverlayTiming(
+                                text.id,
+                                Duration(milliseconds: (newStart * 1000).round()),
+                                Duration(milliseconds: (newDur * 1000).round()),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                      Positioned(
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        child: _buildHandle(
+                          isLeft: false,
+                          color: AppColors.accentPurple,
+                          onDrag: (dx) {
+                            final deltaSec = dx / viewModel.pixelsPerSecond;
+                            final newDur = math.max(0.3, text.durationInSeconds + deltaSec);
+                            viewModel.updateTextOverlayTiming(
+                              text.id,
+                              text.startTime,
+                              Duration(milliseconds: (newDur * 1000).round()),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           );
         }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildHandle({required bool isLeft, required Color color, required ValueChanged<double> onDrag}) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragUpdate: (details) {
+        onDrag(details.primaryDelta ?? 0.0);
+      },
+      child: Container(
+        width: 12,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.horizontal(
+            left: isLeft ? const Radius.circular(AppDimensions.radiusSm) : Radius.zero,
+            right: !isLeft ? const Radius.circular(AppDimensions.radiusSm) : Radius.zero,
+          ),
+        ),
+        child: Center(
+          child: Container(
+            width: 1.5,
+            height: 10,
+            color: Colors.black87,
+          ),
+        ),
       ),
     );
   }
