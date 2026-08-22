@@ -11,6 +11,7 @@ class MediaPickerItem {
   final List<Color> gradient;
   final IconData icon;
   final String category; // 'Video', 'Photo', 'Canvas'
+  final String? assetPath;
 
   const MediaPickerItem({
     required this.title,
@@ -18,6 +19,7 @@ class MediaPickerItem {
     required this.gradient,
     this.icon = Icons.movie_creation_rounded,
     required this.category,
+    this.assetPath,
   });
 }
 
@@ -178,6 +180,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
           duration: selected.duration,
           gradient: selected.gradient,
           icon: selected.icon,
+          assetPath: selected.assetPath,
         );
       } else {
         widget.viewModel.addNewClipFromMedia(
@@ -185,13 +188,51 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
           duration: selected.duration,
           gradient: selected.gradient,
           icon: selected.icon,
+          assetPath: selected.assetPath,
         );
       }
       Navigator.of(context).pop();
     }
   }
 
-  void _openDeviceFilePicker() {
+  Future<void> _handleDeviceUpload() async {
+    // 1. Try launching native system file picker intent (ACTION_GET_CONTENT)
+    final nativeResult = await DeviceMediaService.pickMediaFromNativeStorage(type: 'media');
+
+    if (nativeResult != null && mounted) {
+      if (widget.isReplacing) {
+        widget.viewModel.replaceSelectedClip(
+          title: nativeResult.fileName,
+          duration: nativeResult.estimatedDuration,
+          gradient: nativeResult.gradient,
+          icon: nativeResult.icon,
+          assetPath: nativeResult.filePath,
+        );
+      } else {
+        widget.viewModel.addNewClipFromMedia(
+          title: nativeResult.fileName,
+          duration: nativeResult.estimatedDuration,
+          gradient: nativeResult.gradient,
+          icon: nativeResult.icon,
+          assetPath: nativeResult.filePath,
+        );
+      }
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Imported "${nativeResult.fileName}" from device storage!'),
+          backgroundColor: AppColors.surfaceElevated,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    // 2. If native intent dismissed or on non-android platform, open interactive storage browser
+    _openDeviceFileBrowserModal();
+  }
+
+  void _openDeviceFileBrowserModal() {
     final controller = TextEditingController(text: 'VID_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}');
     int durationSec = 12;
     String selectedFolder = 'Camera (DCIM)';
@@ -331,6 +372,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                     duration: result.estimatedDuration,
                     gradient: result.gradient,
                     icon: result.icon,
+                    assetPath: result.filePath,
                   );
                 } else {
                   widget.viewModel.addNewClipFromMedia(
@@ -338,6 +380,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                     duration: result.estimatedDuration,
                     gradient: result.gradient,
                     icon: result.icon,
+                    assetPath: result.filePath,
                   );
                 }
                 Navigator.of(ctx).pop();
@@ -396,7 +439,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 4),
             child: InkWell(
-              onTap: _openDeviceFilePicker,
+              onTap: _handleDeviceUpload,
               borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),

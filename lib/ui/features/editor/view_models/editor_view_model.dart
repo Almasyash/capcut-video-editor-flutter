@@ -809,6 +809,7 @@ class EditorViewModel extends ChangeNotifier {
     required Duration duration,
     required List<Color> gradient,
     IconData icon = Icons.movie_creation_outlined,
+    String? assetPath,
   }) {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
@@ -820,6 +821,7 @@ class EditorViewModel extends ChangeNotifier {
       trimEnd: duration,
       previewGradient: gradient,
       previewIcon: icon,
+      assetPath: assetPath,
     );
     notifyListeners();
   }

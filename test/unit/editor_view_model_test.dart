@@ -191,15 +191,28 @@ void main() {
       expect(videoResult.fileName, equals('Trip_Vlog.mp4'));
       expect(videoResult.fileType, equals('video'));
       expect(videoResult.estimatedDuration.inSeconds, equals(15));
+      expect(videoResult.filePath, contains('Trip_Vlog.mp4'));
 
       final audioResult = DeviceMediaService.createCustomAudioResult(name: 'Theme_Song', duration: const Duration(seconds: 30));
       expect(audioResult.fileName, equals('Theme_Song.mp3'));
       expect(audioResult.fileType, equals('audio'));
       expect(audioResult.estimatedDuration.inSeconds, equals(30));
+      expect(audioResult.filePath, contains('Theme_Song.mp3'));
 
       final photoResult = DeviceMediaService.createCustomPhotoResult(name: 'Selfie');
       expect(photoResult.fileName, equals('Selfie.jpg'));
       expect(photoResult.fileType, equals('photo'));
+      expect(photoResult.filePath, contains('Selfie.jpg'));
+
+      // Test binding assetPath to timeline
+      viewModel.addNewClipFromMedia(
+        title: videoResult.fileName,
+        duration: videoResult.estimatedDuration,
+        gradient: videoResult.gradient,
+        icon: videoResult.icon,
+        assetPath: videoResult.filePath,
+      );
+      expect(viewModel.videoClips.last.assetPath, equals(videoResult.filePath));
     });
   });
 }

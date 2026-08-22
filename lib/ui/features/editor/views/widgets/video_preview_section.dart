@@ -240,27 +240,45 @@ class VideoPreviewSection extends StatelessWidget {
                     color: Colors.black.withOpacity(0.4),
                     borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                   ),
-                  child: Row(
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        activeClip.title,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            activeClip.title,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
+                          if (activeClip.isReversed)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4.0),
+                              child: Icon(Icons.fast_rewind_rounded, size: 12, color: AppColors.secondary),
+                            ),
+                          if (activeClip.isFrozen)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 4.0),
+                              child: Icon(Icons.ac_unit_rounded, size: 12, color: AppColors.primary),
+                            ),
+                        ],
                       ),
-                      if (activeClip.isReversed)
-                        const Padding(
-                          padding: EdgeInsets.only(left: 4.0),
-                          child: Icon(Icons.fast_rewind_rounded, size: 12, color: AppColors.secondary),
+                      if (activeClip.assetPath != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          activeClip.assetPath!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 8,
+                            color: AppColors.primary.withOpacity(0.8),
+                            fontFamily: 'monospace',
+                          ),
                         ),
-                      if (activeClip.isFrozen)
-                        const Padding(
-                          padding: EdgeInsets.only(left: 4.0),
-                          child: Icon(Icons.ac_unit_rounded, size: 12, color: AppColors.primary),
-                        ),
+                      ],
                     ],
                   ),
                 ),

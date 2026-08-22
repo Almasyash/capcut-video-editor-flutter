@@ -50,7 +50,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
     super.dispose();
   }
 
-  void _addMusic(String title, int durationSec, {String artist = 'Original Audio'}) {
+  void _addMusic(String title, int durationSec, {String artist = 'Original Audio', String? filePath}) {
     final random = math.Random(title.hashCode);
     final waveform = List.generate(40, (_) => 0.2 + random.nextDouble() * 0.8);
 
@@ -61,6 +61,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
       duration: Duration(seconds: durationSec),
       waveformPoints: waveform,
       volume: 0.85,
+      filePath: filePath,
     );
 
     widget.viewModel.addAudioTrack(track);
@@ -69,7 +70,25 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
     );
   }
 
-  void _openDeviceAudioPicker() {
+  Future<void> _handleDeviceAudioImport() async {
+    // 1. Try native platform intent for real audio selection
+    final nativeResult = await DeviceMediaService.pickAudioFromNativeStorage();
+
+    if (nativeResult != null && mounted) {
+      _addMusic(
+        nativeResult.fileName,
+        nativeResult.estimatedDuration.inSeconds,
+        artist: 'Device Storage',
+        filePath: nativeResult.filePath,
+      );
+      return;
+    }
+
+    // 2. Fallback to interactive audio browser modal
+    _openDeviceAudioPickerModal();
+  }
+
+  void _openDeviceAudioPickerModal() {
     final controller = TextEditingController(text: 'AUD_${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}');
     int durationSec = 28;
     String selectedCategory = 'Music';
@@ -163,7 +182,12 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                   duration: Duration(seconds: durationSec),
                 );
 
-                _addMusic(result.fileName, result.estimatedDuration.inSeconds, artist: '$selectedCategory Storage');
+                _addMusic(
+                  result.fileName,
+                  result.estimatedDuration.inSeconds,
+                  artist: '$selectedCategory Storage',
+                  filePath: result.filePath,
+                );
                 Navigator.of(ctx).pop();
               },
               child: const Text('Import & Use', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -234,7 +258,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 4),
             child: InkWell(
-              onTap: _openDeviceAudioPicker,
+              onTap: _handleDeviceAudioImport,
               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

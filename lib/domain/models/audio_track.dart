@@ -7,6 +7,7 @@ class AudioTrack {
   final Duration duration;
   final double volume;
   final List<double> waveformPoints;
+  final String? filePath;
 
   const AudioTrack({
     required this.id,
@@ -17,6 +18,7 @@ class AudioTrack {
     required this.duration,
     this.volume = 0.8,
     required this.waveformPoints,
+    this.filePath,
   }) : name = title ?? name ?? 'Audio Track';
 
   String get title => name;
@@ -33,6 +35,7 @@ class AudioTrack {
     Duration? duration,
     double? volume,
     List<double>? waveformPoints,
+    String? filePath,
   }) {
     return AudioTrack(
       id: id ?? this.id,
@@ -42,6 +45,7 @@ class AudioTrack {
       duration: duration ?? this.duration,
       volume: volume ?? this.volume,
       waveformPoints: waveformPoints ?? this.waveformPoints,
+      filePath: filePath ?? this.filePath,
     );
   }
 }
