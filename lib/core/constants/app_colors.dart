@@ -9,6 +9,7 @@ class AppColors {
   static const Color surface = Color(0xFF18181F);
   static const Color surfaceElevated = Color(0xFF22222C);
   static const Color surfaceHighlight = Color(0xFF2E2E3C);
+  static const Color surfaceLight = Color(0xFF252532);
 
   // Accents & Brand Colors
   static const Color primary = Color(0xFF00E5FF); // Electric Cyan
@@ -17,6 +18,7 @@ class AppColors {
   static const Color accentAmber = Color(0xFFFFB300); // Yellow/Amber Selection Handle
   static const Color accentGreen = Color(0xFF00E676); // Success Green
   static const Color accentPurple = Color(0xFF9D4EDD); // Effects / Text Track
+  static const Color error = Color(0xFFFF5252); // Error Red
 
   // Timeline Specific Colors
   static const Color timelineTrackBg = Color(0xFF14141A);

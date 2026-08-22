@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
+import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/action_toolbar.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/bottom_tool_selector.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/adjust_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/audio_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/canvas_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/edit_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/effects_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/filters_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/stickers_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/timeline_section.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/top_navigation_bar.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_preview_section.dart';
@@ -13,7 +22,7 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_previ
 /// 2. Video Preview Screen at top
 /// 3. Middle Action Toolbar (Split, Trim, Delete, Duplicate, Speed, Volume, Export)
 /// 4. Interactive Multi-Track Timeline Track at bottom
-/// 5. Signature Category Selector (Edit, Audio, Text, Filters, etc.)
+/// 5. Signature Category Selector / Active Category Drawer Panels
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
 
@@ -36,11 +45,34 @@ class _EditorScreenState extends State<EditorScreen> {
     super.dispose();
   }
 
+  Widget _buildActiveDrawer(EditorCategory drawer) {
+    switch (drawer) {
+      case EditorCategory.edit:
+        return EditDrawer(viewModel: _viewModel);
+      case EditorCategory.audio:
+        return AudioDrawer(viewModel: _viewModel);
+      case EditorCategory.text:
+        return TextDrawer(viewModel: _viewModel);
+      case EditorCategory.stickers:
+        return StickersDrawer(viewModel: _viewModel);
+      case EditorCategory.effects:
+        return EffectsDrawer(viewModel: _viewModel);
+      case EditorCategory.filters:
+        return FiltersDrawer(viewModel: _viewModel);
+      case EditorCategory.canvas:
+        return CanvasDrawer(viewModel: _viewModel);
+      case EditorCategory.adjust:
+        return AdjustDrawer(viewModel: _viewModel);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: _viewModel,
       builder: (context, _) {
+        final activeDrawer = _viewModel.activeDrawer;
+
         return Scaffold(
           backgroundColor: AppColors.background,
           body: SafeArea(
@@ -65,8 +97,28 @@ class _EditorScreenState extends State<EditorScreen> {
                   child: TimelineSection(viewModel: _viewModel),
                 ),
 
-                // 5. Signature Bottom Category Selector
-                BottomToolSelector(viewModel: _viewModel),
+                // 5. Signature Bottom Category Selector or Active Drawer Panel
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  transitionBuilder: (child, animation) {
+                    return SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0, 0.2),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: FadeTransition(opacity: animation, child: child),
+                    );
+                  },
+                  child: activeDrawer != null
+                      ? KeyedSubtree(
+                          key: ValueKey('drawer_${activeDrawer.name}'),
+                          child: _buildActiveDrawer(activeDrawer),
+                        )
+                      : KeyedSubtree(
+                          key: const ValueKey('bottom_selector'),
+                          child: BottomToolSelector(viewModel: _viewModel),
+                        ),
+                ),
               ],
             ),
           ),

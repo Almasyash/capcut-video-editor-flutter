@@ -10,13 +10,16 @@ class AudioTrack {
 
   const AudioTrack({
     required this.id,
-    required this.name,
-    required this.artist,
-    required this.startTime,
+    String? name,
+    String? title,
+    this.artist = 'Original Audio',
+    this.startTime = Duration.zero,
     required this.duration,
     this.volume = 0.8,
     required this.waveformPoints,
-  });
+  }) : name = title ?? name ?? 'Audio Track';
+
+  String get title => name;
 
   double get durationInSeconds => duration.inMilliseconds / 1000.0;
   double get startTimeInSeconds => startTime.inMilliseconds / 1000.0;
@@ -24,6 +27,7 @@ class AudioTrack {
   AudioTrack copyWith({
     String? id,
     String? name,
+    String? title,
     String? artist,
     Duration? startTime,
     Duration? duration,
@@ -32,7 +36,7 @@ class AudioTrack {
   }) {
     return AudioTrack(
       id: id ?? this.id,
-      name: name ?? this.name,
+      name: title ?? name ?? this.name,
       artist: artist ?? this.artist,
       startTime: startTime ?? this.startTime,
       duration: duration ?? this.duration,

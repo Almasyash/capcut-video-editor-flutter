@@ -26,21 +26,17 @@ class BottomToolSelector extends StatelessWidget {
           physics: const BouncingScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: AppDimensions.sm),
           children: EditorCategory.values.map((category) {
-            final isSelected = category == viewModel.activeCategory;
+            final isSelected = category == viewModel.activeDrawer;
 
             return InkWell(
               onTap: () {
-                viewModel.setActiveCategory(category);
-                ScaffoldMessenger.of(context).clearSnackBars();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('${category.label} tool panel selected'),
-                    duration: const Duration(milliseconds: 600),
-                    backgroundColor: AppColors.surfaceElevated,
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                if (viewModel.activeDrawer == category) {
+                  viewModel.closeDrawer();
+                } else {
+                  viewModel.openDrawer(category);
+                }
               },
+              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14.0),
                 alignment: Alignment.center,

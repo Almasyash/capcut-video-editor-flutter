@@ -1,0 +1,311 @@
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'package:capcut_video_editor/core/constants/app_colors.dart';
+import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
+import 'package:capcut_video_editor/domain/models/audio_track.dart';
+import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
+
+class AudioDrawer extends StatefulWidget {
+  final EditorViewModel viewModel;
+
+  const AudioDrawer({
+    super.key,
+    required this.viewModel,
+  });
+
+  @override
+  State<AudioDrawer> createState() => _AudioDrawerState();
+}
+
+class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  bool _isRecording = false;
+  int _recordSeconds = 0;
+
+  static const List<Map<String, dynamic>> _musicTracks = [
+    {'title': 'Lofi Chill Vibes', 'artist': 'Chilled Beats', 'duration': 24, 'genre': 'Lofi'},
+    {'title': 'Trending Hyper Pop', 'artist': 'Synth Wave', 'duration': 18, 'genre': 'Pop'},
+    {'title': 'Epic Cinematic Intro', 'artist': 'Orchestra Studio', 'duration': 30, 'genre': 'Cinematic'},
+    {'title': 'Deep House Sunset', 'artist': 'Club Mix', 'duration': 22, 'genre': 'EDM'},
+  ];
+
+  static const List<Map<String, dynamic>> _soundEffects = [
+    {'title': 'Whoosh Transition', 'duration': 2, 'icon': Icons.air_rounded},
+    {'title': 'Glitch Sound FX', 'duration': 3, 'icon': Icons.electric_bolt_rounded},
+    {'title': 'Camera Shutter', 'duration': 1, 'icon': Icons.camera_alt_rounded},
+    {'title': 'Pop Bubble Ding', 'duration': 1, 'icon': Icons.touch_app_rounded},
+    {'title': 'Success Bell Chime', 'duration': 2, 'icon': Icons.notifications_active_rounded},
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  void _addMusic(String title, int durationSec) {
+    final random = math.Random(title.hashCode);
+    final waveform = List.generate(40, (_) => 0.2 + random.nextDouble() * 0.8);
+
+    final track = AudioTrack(
+      id: 'audio_${DateTime.now().millisecondsSinceEpoch}',
+      title: title,
+      duration: Duration(seconds: durationSec),
+      waveformPoints: waveform,
+      volume: 0.85,
+    );
+
+    widget.viewModel.addAudioTrack(track);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added track "$title" to timeline!'), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final audio = widget.viewModel.audioTrack;
+
+    return Container(
+      height: 220,
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.divider, width: 0.8)),
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 4),
+            decoration: const BoxDecoration(
+              color: Color(0xFF141418),
+              border: Border(bottom: BorderSide(color: AppColors.divider, width: 0.5)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.music_note_rounded, size: 16, color: AppColors.secondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      audio != null ? 'Audio: ${audio.title}' : 'Audio & Music Library',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    if (audio != null)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 18),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Remove Audio',
+                        onPressed: () => widget.viewModel.removeAudioTrack(),
+                      ),
+                    const SizedBox(width: 12),
+                    IconButton(
+                      icon: const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      tooltip: 'Done',
+                      onPressed: widget.viewModel.closeDrawer,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Tabs: Sounds / Effects / Voiceover
+          Container(
+            height: 34,
+            margin: const EdgeInsets.symmetric(horizontal: AppDimensions.md, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceLight,
+              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                color: AppColors.secondary,
+                borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+              ),
+              labelColor: Colors.white,
+              unselectedLabelColor: AppColors.textMuted,
+              labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+              tabs: const [
+                Tab(text: 'Music Tracks'),
+                Tab(text: 'Sound Effects'),
+                Tab(text: 'Voiceover Record'),
+              ],
+            ),
+          ),
+
+          // Tab Content
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                // 1. Music Tracks
+                ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  itemCount: _musicTracks.length,
+                  itemBuilder: (context, idx) {
+                    final item = _musicTracks[idx];
+                    return Container(
+                      width: 130,
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                        border: Border.all(color: AppColors.divider),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.secondary.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Icon(Icons.music_note_rounded, color: AppColors.secondary, size: 14),
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  item['title'] as String,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text('${item['genre']} • ${item['duration']}s', style: const TextStyle(fontSize: 9, color: AppColors.textMuted)),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 26,
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.secondary,
+                                padding: EdgeInsets.zero,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                              ),
+                              onPressed: () => _addMusic(item['title'] as String, item['duration'] as int),
+                              child: const Text('Add Track', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+
+                // 2. Sound Effects
+                ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  itemCount: _soundEffects.length,
+                  itemBuilder: (context, idx) {
+                    final sfx = _soundEffects[idx];
+                    return Container(
+                      width: 115,
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceLight,
+                        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                        border: Border.all(color: AppColors.divider),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          Icon(sfx['icon'] as IconData, color: AppColors.primary, size: 22),
+                          Text(
+                            sfx['title'] as String,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 24,
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: AppColors.primary, width: 0.8),
+                                padding: EdgeInsets.zero,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                              ),
+                              onPressed: () => _addMusic(sfx['title'] as String, sfx['duration'] as int),
+                              child: const Text('Use SFX', style: TextStyle(fontSize: 9, color: AppColors.primary, fontWeight: FontWeight.bold)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+
+                // 3. Voiceover Recording
+                Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _isRecording = !_isRecording;
+                            if (_isRecording) {
+                              _recordSeconds = 0;
+                            } else {
+                              _addMusic('Voiceover Recording', math.max(3, _recordSeconds));
+                            }
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _isRecording ? AppColors.error : AppColors.secondary,
+                            boxShadow: [
+                              if (_isRecording)
+                                BoxShadow(color: AppColors.error.withOpacity(0.5), blurRadius: 16, spreadRadius: 4),
+                            ],
+                          ),
+                          child: Icon(_isRecording ? Icons.stop_rounded : Icons.mic_rounded, color: Colors.white, size: 28),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _isRecording ? 'Recording... Tap to Finish' : 'Tap Mic to Record Voiceover',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _isRecording ? AppColors.error : AppColors.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

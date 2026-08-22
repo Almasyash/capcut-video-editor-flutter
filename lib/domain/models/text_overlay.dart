@@ -15,10 +15,13 @@ class TextOverlay {
     required this.text,
     required this.startTime,
     required this.duration,
-    this.textColor = Colors.white,
+    Color? color,
+    Color textColor = Colors.white,
     this.fontSize = 24.0,
     this.position = const Offset(0.5, 0.75),
-  });
+  }) : textColor = color ?? textColor;
+
+  Color get color => textColor;
 
   double get startTimeInSeconds => startTime.inMilliseconds / 1000.0;
   double get durationInSeconds => duration.inMilliseconds / 1000.0;
@@ -28,6 +31,7 @@ class TextOverlay {
     String? text,
     Duration? startTime,
     Duration? duration,
+    Color? color,
     Color? textColor,
     double? fontSize,
     Offset? position,
@@ -37,7 +41,7 @@ class TextOverlay {
       text: text ?? this.text,
       startTime: startTime ?? this.startTime,
       duration: duration ?? this.duration,
-      textColor: textColor ?? this.textColor,
+      textColor: color ?? textColor ?? this.textColor,
       fontSize: fontSize ?? this.fontSize,
       position: position ?? this.position,
     );

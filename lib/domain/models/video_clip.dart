@@ -9,6 +9,12 @@ class VideoClip {
   final Duration trimEnd;
   final double speed;
   final double volume;
+  final double opacity; // 0.0 to 1.0
+  final int rotationDegrees; // 0, 90, 180, 270
+  final bool flipHorizontal;
+  final bool flipVertical;
+  final bool isReversed;
+  final bool isFrozen;
   final List<Color> previewGradient;
   final IconData previewIcon;
   final String? assetPath;
@@ -21,6 +27,12 @@ class VideoClip {
     required this.trimEnd,
     this.speed = 1.0,
     this.volume = 1.0,
+    this.opacity = 1.0,
+    this.rotationDegrees = 0,
+    this.flipHorizontal = false,
+    this.flipVertical = false,
+    this.isReversed = false,
+    this.isFrozen = false,
     required this.previewGradient,
     this.previewIcon = Icons.movie_creation_outlined,
     this.assetPath,
@@ -44,6 +56,12 @@ class VideoClip {
     Duration? trimEnd,
     double? speed,
     double? volume,
+    double? opacity,
+    int? rotationDegrees,
+    bool? flipHorizontal,
+    bool? flipVertical,
+    bool? isReversed,
+    bool? isFrozen,
     List<Color>? previewGradient,
     IconData? previewIcon,
     String? assetPath,
@@ -56,6 +74,12 @@ class VideoClip {
       trimEnd: trimEnd ?? this.trimEnd,
       speed: speed ?? this.speed,
       volume: volume ?? this.volume,
+      opacity: opacity ?? this.opacity,
+      rotationDegrees: rotationDegrees ?? this.rotationDegrees,
+      flipHorizontal: flipHorizontal ?? this.flipHorizontal,
+      flipVertical: flipVertical ?? this.flipVertical,
+      isReversed: isReversed ?? this.isReversed,
+      isFrozen: isFrozen ?? this.isFrozen,
       previewGradient: previewGradient ?? this.previewGradient,
       previewIcon: previewIcon ?? this.previewIcon,
       assetPath: assetPath ?? this.assetPath,
@@ -72,7 +96,13 @@ class VideoClip {
           trimStart == other.trimStart &&
           trimEnd == other.trimEnd &&
           speed == other.speed &&
-          volume == other.volume;
+          volume == other.volume &&
+          opacity == other.opacity &&
+          rotationDegrees == other.rotationDegrees &&
+          flipHorizontal == other.flipHorizontal &&
+          flipVertical == other.flipVertical &&
+          isReversed == other.isReversed &&
+          isFrozen == other.isFrozen;
 
   @override
   int get hashCode =>
@@ -81,5 +111,11 @@ class VideoClip {
       trimStart.hashCode ^
       trimEnd.hashCode ^
       speed.hashCode ^
-      volume.hashCode;
+      volume.hashCode ^
+      opacity.hashCode ^
+      rotationDegrees.hashCode ^
+      flipHorizontal.hashCode ^
+      flipVertical.hashCode ^
+      isReversed.hashCode ^
+      isFrozen.hashCode;
 }

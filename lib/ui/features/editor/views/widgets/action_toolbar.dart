@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
-import 'package:capcut_video_editor/core/constants/app_typography.dart';
+import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
-import 'export_modal_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/duplicate_options_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/export_modal_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
 
-/// Middle Action Toolbar containing Split, Trim Left/Right, Delete, Duplicate, Speed, Volume, Add Clip, and Export.
+/// Middle Action Toolbar containing Split, Trim Left/Right, Delete, Duplicate (with PIP option),
+/// Speed, Volume, Add Clip (Media Picker), and Export.
 class ActionToolbar extends StatelessWidget {
   final EditorViewModel viewModel;
 
@@ -49,7 +52,7 @@ class ActionToolbar extends StatelessWidget {
                   isPrimary: true,
                   enabled: viewModel.videoClips.isNotEmpty,
                   onTap: () {
-                    final success = viewModel.splitAtPlayhead();
+                    final success = viewModel.splitClipAtPlayhead();
                     if (success) {
                       _showFeedback(context, '✂️ Clip split successfully at playhead');
                     } else {
@@ -90,28 +93,44 @@ class ActionToolbar extends StatelessWidget {
                   },
                 ),
 
-                // Delete Clip
-                _buildActionButton(
-                  context: context,
-                  icon: Icons.delete_outline_rounded,
-                  label: 'Delete',
-                  enabled: hasSelectedClip,
-                  onTap: () {
-                    viewModel.deleteSelectedClip();
-                    _showFeedback(context, '🗑️ Clip removed');
-                  },
-                ),
-
-                // Duplicate Clip
+                // Duplicate Clip (Opens choice: Timeline vs Overlay Layer)
                 _buildActionButton(
                   context: context,
                   icon: Icons.copy_all_rounded,
                   label: 'Duplicate',
                   enabled: hasSelectedClip,
                   onTap: () {
-                    viewModel.duplicateSelectedClip();
-                    _showFeedback(context, '📋 Clip duplicated');
+                    showModalBottomSheet(
+                      context: context,
+                      backgroundColor: Colors.transparent,
+                      builder: (ctx) => DuplicateOptionsSheet(viewModel: viewModel),
+                    );
                   },
+                ),
+
+                // Add Clip (Opens Gallery Media Picker)
+                _buildActionButton(
+                  context: context,
+                  icon: Icons.add_photo_alternate_rounded,
+                  label: 'Add Clip',
+                  enabled: true,
+                  onTap: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      backgroundColor: Colors.transparent,
+                      builder: (ctx) => MediaPickerSheet(viewModel: viewModel),
+                    );
+                  },
+                ),
+
+                // Edit Clip Detailed Drawer
+                _buildActionButton(
+                  context: context,
+                  icon: Icons.edit_note_rounded,
+                  label: 'Edit Tools',
+                  enabled: hasSelectedClip,
+                  onTap: () => viewModel.openDrawer(EditorCategory.edit),
                 ),
 
                 // Speed Controller
@@ -132,15 +151,15 @@ class ActionToolbar extends StatelessWidget {
                   onTap: () => _showVolumeDialog(context),
                 ),
 
-                // Add Clip (+)
+                // Delete Clip
                 _buildActionButton(
                   context: context,
-                  icon: Icons.add_to_photos_rounded,
-                  label: 'Add Clip',
-                  enabled: true,
+                  icon: Icons.delete_outline_rounded,
+                  label: 'Delete',
+                  enabled: hasSelectedClip,
                   onTap: () {
-                    viewModel.addNewClip();
-                    _showFeedback(context, '➕ New video clip added');
+                    viewModel.deleteSelectedClip();
+                    _showFeedback(context, '🗑️ Clip removed');
                   },
                 ),
 
@@ -179,11 +198,12 @@ class ActionToolbar extends StatelessWidget {
           shape: BoxShape.circle,
           border: Border.all(
             color: viewModel.isPlaying ? AppColors.secondary : AppColors.divider,
+            width: 1.2,
           ),
         ),
         child: Icon(
           viewModel.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          size: 22,
+          size: 20,
           color: viewModel.isPlaying ? AppColors.secondary : AppColors.primary,
         ),
       ),
@@ -247,46 +267,65 @@ class ActionToolbar extends StatelessWidget {
   }
 
   void _showFeedback(BuildContext context, String message) {
-    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-        duration: const Duration(milliseconds: 1200),
-        backgroundColor: AppColors.surfaceHighlight,
+        content: Text(message),
+        duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        backgroundColor: AppColors.surfaceElevated,
       ),
     );
   }
 
   void _showSpeedDialog(BuildContext context) {
-    final currentSpeed = viewModel.selectedClip?.speed ?? 1.0;
-    showDialog(
+    final clip = viewModel.selectedClip;
+    if (clip == null) return;
+
+    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+
+    showModalBottomSheet(
       context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppDimensions.radiusMd)),
+      ),
       builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: AppColors.surfaceElevated,
-          title: const Text('Adjust Playback Speed', style: AppTypography.headerTitle),
-          content: Column(
+        return Padding(
+          padding: const EdgeInsets.all(AppDimensions.lg),
+          child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const Text(
+                'Speed Adjustment',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+              ),
+              const SizedBox(height: 16),
               Wrap(
-                spacing: 8,
-                children: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0].map((spd) {
-                  final isSel = (currentSpeed - spd).abs() < 0.05;
+                spacing: 10,
+                runSpacing: 10,
+                children: speeds.map((s) {
+                  final isSelected = clip.speed == s;
                   return ChoiceChip(
-                    label: Text('${spd}x'),
-                    selected: isSel,
+                    label: Text('${s}x'),
+                    selected: isSelected,
                     selectedColor: AppColors.primary,
+                    backgroundColor: AppColors.surfaceLight,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.black : Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                     onSelected: (selected) {
                       if (selected) {
-                        viewModel.setClipSpeed(spd);
+                        viewModel.setClipSpeed(s);
                         Navigator.of(ctx).pop();
                       }
                     },
                   );
                 }).toList(),
               ),
+              const SizedBox(height: 16),
             ],
           ),
         );
@@ -295,47 +334,52 @@ class ActionToolbar extends StatelessWidget {
   }
 
   void _showVolumeDialog(BuildContext context) {
-    double currentVolume = viewModel.selectedClip?.volume ?? 1.0;
-    showDialog(
+    final clip = viewModel.selectedClip;
+    if (clip == null) return;
+
+    showModalBottomSheet(
       context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppDimensions.radiusMd)),
+      ),
       builder: (ctx) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppColors.surfaceElevated,
-              title: const Text('Clip Audio Volume', style: AppTypography.headerTitle),
-              content: Column(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: const EdgeInsets.all(AppDimensions.lg),
+              child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Icon(Icons.volume_down_rounded, color: AppColors.textSecondary),
-                      Text(
-                        '${(currentVolume * 100).round()}%',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary),
+                      const Text(
+                        'Clip Volume',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                       ),
-                      const Icon(Icons.volume_up_rounded, color: AppColors.primary),
+                      Text(
+                        '${(clip.volume * 100).round()}%',
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.primary),
+                      ),
                     ],
                   ),
+                  const SizedBox(height: 12),
                   Slider(
-                    value: currentVolume,
+                    value: clip.volume,
                     min: 0.0,
                     max: 1.0,
-                    divisions: 20,
+                    divisions: 100,
+                    activeColor: AppColors.primary,
                     onChanged: (val) {
-                      setDialogState(() => currentVolume = val);
+                      setSheetState(() {});
                       viewModel.setClipVolume(val);
                     },
                   ),
+                  const SizedBox(height: 16),
                 ],
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(),
-                  child: const Text('Done', style: TextStyle(color: AppColors.primary)),
-                ),
-              ],
             );
           },
         );

@@ -6,26 +6,44 @@ import 'package:capcut_video_editor/domain/enums/aspect_ratio_preset.dart';
 import 'package:capcut_video_editor/domain/enums/export_resolution.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/domain/models/audio_track.dart';
+import 'package:capcut_video_editor/domain/models/color_adjustments.dart';
+import 'package:capcut_video_editor/domain/models/editor_filter.dart';
 import 'package:capcut_video_editor/domain/models/export_settings.dart';
+import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
+import 'package:capcut_video_editor/domain/models/sticker_item.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
+import 'package:capcut_video_editor/domain/models/video_effect.dart';
 import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
 
 /// State representation for undo/redo history
 class _EditorSnapshot {
   final List<VideoClip> clips;
+  final List<OverlayClip> overlayClips;
+  final List<StickerOverlay> stickerOverlays;
+  final List<TextOverlay> textOverlays;
   final int? selectedIndex;
   final double playheadPosition;
+  final EditorFilter activeFilter;
+  final ColorAdjustments colorAdjustments;
+  final VideoEffect activeEffect;
 
   _EditorSnapshot({
     required this.clips,
+    required this.overlayClips,
+    required this.stickerOverlays,
+    required this.textOverlays,
     required this.selectedIndex,
     required this.playheadPosition,
+    required this.activeFilter,
+    required this.colorAdjustments,
+    required this.activeEffect,
   });
 }
 
 /// Comprehensive ViewModel managing the CapCut video editor state, timeline playback,
-/// clip modifications (split, trim, delete, duplicate), undo/redo history, and export.
+/// clip modifications (split, trim, delete, duplicate, layers), undo/redo history,
+/// visual effects, color filters/adjustments, stickers, and export.
 class EditorViewModel extends ChangeNotifier {
   EditorViewModel() {
     _initializeProject();
@@ -34,18 +52,31 @@ class EditorViewModel extends ChangeNotifier {
   // --- State Variables ---
 
   List<VideoClip> _videoClips = [];
+  List<OverlayClip> _overlayClips = [];
+  List<StickerOverlay> _stickerOverlays = [];
   AudioTrack? _audioTrack;
   List<TextOverlay> _textOverlays = [];
 
   int? _selectedClipIndex;
+  int? _selectedOverlayIndex;
   double _playheadPosition = 0.0; // In seconds
   bool _isPlaying = false;
+  bool _isLooping = true; // Auto-loop playback for video editors
   Timer? _playbackTimer;
 
   double _pixelsPerSecond = AppDimensions.defaultPixelsPerSecond;
   AspectRatioPreset _aspectRatio = AspectRatioPreset.ratio9x16;
-  EditorCategory _activeCategory = EditorCategory.edit;
+  EditorCategory? _activeDrawer;
   ExportSettings _exportSettings = const ExportSettings();
+
+  // Filters & Adjustments
+  EditorFilter _activeFilter = EditorFilter.presets.first;
+  ColorAdjustments _colorAdjustments = const ColorAdjustments();
+  VideoEffect _activeEffect = VideoEffect.presets.first;
+
+  // Canvas
+  Color _canvasBackgroundColor = Colors.black;
+  double _canvasBlurSigma = 0.0;
 
   // Undo / Redo Stacks
   final List<_EditorSnapshot> _undoStack = [];
@@ -59,21 +90,37 @@ class EditorViewModel extends ChangeNotifier {
   // --- Getters ---
 
   List<VideoClip> get videoClips => List.unmodifiable(_videoClips);
+  List<OverlayClip> get overlayClips => List.unmodifiable(_overlayClips);
+  List<StickerOverlay> get stickerOverlays => List.unmodifiable(_stickerOverlays);
   AudioTrack? get audioTrack => _audioTrack;
   List<TextOverlay> get textOverlays => List.unmodifiable(_textOverlays);
 
   int? get selectedClipIndex => _selectedClipIndex;
+  int? get selectedOverlayIndex => _selectedOverlayIndex;
+
   VideoClip? get selectedClip =>
       (_selectedClipIndex != null && _selectedClipIndex! >= 0 && _selectedClipIndex! < _videoClips.length)
           ? _videoClips[_selectedClipIndex!]
           : null;
 
+  OverlayClip? get selectedOverlay =>
+      (_selectedOverlayIndex != null && _selectedOverlayIndex! >= 0 && _selectedOverlayIndex! < _overlayClips.length)
+          ? _overlayClips[_selectedOverlayIndex!]
+          : null;
+
   double get playheadPosition => _playheadPosition;
   bool get isPlaying => _isPlaying;
+  bool get isLooping => _isLooping;
   double get pixelsPerSecond => _pixelsPerSecond;
   AspectRatioPreset get aspectRatio => _aspectRatio;
-  EditorCategory get activeCategory => _activeCategory;
+  EditorCategory? get activeDrawer => _activeDrawer;
   ExportSettings get exportSettings => _exportSettings;
+
+  EditorFilter get activeFilter => _activeFilter;
+  ColorAdjustments get colorAdjustments => _colorAdjustments;
+  VideoEffect get activeEffect => _activeEffect;
+  Color get canvasBackgroundColor => _canvasBackgroundColor;
+  double get canvasBlurSigma => _canvasBlurSigma;
 
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
@@ -104,6 +151,22 @@ class EditorViewModel extends ChangeNotifier {
     return _videoClips.isNotEmpty ? _videoClips.first : null;
   }
 
+  /// Returns active overlay clips visible at current playhead
+  List<OverlayClip> get activeOverlayClipsAtPlayhead {
+    return _overlayClips.where((o) {
+      return _playheadPosition >= o.startTimeInSeconds &&
+          _playheadPosition <= (o.startTimeInSeconds + o.durationInSeconds);
+    }).toList();
+  }
+
+  /// Returns active stickers visible at current playhead
+  List<StickerOverlay> get activeStickersAtPlayhead {
+    return _stickerOverlays.where((s) {
+      return _playheadPosition >= s.startTimeInSeconds &&
+          _playheadPosition <= (s.startTimeInSeconds + s.durationInSeconds);
+    }).toList();
+  }
+
   /// Returns active text overlay at current playhead position
   TextOverlay? get activeTextOverlay {
     for (final text in _textOverlays) {
@@ -121,6 +184,8 @@ class EditorViewModel extends ChangeNotifier {
     _videoClips = MockMediaRepository.getInitialVideoClips();
     _audioTrack = MockMediaRepository.getInitialAudioTrack();
     _textOverlays = MockMediaRepository.getInitialTextOverlays();
+    _overlayClips = [];
+    _stickerOverlays = [];
     _selectedClipIndex = 0;
     _playheadPosition = 0.0;
     notifyListeners();
@@ -132,12 +197,17 @@ class EditorViewModel extends ChangeNotifier {
     _undoStack.add(
       _EditorSnapshot(
         clips: List.from(_videoClips),
+        overlayClips: List.from(_overlayClips),
+        stickerOverlays: List.from(_stickerOverlays),
+        textOverlays: List.from(_textOverlays),
         selectedIndex: _selectedClipIndex,
         playheadPosition: _playheadPosition,
+        activeFilter: _activeFilter,
+        colorAdjustments: _colorAdjustments,
+        activeEffect: _activeEffect,
       ),
     );
     _redoStack.clear();
-    // Cap undo stack to 30 items
     if (_undoStack.length > 30) {
       _undoStack.removeAt(0);
     }
@@ -148,17 +218,29 @@ class EditorViewModel extends ChangeNotifier {
     _redoStack.add(
       _EditorSnapshot(
         clips: List.from(_videoClips),
+        overlayClips: List.from(_overlayClips),
+        stickerOverlays: List.from(_stickerOverlays),
+        textOverlays: List.from(_textOverlays),
         selectedIndex: _selectedClipIndex,
         playheadPosition: _playheadPosition,
+        activeFilter: _activeFilter,
+        colorAdjustments: _colorAdjustments,
+        activeEffect: _activeEffect,
       ),
     );
 
     final snapshot = _undoStack.removeLast();
     _videoClips = List.from(snapshot.clips);
+    _overlayClips = List.from(snapshot.overlayClips);
+    _stickerOverlays = List.from(snapshot.stickerOverlays);
+    _textOverlays = List.from(snapshot.textOverlays);
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
     _playheadPosition = snapshot.playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    _activeFilter = snapshot.activeFilter;
+    _colorAdjustments = snapshot.colorAdjustments;
+    _activeEffect = snapshot.activeEffect;
     notifyListeners();
   }
 
@@ -167,17 +249,29 @@ class EditorViewModel extends ChangeNotifier {
     _undoStack.add(
       _EditorSnapshot(
         clips: List.from(_videoClips),
+        overlayClips: List.from(_overlayClips),
+        stickerOverlays: List.from(_stickerOverlays),
+        textOverlays: List.from(_textOverlays),
         selectedIndex: _selectedClipIndex,
         playheadPosition: _playheadPosition,
+        activeFilter: _activeFilter,
+        colorAdjustments: _colorAdjustments,
+        activeEffect: _activeEffect,
       ),
     );
 
     final snapshot = _redoStack.removeLast();
     _videoClips = List.from(snapshot.clips);
+    _overlayClips = List.from(snapshot.overlayClips);
+    _stickerOverlays = List.from(snapshot.stickerOverlays);
+    _textOverlays = List.from(snapshot.textOverlays);
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
     _playheadPosition = snapshot.playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    _activeFilter = snapshot.activeFilter;
+    _colorAdjustments = snapshot.colorAdjustments;
+    _activeEffect = snapshot.activeEffect;
     notifyListeners();
   }
 
@@ -191,6 +285,11 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
+  void setLooping(bool loop) {
+    _isLooping = loop;
+    notifyListeners();
+  }
+
   void play() {
     if (_videoClips.isEmpty) return;
     if (_playheadPosition >= totalDurationInSeconds) {
@@ -200,13 +299,19 @@ class EditorViewModel extends ChangeNotifier {
     _isPlaying = true;
     _playbackTimer?.cancel();
 
-    // 33ms interval (~30 FPS playback simulation)
+    // 33ms interval (~30 FPS smooth playback loop)
     const intervalMs = 33;
     _playbackTimer = Timer.periodic(const Duration(milliseconds: intervalMs), (timer) {
       final nextPos = _playheadPosition + (intervalMs / 1000.0);
       if (nextPos >= totalDurationInSeconds) {
-        _playheadPosition = totalDurationInSeconds;
-        pause();
+        if (_isLooping && totalDurationInSeconds > 0.0) {
+          _playheadPosition = 0.0;
+          _autoSelectActiveClip();
+          notifyListeners();
+        } else {
+          _playheadPosition = totalDurationInSeconds;
+          pause();
+        }
       } else {
         _playheadPosition = nextPos;
         _autoSelectActiveClip();
@@ -229,62 +334,79 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void seekBy(double deltaSeconds) {
-    seekTo(_playheadPosition + deltaSeconds);
-  }
-
   void _autoSelectActiveClip() {
+    if (_videoClips.isEmpty) return;
     double accumulated = 0.0;
     for (int i = 0; i < _videoClips.length; i++) {
-      final clipEnd = accumulated + _videoClips[i].durationInSeconds;
-      if (_playheadPosition >= accumulated && _playheadPosition < clipEnd) {
+      final clip = _videoClips[i];
+      final clipEnd = accumulated + clip.durationInSeconds;
+      if (_playheadPosition >= accumulated && _playheadPosition <= clipEnd) {
         if (_selectedClipIndex != i) {
           _selectedClipIndex = i;
         }
-        return;
+        break;
       }
       accumulated = clipEnd;
     }
   }
 
-  // --- Clip Selection & Timeline Actions ---
+  // --- Clip Selection ---
 
   void selectClip(int index) {
     if (index >= 0 && index < _videoClips.length) {
       _selectedClipIndex = index;
+      _selectedOverlayIndex = null;
+      notifyListeners();
+    }
+  }
+
+  void selectOverlay(int index) {
+    if (index >= 0 && index < _overlayClips.length) {
+      _selectedOverlayIndex = index;
+      _selectedClipIndex = null;
       notifyListeners();
     }
   }
 
   void clearSelection() {
     _selectedClipIndex = null;
+    _selectedOverlayIndex = null;
     notifyListeners();
   }
 
-  /// Calculates the global start time (in seconds) of a clip at the given index
-  double getClipStartTime(int clipIndex) {
+  double getClipStartTime(int targetIndex) {
     double start = 0.0;
-    for (int i = 0; i < clipIndex && i < _videoClips.length; i++) {
+    for (int i = 0; i < targetIndex && i < _videoClips.length; i++) {
       start += _videoClips[i].durationInSeconds;
     }
     return start;
   }
 
+  // --- Drawer & Sub-Panel Navigation ---
+
+  void openDrawer(EditorCategory category) {
+    _activeDrawer = category;
+    notifyListeners();
+  }
+
+  void closeDrawer() {
+    _activeDrawer = null;
+    notifyListeners();
+  }
+
   // --- CapCut Core Action: SPLIT ---
 
-  /// Splits the currently selected clip (or clip at playhead) into two distinct clips
-  bool splitAtPlayhead() {
+  bool splitClipAtPlayhead() {
     if (_videoClips.isEmpty) return false;
 
-    // Find the clip containing the playhead
     int targetIndex = -1;
     double clipGlobalStart = 0.0;
-    double accumulated = 0.0;
 
+    double accumulated = 0.0;
     for (int i = 0; i < _videoClips.length; i++) {
-      final clipDuration = _videoClips[i].durationInSeconds;
-      final clipEnd = accumulated + clipDuration;
-      if (_playheadPosition > accumulated && _playheadPosition < clipEnd) {
+      final clip = _videoClips[i];
+      final clipEnd = accumulated + clip.durationInSeconds;
+      if (_playheadPosition > accumulated + 0.1 && _playheadPosition < clipEnd - 0.1) {
         targetIndex = i;
         clipGlobalStart = accumulated;
         break;
@@ -292,11 +414,12 @@ class EditorViewModel extends ChangeNotifier {
       accumulated = clipEnd;
     }
 
-    // If playhead is not strictly inside a clip, try selected clip
     if (targetIndex == -1 && _selectedClipIndex != null) {
       final selectedStart = getClipStartTime(_selectedClipIndex!);
-      final selectedEnd = selectedStart + _videoClips[_selectedClipIndex!].durationInSeconds;
-      if (_playheadPosition > selectedStart && _playheadPosition < selectedEnd) {
+      final selectedClip = _videoClips[_selectedClipIndex!];
+      final selectedEnd = selectedStart + selectedClip.durationInSeconds;
+
+      if (_playheadPosition > selectedStart + 0.1 && _playheadPosition < selectedEnd - 0.1) {
         targetIndex = _selectedClipIndex!;
         clipGlobalStart = selectedStart;
       }
@@ -307,7 +430,6 @@ class EditorViewModel extends ChangeNotifier {
     final originalClip = _videoClips[targetIndex];
     final offsetInClipSeconds = _playheadPosition - clipGlobalStart;
 
-    // Must be at least 0.2s from both edges
     if (offsetInClipSeconds < 0.2 || (originalClip.durationInSeconds - offsetInClipSeconds) < 0.2) {
       return false;
     }
@@ -340,7 +462,6 @@ class EditorViewModel extends ChangeNotifier {
 
   // --- CapCut Core Action: TRIM ---
 
-  /// Trims the start of the selected clip to current playhead
   bool trimLeftToPlayhead() {
     if (_selectedClipIndex == null) return false;
     final clip = _videoClips[_selectedClipIndex!];
@@ -360,7 +481,6 @@ class EditorViewModel extends ChangeNotifier {
     return true;
   }
 
-  /// Trims the end of the selected clip to current playhead
   bool trimRightToPlayhead() {
     if (_selectedClipIndex == null) return false;
     final clip = _videoClips[_selectedClipIndex!];
@@ -380,12 +500,10 @@ class EditorViewModel extends ChangeNotifier {
     return true;
   }
 
-  /// Direct trim update from interactive drag handles
   void updateClipTrim(int index, Duration newTrimStart, Duration newTrimEnd) {
     if (index < 0 || index >= _videoClips.length) return;
     final clip = _videoClips[index];
 
-    // Ensure minimum 0.3s duration
     if (newTrimEnd.inMilliseconds - newTrimStart.inMilliseconds < 300) return;
 
     _saveSnapshot();
@@ -396,7 +514,7 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Clip Operations: DELETE, DUPLICATE, ADD, REORDER ---
+  // --- Clip Operations: DELETE, DUPLICATE (Track & Layer), ADD ---
 
   void deleteSelectedClip() {
     if (_selectedClipIndex == null || _videoClips.isEmpty) return;
@@ -413,6 +531,7 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Duplicate on main timeline track
   void duplicateSelectedClip() {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
@@ -425,6 +544,56 @@ class EditorViewModel extends ChangeNotifier {
 
     _videoClips.insert(_selectedClipIndex! + 1, duplicated);
     _selectedClipIndex = _selectedClipIndex! + 1;
+    notifyListeners();
+  }
+
+  /// Duplicate as secondary Overlay / Picture-in-Picture (PIP) Layer
+  void duplicateSelectedClipAsOverlay() {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+
+    final original = _videoClips[_selectedClipIndex!];
+    final clipStart = getClipStartTime(_selectedClipIndex!);
+
+    final overlay = OverlayClip(
+      id: 'overlay_${DateTime.now().millisecondsSinceEpoch}',
+      title: '${original.title} (PIP Layer)',
+      startTime: Duration(milliseconds: (clipStart * 1000).round()),
+      duration: original.activeDuration,
+      previewGradient: original.previewGradient,
+      previewIcon: original.previewIcon,
+      position: const Offset(0.7, 0.25),
+      scale: 0.45,
+      opacity: original.opacity,
+    );
+
+    _overlayClips.add(overlay);
+    _selectedOverlayIndex = _overlayClips.length - 1;
+    _selectedClipIndex = null;
+    notifyListeners();
+  }
+
+  /// Add a clip selected from Media Picker Sheet
+  void addNewClipFromMedia({
+    required String title,
+    required Duration duration,
+    required List<Color> gradient,
+    IconData icon = Icons.videocam_rounded,
+    String? assetPath,
+  }) {
+    _saveSnapshot();
+    final newClip = VideoClip(
+      id: 'clip_custom_${DateTime.now().millisecondsSinceEpoch}',
+      title: title,
+      originalDuration: duration,
+      trimStart: Duration.zero,
+      trimEnd: duration,
+      previewGradient: gradient,
+      previewIcon: icon,
+      assetPath: assetPath,
+    );
+    _videoClips.add(newClip);
+    _selectedClipIndex = _videoClips.length - 1;
     notifyListeners();
   }
 
@@ -450,6 +619,105 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Overlay (PIP) Operations ---
+
+  void addOverlayClip(OverlayClip overlay) {
+    _saveSnapshot();
+    _overlayClips.add(overlay);
+    _selectedOverlayIndex = _overlayClips.length - 1;
+    notifyListeners();
+  }
+
+  void removeOverlayClip(String id) {
+    _saveSnapshot();
+    _overlayClips.removeWhere((o) => o.id == id);
+    _selectedOverlayIndex = null;
+    notifyListeners();
+  }
+
+  void updateOverlayPosition(int index, Offset newPos) {
+    if (index < 0 || index >= _overlayClips.length) return;
+    _overlayClips[index] = _overlayClips[index].copyWith(position: newPos);
+    notifyListeners();
+  }
+
+  void updateOverlayScale(int index, double scale) {
+    if (index < 0 || index >= _overlayClips.length) return;
+    _overlayClips[index] = _overlayClips[index].copyWith(scale: scale);
+    notifyListeners();
+  }
+
+  // --- Edit Panel Transformations ---
+
+  void rotateSelectedClip() {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    final nextRotation = (clip.rotationDegrees + 90) % 360;
+    _videoClips[_selectedClipIndex!] = clip.copyWith(rotationDegrees: nextRotation);
+    notifyListeners();
+  }
+
+  void flipSelectedClipHorizontal() {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    _videoClips[_selectedClipIndex!] = clip.copyWith(flipHorizontal: !clip.flipHorizontal);
+    notifyListeners();
+  }
+
+  void flipSelectedClipVertical() {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    _videoClips[_selectedClipIndex!] = clip.copyWith(flipVertical: !clip.flipVertical);
+    notifyListeners();
+  }
+
+  void setSelectedClipOpacity(double opacity) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    _videoClips[_selectedClipIndex!] = clip.copyWith(opacity: opacity.clamp(0.0, 1.0));
+    notifyListeners();
+  }
+
+  void toggleSelectedClipReverse() {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    _videoClips[_selectedClipIndex!] = clip.copyWith(isReversed: !clip.isReversed);
+    notifyListeners();
+  }
+
+  void toggleSelectedClipFreeze() {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    _videoClips[_selectedClipIndex!] = clip.copyWith(isFrozen: !clip.isFrozen);
+    notifyListeners();
+  }
+
+  void replaceSelectedClip({
+    required String title,
+    required Duration duration,
+    required List<Color> gradient,
+    IconData icon = Icons.movie_creation_outlined,
+  }) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final current = _videoClips[_selectedClipIndex!];
+    _videoClips[_selectedClipIndex!] = current.copyWith(
+      title: title,
+      originalDuration: duration,
+      trimStart: Duration.zero,
+      trimEnd: duration,
+      previewGradient: gradient,
+      previewIcon: icon,
+    );
+    notifyListeners();
+  }
+
   // --- Speed & Volume Adjustments ---
 
   void setClipSpeed(double speed) {
@@ -462,12 +730,120 @@ class EditorViewModel extends ChangeNotifier {
 
   void setClipVolume(double volume) {
     if (_selectedClipIndex == null) return;
+    _saveSnapshot();
     final clip = _videoClips[_selectedClipIndex!];
     _videoClips[_selectedClipIndex!] = clip.copyWith(volume: volume.clamp(0.0, 1.0));
     notifyListeners();
   }
 
-  // --- Zoom, Aspect Ratio & Categories ---
+  // --- Audio Track Operations ---
+
+  void addAudioTrack(AudioTrack track) {
+    _saveSnapshot();
+    _audioTrack = track;
+    notifyListeners();
+  }
+
+  void removeAudioTrack() {
+    _saveSnapshot();
+    _audioTrack = null;
+    notifyListeners();
+  }
+
+  void setAudioTrackVolume(double volume) {
+    if (_audioTrack == null) return;
+    _saveSnapshot();
+    _audioTrack = _audioTrack!.copyWith(volume: volume.clamp(0.0, 1.0));
+    notifyListeners();
+  }
+
+  // --- Text Overlay Operations ---
+
+  void addTextOverlay(TextOverlay overlay) {
+    _saveSnapshot();
+    _textOverlays.add(overlay);
+    notifyListeners();
+  }
+
+  void removeTextOverlay(String id) {
+    _saveSnapshot();
+    _textOverlays.removeWhere((t) => t.id == id);
+    notifyListeners();
+  }
+
+  void updateTextOverlay(TextOverlay overlay) {
+    _saveSnapshot();
+    final index = _textOverlays.indexWhere((t) => t.id == overlay.id);
+    if (index != -1) {
+      _textOverlays[index] = overlay;
+      notifyListeners();
+    }
+  }
+
+  // --- Sticker Operations ---
+
+  void addSticker(StickerPreset preset, {Duration? duration}) {
+    _saveSnapshot();
+    final overlay = StickerOverlay(
+      id: 'sticker_${DateTime.now().millisecondsSinceEpoch}',
+      preset: preset,
+      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
+      duration: duration ?? const Duration(seconds: 4),
+      position: const Offset(0.5, 0.4),
+      scale: 1.0,
+    );
+    _stickerOverlays.add(overlay);
+    notifyListeners();
+  }
+
+  void removeSticker(String id) {
+    _saveSnapshot();
+    _stickerOverlays.removeWhere((s) => s.id == id);
+    notifyListeners();
+  }
+
+  // --- Effects, Filters & Color Adjustments ---
+
+  void setFilter(EditorFilter filter) {
+    _saveSnapshot();
+    _activeFilter = filter;
+    notifyListeners();
+  }
+
+  void setFilterIntensity(double intensity) {
+    _activeFilter = _activeFilter.copyWith(intensity: intensity.clamp(0.0, 1.0));
+    notifyListeners();
+  }
+
+  void setEffect(VideoEffect effect) {
+    _saveSnapshot();
+    _activeEffect = effect;
+    notifyListeners();
+  }
+
+  void updateColorAdjustments(ColorAdjustments adjustments) {
+    _colorAdjustments = adjustments;
+    notifyListeners();
+  }
+
+  void resetColorAdjustments() {
+    _colorAdjustments = const ColorAdjustments();
+    notifyListeners();
+  }
+
+  // --- Canvas Settings ---
+
+  void setCanvasBackgroundColor(Color color) {
+    _canvasBackgroundColor = color;
+    notifyListeners();
+  }
+
+  void setCanvasBlurSigma(double sigma) {
+    _canvasBlurSigma = sigma;
+    notifyListeners();
+  }
+
+  // --- Zoom, Aspect Ratio & Export ---
 
   void setZoomScale(double pps) {
     _pixelsPerSecond = pps.clamp(AppDimensions.minPixelsPerSecond, AppDimensions.maxPixelsPerSecond);
@@ -476,11 +852,6 @@ class EditorViewModel extends ChangeNotifier {
 
   void setAspectRatio(AspectRatioPreset preset) {
     _aspectRatio = preset;
-    notifyListeners();
-  }
-
-  void setActiveCategory(EditorCategory category) {
-    _activeCategory = category;
     notifyListeners();
   }
 
