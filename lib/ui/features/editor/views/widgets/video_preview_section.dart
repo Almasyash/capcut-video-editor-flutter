@@ -8,6 +8,7 @@ import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/core/constants/app_typography.dart';
 import 'package:capcut_video_editor/core/utils/time_formatter.dart';
 import 'package:capcut_video_editor/domain/models/editor_filter.dart';
+import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
@@ -207,9 +208,16 @@ class VideoPreviewSection extends StatelessWidget {
   }
 
   Widget _buildMainVideoCanvas(dynamic activeClip, ColorFilter? filter, ColorFilter? adjustments) {
-    final hasLocalFile = activeClip.assetPath != null &&
+    String? localPath;
+    if (activeClip is VideoClip) {
+      final asset = viewModel.getAssetById(activeClip.assetId);
+      localPath = asset?.localPath;
+    }
+
+    final hasLocalFile = localPath != null &&
+        !localPath.startsWith('content://') &&
         !kIsWeb &&
-        File(activeClip.assetPath!).existsSync();
+        File(localPath).existsSync();
 
     Widget canvasChild;
 
@@ -218,7 +226,7 @@ class VideoPreviewSection extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           Image.file(
-            File(activeClip.assetPath!),
+            File(localPath),
             fit: BoxFit.contain,
             errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(activeClip),
           ),
@@ -295,6 +303,12 @@ class VideoPreviewSection extends StatelessWidget {
   }
 
   Widget _buildPlaceholderGraphic(dynamic activeClip) {
+    String? localPath;
+    if (activeClip is VideoClip) {
+      final asset = viewModel.getAssetById(activeClip.assetId);
+      localPath = asset?.localPath;
+    }
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
       decoration: BoxDecoration(
@@ -346,10 +360,10 @@ class VideoPreviewSection extends StatelessWidget {
                         ),
                     ],
                   ),
-                  if (activeClip.assetPath != null) ...[
+                  if (localPath != null) ...[
                     const SizedBox(height: 2),
                     Text(
-                      activeClip.assetPath!,
+                      localPath,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(

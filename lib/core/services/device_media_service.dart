@@ -1,15 +1,20 @@
+import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:capcut_video_editor/domain/models/media_asset.dart';
 
+/// Legacy result wrapper for existing presentation widgets (backward compatible)
 class DeviceMediaResult {
   final String fileName;
-  final String filePath; // Actual content:// URI or filesystem path
+  final String filePath; // Actual cached filesystem path or URI
   final String fileType; // 'video', 'photo', 'audio'
   final Duration estimatedDuration;
   final List<Color> gradient;
   final IconData icon;
   final int fileSizeMb;
+  final String? contentUri;
 
   const DeviceMediaResult({
     required this.fileName,
@@ -19,7 +24,33 @@ class DeviceMediaResult {
     required this.gradient,
     required this.icon,
     this.fileSizeMb = 14,
+    this.contentUri,
   });
+
+  MediaAsset toMediaAsset() {
+    MediaAssetType assetType;
+    if (fileType == 'audio') {
+      assetType = MediaAssetType.audio;
+    } else if (fileType == 'photo') {
+      assetType = MediaAssetType.photo;
+    } else {
+      assetType = MediaAssetType.video;
+    }
+
+    final isContentUri = filePath.startsWith('content://');
+
+    return MediaAsset(
+      id: 'asset_${DateTime.now().millisecondsSinceEpoch}_${fileName.hashCode.abs()}',
+      type: assetType,
+      name: fileName,
+      uri: contentUri ?? (isContentUri ? filePath : null),
+      localPath: isContentUri ? null : filePath,
+      duration: null,
+      sizeBytes: fileSizeMb * 1024 * 1024,
+      thumbnailPath: (assetType == MediaAssetType.photo && !isContentUri) ? filePath : null,
+      createdAt: DateTime.now(),
+    );
+  }
 }
 
 /// Service to handle native system intents, runtime permissions, and media/audio file picking
@@ -52,7 +83,135 @@ class DeviceMediaService {
     }
   }
 
-  /// Launches native system file picker intent (ACTION_GET_CONTENT) to pick actual video or photo from device
+  /// Imports a Video or Photo from native device storage into a clean [MediaAsset] model
+  static Future<MediaAsset?> pickMediaAsset({String type = 'media'}) async {
+    try {
+      await requestStoragePermissions();
+
+      final result = await _platform.invokeMapMethod<String, dynamic>(
+        'pickMediaFile',
+        {'type': type},
+      );
+
+      if (result == null) {
+        // User cancelled picker
+        return null;
+      }
+
+      final uri = result['uri'] as String?;
+      final localPath = result['path'] as String?;
+      final name = (result['name'] as String?) ?? 'Selected_Media';
+      final mime = (result['mimeType'] as String?) ?? '';
+      final sizeBytes = (result['size'] as num?)?.toInt();
+
+      // Rule 2: If Android returns null/empty localPath, fail import
+      if (localPath == null || localPath.trim().isEmpty) {
+        debugPrint('[DeviceMediaService] Import failed: Native picker returned null/empty localPath');
+        return null;
+      }
+
+      // Rule 1: Content URI must never become localPath
+      if (localPath.startsWith('content://')) {
+        debugPrint('[DeviceMediaService] Import failed: localPath is a content URI, expected filesystem path');
+        return null;
+      }
+
+      // Rule 3: Cached file must exist on disk
+      if (!kIsWeb) {
+        final cachedFile = File(localPath);
+        if (!cachedFile.existsSync()) {
+          debugPrint('[DeviceMediaService] Import failed: Cached file does not exist on disk: $localPath');
+          return null;
+        }
+      }
+
+      final isPhoto = mime.startsWith('image') ||
+          name.toLowerCase().endsWith('.jpg') ||
+          name.toLowerCase().endsWith('.jpeg') ||
+          name.toLowerCase().endsWith('.png') ||
+          name.toLowerCase().endsWith('.webp');
+
+      final assetType = isPhoto ? MediaAssetType.photo : MediaAssetType.video;
+
+      return MediaAsset(
+        id: 'asset_${DateTime.now().millisecondsSinceEpoch}_${name.hashCode.abs()}',
+        type: assetType,
+        name: name,
+        uri: uri,
+        localPath: localPath,
+        duration: null, // Rule 4: No fake durations, use null until real metadata extraction exists
+        sizeBytes: sizeBytes, // Rule 5: Preserve exact native sizeBytes
+        thumbnailPath: isPhoto ? localPath : null,
+        createdAt: DateTime.now(),
+      );
+    } on MissingPluginException {
+      debugPrint('[DeviceMediaService] MethodChannel not available on this platform');
+      return null;
+    } catch (e) {
+      debugPrint('[DeviceMediaService] Error picking media asset: $e');
+      return null;
+    }
+  }
+
+  /// Imports an Audio track from native device storage into a clean [MediaAsset] model
+  static Future<MediaAsset?> pickAudioAsset() async {
+    try {
+      await requestStoragePermissions();
+
+      final result = await _platform.invokeMapMethod<String, dynamic>('pickAudioFile');
+
+      if (result == null) {
+        // User cancelled picker
+        return null;
+      }
+
+      final uri = result['uri'] as String?;
+      final localPath = result['path'] as String?;
+      final name = (result['name'] as String?) ?? 'Selected_Audio';
+      final sizeBytes = (result['size'] as num?)?.toInt();
+
+      // Rule 2: If Android returns null/empty localPath, fail import
+      if (localPath == null || localPath.trim().isEmpty) {
+        debugPrint('[DeviceMediaService] Import failed: Audio picker returned null/empty localPath');
+        return null;
+      }
+
+      // Rule 1: Content URI must never become localPath
+      if (localPath.startsWith('content://')) {
+        debugPrint('[DeviceMediaService] Import failed: localPath is a content URI, expected filesystem path');
+        return null;
+      }
+
+      // Rule 3: Cached file must exist on disk
+      if (!kIsWeb) {
+        final cachedFile = File(localPath);
+        if (!cachedFile.existsSync()) {
+          debugPrint('[DeviceMediaService] Import failed: Cached audio file does not exist on disk: $localPath');
+          return null;
+        }
+      }
+
+      return MediaAsset(
+        id: 'audio_asset_${DateTime.now().millisecondsSinceEpoch}_${name.hashCode.abs()}',
+        type: MediaAssetType.audio,
+        name: name,
+        uri: uri,
+        localPath: localPath,
+        duration: null, // Rule 4: No fake durations, use null until real metadata extraction exists
+        sizeBytes: sizeBytes, // Rule 5: Preserve exact native sizeBytes
+        thumbnailPath: null,
+        createdAt: DateTime.now(),
+      );
+    } on MissingPluginException {
+      debugPrint('[DeviceMediaService] MethodChannel not available on this platform');
+      return null;
+    } catch (e) {
+      debugPrint('[DeviceMediaService] Error picking audio asset: $e');
+      return null;
+    }
+  }
+
+  /// Launches native system file picker intent (ACTION_GET_CONTENT) with localPath resolution (Legacy compatible)
   static Future<DeviceMediaResult?> pickMediaFromNativeStorage({String type = 'media'}) async {
     try {
       await requestStoragePermissions();
@@ -62,12 +221,16 @@ class DeviceMediaService {
         {'type': type},
       );
 
-      if (result != null && result['uri'] != null) {
-        final uri = result['uri'] as String;
+      if (result != null) {
+        final uri = result['uri'] as String?;
+        final localPath = result['path'] as String?;
         final name = (result['name'] as String?) ?? 'Selected_Media';
         final mime = (result['mimeType'] as String?) ?? '';
         final sizeBytes = (result['size'] as num?)?.toInt() ?? 0;
         final sizeMb = (sizeBytes / (1024 * 1024)).ceil();
+
+        // Crucial fix: Use localPath (cached absolute filesystem path) rather than content:// URI
+        final effectivePath = localPath ?? uri ?? '';
 
         final isPhoto = mime.startsWith('image') ||
             name.toLowerCase().endsWith('.jpg') ||
@@ -80,59 +243,65 @@ class DeviceMediaService {
 
         return DeviceMediaResult(
           fileName: name,
-          filePath: uri,
+          filePath: effectivePath,
           fileType: isPhoto ? 'photo' : 'video',
           estimatedDuration: isPhoto ? const Duration(seconds: 4) : const Duration(seconds: 12),
           gradient: gradient,
           icon: isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
           fileSizeMb: math.max(1, sizeMb),
+          contentUri: uri,
         );
       }
     } on MissingPluginException {
-      // Fallback for Web/desktop test environments
       return null;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[DeviceMediaService] Error picking native media: $e');
       return null;
     }
     return null;
   }
 
-  /// Launches native system file picker intent to pick actual audio file from device
+  /// Launches native system file picker intent to pick actual audio file from device (Legacy compatible)
   static Future<DeviceMediaResult?> pickAudioFromNativeStorage() async {
     try {
       await requestStoragePermissions();
 
       final result = await _platform.invokeMapMethod<String, dynamic>('pickAudioFile');
 
-      if (result != null && result['uri'] != null) {
-        final uri = result['uri'] as String;
+      if (result != null) {
+        final uri = result['uri'] as String?;
+        final localPath = result['path'] as String?;
         final name = (result['name'] as String?) ?? 'Selected_Audio';
         final sizeBytes = (result['size'] as num?)?.toInt() ?? 0;
         final sizeMb = (sizeBytes / (1024 * 1024)).ceil();
+
+        // Crucial fix: Use localPath (cached absolute filesystem path) rather than content:// URI
+        final effectivePath = localPath ?? uri ?? '';
 
         final random = math.Random(name.hashCode);
         final gradient = _vibrantGradients[random.nextInt(_vibrantGradients.length)];
 
         return DeviceMediaResult(
           fileName: name,
-          filePath: uri,
+          filePath: effectivePath,
           fileType: 'audio',
           estimatedDuration: const Duration(seconds: 28),
           gradient: gradient,
           icon: Icons.music_note_rounded,
           fileSizeMb: math.max(1, sizeMb),
+          contentUri: uri,
         );
       }
     } on MissingPluginException {
-      // Fallback for Web/desktop test environments
       return null;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[DeviceMediaService] Error picking native audio: $e');
       return null;
     }
     return null;
   }
 
-  /// Creates custom video result with file attributes
+  /// Creates custom video result with file attributes (Mock / Test helper)
   static DeviceMediaResult createCustomVideoResult({
     required String name,
     Duration duration = const Duration(seconds: 12),
@@ -146,16 +315,17 @@ class DeviceMediaService {
 
     return DeviceMediaResult(
       fileName: formattedName,
-      filePath: customPath ?? 'content://media/external/video/media/$formattedName',
+      filePath: customPath ?? '/storage/emulated/0/DCIM/Camera/$formattedName',
       fileType: 'video',
       estimatedDuration: duration,
       gradient: gradient,
       icon: Icons.videocam_rounded,
       fileSizeMb: sizeMb,
+      contentUri: 'content://media/external/video/media/$formattedName',
     );
   }
 
-  /// Creates custom photo result
+  /// Creates custom photo result (Mock / Test helper)
   static DeviceMediaResult createCustomPhotoResult({
     required String name,
     Duration duration = const Duration(seconds: 4),
@@ -169,16 +339,17 @@ class DeviceMediaService {
 
     return DeviceMediaResult(
       fileName: formattedName,
-      filePath: customPath ?? 'content://media/external/images/media/$formattedName',
+      filePath: customPath ?? '/storage/emulated/0/DCIM/Pictures/$formattedName',
       fileType: 'photo',
       estimatedDuration: duration,
       gradient: gradient,
       icon: Icons.image_rounded,
       fileSizeMb: sizeMb,
+      contentUri: 'content://media/external/images/media/$formattedName',
     );
   }
 
-  /// Creates custom audio result
+  /// Creates custom audio result (Mock / Test helper)
   static DeviceMediaResult createCustomAudioResult({
     required String name,
     Duration duration = const Duration(seconds: 25),
@@ -194,12 +365,13 @@ class DeviceMediaService {
 
     return DeviceMediaResult(
       fileName: formattedName,
-      filePath: customPath ?? 'content://media/external/audio/media/$formattedName',
+      filePath: customPath ?? '/storage/emulated/0/Music/$formattedName',
       fileType: 'audio',
       estimatedDuration: duration,
       gradient: gradient,
       icon: Icons.music_note_rounded,
       fileSizeMb: sizeMb,
+      contentUri: 'content://media/external/audio/media/$formattedName',
     );
   }
 

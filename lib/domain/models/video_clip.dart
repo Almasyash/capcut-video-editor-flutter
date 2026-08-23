@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 /// Immutable model representing an individual video segment/clip on the timeline
 class VideoClip {
   final String id;
+
+  /// Canonical reference to the source MediaAsset in central MediaLibrary
+  final String assetId;
+
   final String title;
   final Duration originalDuration;
   final Duration trimStart;
@@ -17,10 +21,10 @@ class VideoClip {
   final bool isFrozen;
   final List<Color> previewGradient;
   final IconData previewIcon;
-  final String? assetPath;
 
   const VideoClip({
     required this.id,
+    required this.assetId,
     required this.title,
     required this.originalDuration,
     required this.trimStart,
@@ -35,7 +39,6 @@ class VideoClip {
     this.isFrozen = false,
     required this.previewGradient,
     this.previewIcon = Icons.movie_creation_outlined,
-    this.assetPath,
   });
 
   /// Effective duration on the timeline after trimming and speed adjustment
@@ -50,6 +53,7 @@ class VideoClip {
 
   VideoClip copyWith({
     String? id,
+    String? assetId,
     String? title,
     Duration? originalDuration,
     Duration? trimStart,
@@ -64,10 +68,10 @@ class VideoClip {
     bool? isFrozen,
     List<Color>? previewGradient,
     IconData? previewIcon,
-    String? assetPath,
   }) {
     return VideoClip(
       id: id ?? this.id,
+      assetId: assetId ?? this.assetId,
       title: title ?? this.title,
       originalDuration: originalDuration ?? this.originalDuration,
       trimStart: trimStart ?? this.trimStart,
@@ -82,7 +86,6 @@ class VideoClip {
       isFrozen: isFrozen ?? this.isFrozen,
       previewGradient: previewGradient ?? this.previewGradient,
       previewIcon: previewIcon ?? this.previewIcon,
-      assetPath: assetPath ?? this.assetPath,
     );
   }
 
@@ -92,6 +95,7 @@ class VideoClip {
       other is VideoClip &&
           runtimeType == other.runtimeType &&
           id == other.id &&
+          assetId == other.assetId &&
           title == other.title &&
           trimStart == other.trimStart &&
           trimEnd == other.trimEnd &&
@@ -107,6 +111,7 @@ class VideoClip {
   @override
   int get hashCode =>
       id.hashCode ^
+      assetId.hashCode ^
       title.hashCode ^
       trimStart.hashCode ^
       trimEnd.hashCode ^

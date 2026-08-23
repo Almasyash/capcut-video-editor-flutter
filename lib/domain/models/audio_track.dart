@@ -1,16 +1,20 @@
 /// Model representing an audio or background music track on the timeline
 class AudioTrack {
   final String id;
+
+  /// Canonical reference to the source MediaAsset in central MediaLibrary
+  final String assetId;
+
   final String name;
   final String artist;
   final Duration startTime;
   final Duration duration;
   final double volume;
   final List<double> waveformPoints;
-  final String? filePath;
 
   const AudioTrack({
     required this.id,
+    required this.assetId,
     String? name,
     String? title,
     this.artist = 'Original Audio',
@@ -18,7 +22,6 @@ class AudioTrack {
     required this.duration,
     this.volume = 0.8,
     required this.waveformPoints,
-    this.filePath,
   }) : name = title ?? name ?? 'Audio Track';
 
   String get title => name;
@@ -28,6 +31,7 @@ class AudioTrack {
 
   AudioTrack copyWith({
     String? id,
+    String? assetId,
     String? name,
     String? title,
     String? artist,
@@ -35,17 +39,16 @@ class AudioTrack {
     Duration? duration,
     double? volume,
     List<double>? waveformPoints,
-    String? filePath,
   }) {
     return AudioTrack(
       id: id ?? this.id,
+      assetId: assetId ?? this.assetId,
       name: title ?? name ?? this.name,
       artist: artist ?? this.artist,
       startTime: startTime ?? this.startTime,
       duration: duration ?? this.duration,
       volume: volume ?? this.volume,
       waveformPoints: waveformPoints ?? this.waveformPoints,
-      filePath: filePath ?? this.filePath,
     );
   }
 }

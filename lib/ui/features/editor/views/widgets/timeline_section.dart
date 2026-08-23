@@ -2,7 +2,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
-import 'package:capcut_video_editor/core/constants/app_typography.dart';
 import 'package:capcut_video_editor/core/utils/time_formatter.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'audio_track_item.dart';
@@ -281,6 +280,7 @@ class _TimelineSectionState extends State<TimelineSection> {
             return TimelineClipItem(
               key: ValueKey(clip.id),
               clip: clip,
+              localPath: viewModel.getAssetById(clip.assetId)?.localPath,
               index: idx,
               isSelected: isSelected,
               pixelsPerSecond: viewModel.pixelsPerSecond,

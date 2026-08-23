@@ -11,6 +11,7 @@ import 'package:capcut_video_editor/domain/models/video_clip.dart';
 /// yellow selection border, and draggable left/right trim handles.
 class TimelineClipItem extends StatelessWidget {
   final VideoClip clip;
+  final String? localPath;
   final int index;
   final bool isSelected;
   final double pixelsPerSecond;
@@ -20,6 +21,7 @@ class TimelineClipItem extends StatelessWidget {
   const TimelineClipItem({
     super.key,
     required this.clip,
+    this.localPath,
     required this.index,
     required this.isSelected,
     required this.pixelsPerSecond,
@@ -30,6 +32,10 @@ class TimelineClipItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clipWidth = clip.durationInSeconds * pixelsPerSecond;
+    final hasLocalFile = localPath != null &&
+        !localPath!.startsWith('content://') &&
+        !kIsWeb &&
+        File(localPath!).existsSync();
 
     return GestureDetector(
       onTap: onTap,
@@ -58,13 +64,13 @@ class TimelineClipItem extends StatelessWidget {
                 ),
                 child: Stack(
                   children: [
-                    // Real image thumbnail if assetPath is available
-                    if (clip.assetPath != null && !kIsWeb)
+                    // Real image thumbnail if localPath is available
+                    if (hasLocalFile)
                       Positioned.fill(
                         child: Opacity(
                           opacity: 0.6,
                           child: Image.file(
-                            File(clip.assetPath!),
+                            File(localPath!),
                             fit: BoxFit.cover,
                             errorBuilder: (ctx, err, stack) => const SizedBox.shrink(),
                           ),
@@ -120,7 +126,7 @@ class TimelineClipItem extends StatelessWidget {
                     ),
 
                     // Bottom-Left: Real File Source Badge if local file
-                    if (clip.assetPath != null)
+                    if (hasLocalFile)
                       Positioned(
                         bottom: 3,
                         left: isSelected ? AppDimensions.trimHandleWidth + 4 : 6,

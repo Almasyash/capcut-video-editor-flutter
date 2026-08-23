@@ -10,6 +10,7 @@ class MockMediaRepository {
     return [
       const VideoClip(
         id: 'clip_01',
+        assetId: 'preset_asset_video_01',
         title: 'Cyberpunk City Neon',
         originalDuration: Duration(seconds: 8),
         trimStart: Duration.zero,
@@ -25,6 +26,7 @@ class MockMediaRepository {
       ),
       const VideoClip(
         id: 'clip_02',
+        assetId: 'preset_asset_video_02',
         title: 'Sunset Beach Drone',
         originalDuration: Duration(seconds: 10),
         trimStart: Duration(seconds: 1),
@@ -39,6 +41,7 @@ class MockMediaRepository {
       ),
       const VideoClip(
         id: 'clip_03',
+        assetId: 'preset_asset_video_03',
         title: 'Hyperlapse Highway',
         originalDuration: Duration(seconds: 6),
         trimStart: Duration.zero,
@@ -65,6 +68,7 @@ class MockMediaRepository {
 
     return AudioTrack(
       id: 'audio_01',
+      assetId: 'preset_asset_audio_01',
       name: 'Midnight Beats (Copyright Free)',
       artist: 'SynthWave Studio',
       startTime: Duration.zero,
@@ -118,6 +122,7 @@ class MockMediaRepository {
 
     return VideoClip(
       id: 'clip_new_${DateTime.now().millisecondsSinceEpoch}',
+      assetId: 'preset_asset_clip_$index',
       title: 'Imported Clip #${index + 1}',
       originalDuration: const Duration(seconds: 6),
       trimStart: Duration.zero,

@@ -24,6 +24,9 @@ class AudioTrackItem extends StatelessWidget {
     final trackWidth = math.max(40.0, audioTrack.durationInSeconds * pixelsPerSecond);
     final startOffset = audioTrack.startTimeInSeconds * pixelsPerSecond;
     final isSelected = viewModel.isAudioSelected;
+    final audioAsset = viewModel.getAssetById(audioTrack.assetId);
+    final hasLocalAudio = audioAsset?.localPath != null &&
+        !audioAsset!.localPath!.startsWith('content://');
 
     return Container(
       margin: EdgeInsets.only(left: startOffset, top: 4.0, bottom: 4.0),
@@ -102,7 +105,7 @@ class AudioTrackItem extends StatelessWidget {
               ),
 
               // Real Local Audio indicator
-              if (audioTrack.filePath != null)
+              if (hasLocalAudio)
                 Positioned(
                   bottom: 2,
                   left: 14,

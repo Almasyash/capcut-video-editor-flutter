@@ -9,6 +9,8 @@ import 'package:capcut_video_editor/domain/models/audio_track.dart';
 import 'package:capcut_video_editor/domain/models/color_adjustments.dart';
 import 'package:capcut_video_editor/domain/models/editor_filter.dart';
 import 'package:capcut_video_editor/domain/models/export_settings.dart';
+import 'package:capcut_video_editor/core/services/device_media_service.dart';
+import 'package:capcut_video_editor/domain/models/media_asset.dart';
 import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
 import 'package:capcut_video_editor/domain/models/sticker_item.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
@@ -52,6 +54,7 @@ class EditorViewModel extends ChangeNotifier {
 
   // --- State Variables ---
 
+  List<MediaAsset> _mediaLibrary = [];
   List<VideoClip> _videoClips = [];
   List<OverlayClip> _overlayClips = [];
   List<StickerOverlay> _stickerOverlays = [];
@@ -94,6 +97,7 @@ class EditorViewModel extends ChangeNotifier {
 
   // --- Getters ---
 
+  List<MediaAsset> get mediaLibrary => List.unmodifiable(_mediaLibrary);
   List<VideoClip> get videoClips => List.unmodifiable(_videoClips);
   List<OverlayClip> get overlayClips => List.unmodifiable(_overlayClips);
   List<StickerOverlay> get stickerOverlays => List.unmodifiable(_stickerOverlays);
@@ -679,24 +683,93 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Centralized Media Library Operations ---
+
+  /// Checks if a media asset already exists in the library by comparing localPath or URI
+  bool containsMediaAsset(MediaAsset asset) {
+    return _mediaLibrary.any((existing) {
+      if (asset.localPath != null &&
+          asset.localPath!.isNotEmpty &&
+          existing.localPath != null &&
+          existing.localPath!.isNotEmpty) {
+        return existing.localPath == asset.localPath;
+      }
+      if (asset.uri != null &&
+          asset.uri!.isNotEmpty &&
+          existing.uri != null &&
+          existing.uri!.isNotEmpty) {
+        return existing.uri == asset.uri;
+      }
+      return false;
+    });
+  }
+
+  /// Adds a media asset to the central media library
+  void addMediaAsset(MediaAsset asset) {
+    if (containsMediaAsset(asset)) return;
+    _mediaLibrary.add(asset);
+    notifyListeners();
+  }
+
+  /// Removes an asset from the media library
+  void removeMediaAsset(String assetId) {
+    _mediaLibrary.removeWhere((asset) => asset.id == assetId);
+    notifyListeners();
+  }
+
+  /// Retrieves an asset by its unique identifier
+  MediaAsset? getAssetById(String assetId) {
+    try {
+      return _mediaLibrary.firstWhere((asset) => asset.id == assetId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Clears all assets in the media library
+  void clearMediaLibrary() {
+    _mediaLibrary.clear();
+    notifyListeners();
+  }
+
+  /// Imports a video or photo from device storage into the central Media Library
+  Future<bool> importVideoAsset() async {
+    final asset = await DeviceMediaService.pickMediaAsset(type: 'video');
+    if (asset == null) return false;
+    if (containsMediaAsset(asset)) return false;
+    _mediaLibrary.add(asset);
+    notifyListeners();
+    return true;
+  }
+
+  /// Imports an audio track from device storage into the central Media Library
+  Future<bool> importAudioAsset() async {
+    final asset = await DeviceMediaService.pickAudioAsset();
+    if (asset == null) return false;
+    if (containsMediaAsset(asset)) return false;
+    _mediaLibrary.add(asset);
+    notifyListeners();
+    return true;
+  }
+
   /// Add a clip selected from Media Picker Sheet
   void addNewClipFromMedia({
+    required String assetId,
     required String title,
     required Duration duration,
     required List<Color> gradient,
     IconData icon = Icons.videocam_rounded,
-    String? assetPath,
   }) {
     _saveSnapshot();
     final newClip = VideoClip(
-      id: 'clip_custom_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'clip_custom_${DateTime.now().microsecondsSinceEpoch}_${_videoClips.length}',
+      assetId: assetId,
       title: title,
       originalDuration: duration,
       trimStart: Duration.zero,
       trimEnd: duration,
       previewGradient: gradient,
       previewIcon: icon,
-      assetPath: assetPath,
     );
     _videoClips.add(newClip);
     _selectedClipIndex = _videoClips.length - 1;
@@ -805,23 +878,23 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   void replaceSelectedClip({
+    required String assetId,
     required String title,
     required Duration duration,
     required List<Color> gradient,
     IconData icon = Icons.movie_creation_outlined,
-    String? assetPath,
   }) {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
     final current = _videoClips[_selectedClipIndex!];
     _videoClips[_selectedClipIndex!] = current.copyWith(
+      assetId: assetId,
       title: title,
       originalDuration: duration,
       trimStart: Duration.zero,
       trimEnd: duration,
       previewGradient: gradient,
       previewIcon: icon,
-      assetPath: assetPath,
     );
     notifyListeners();
   }
