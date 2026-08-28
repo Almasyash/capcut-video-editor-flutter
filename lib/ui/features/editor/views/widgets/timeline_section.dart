@@ -108,13 +108,18 @@ class _TimelineSectionState extends State<TimelineSection> {
 
                           const SizedBox(height: 4),
 
-                          // Background Audio Track
-                          if (viewModel.audioTrack != null)
-                            AudioTrackItem(
-                              audioTrack: viewModel.audioTrack!,
-                              pixelsPerSecond: viewModel.pixelsPerSecond,
-                              viewModel: viewModel,
-                            ),
+                          // Background Audio Track(s)
+                          if (viewModel.audioTracks.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            ...viewModel.audioTracks.map((track) {
+                              return AudioTrackItem(
+                                key: ValueKey(track.id),
+                                audioTrack: track,
+                                pixelsPerSecond: viewModel.pixelsPerSecond,
+                                viewModel: viewModel,
+                              );
+                            }),
+                          ],
 
                           // Stickers Track
                           if (viewModel.stickerOverlays.isNotEmpty) ...[
@@ -197,18 +202,18 @@ class _TimelineSectionState extends State<TimelineSection> {
               text: 'PIP: ${TimeFormatter.formatSeconds(viewModel.selectedOverlay!.durationInSeconds)}',
               onClear: viewModel.clearSelection,
             )
-          else if (viewModel.isAudioSelected && viewModel.audioTrack != null)
+          else if (viewModel.isAudioSelected && viewModel.selectedAudioTrack != null)
             _buildSelectionBadge(
               icon: Icons.music_note_rounded,
               color: AppColors.secondary,
-              text: 'Audio: ${TimeFormatter.formatSeconds(viewModel.audioTrack!.durationInSeconds)}',
+              text: 'Audio: ${TimeFormatter.formatSeconds(viewModel.selectedAudioTrack!.durationInSeconds)}',
               onClear: viewModel.clearSelection,
             )
-          else if (viewModel.selectedTextId != null)
+          else if (viewModel.selectedTextId != null && viewModel.selectedTextOverlay != null)
             _buildSelectionBadge(
               icon: Icons.title_rounded,
               color: AppColors.accentPurple,
-              text: 'Text Layer Selected',
+              text: 'Text: "${viewModel.selectedTextOverlay!.text.length > 12 ? '${viewModel.selectedTextOverlay!.text.substring(0, 10)}...' : viewModel.selectedTextOverlay!.text}" (${TimeFormatter.formatSeconds(viewModel.selectedTextOverlay!.durationInSeconds)})',
               onClear: viewModel.clearSelection,
             )
           else if (viewModel.selectedStickerId != null)
@@ -277,10 +282,13 @@ class _TimelineSectionState extends State<TimelineSection> {
             final clip = entry.value;
             final isSelected = viewModel.selectedClipIndex == idx;
 
+            final asset = viewModel.getAssetById(clip.assetId);
             return TimelineClipItem(
               key: ValueKey(clip.id),
               clip: clip,
-              localPath: viewModel.getAssetById(clip.assetId)?.localPath,
+              localPath: asset?.localPath,
+              thumbnailPath: asset?.thumbnailPath,
+              isPhoto: asset?.isPhoto ?? false,
               index: idx,
               isSelected: isSelected,
               pixelsPerSecond: viewModel.pixelsPerSecond,

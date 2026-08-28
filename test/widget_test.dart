@@ -5,7 +5,6 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/action_tool
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/audio_track_item.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/adjust_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/audio_drawer.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/canvas_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/edit_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/effects_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/filters_drawer.dart';
@@ -28,7 +27,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Mahmas Studio'), findsOneWidget);
+    expect(find.text('Mahmas'), findsOneWidget);
     expect(find.byIcon(Icons.movie_filter_rounded), findsOneWidget);
   });
 
@@ -84,7 +83,7 @@ void main() {
     expect(find.textContaining('Midnight Beats'), findsOneWidget);
   });
 
-  testWidgets('All 8 Category Drawers render properly', (WidgetTester tester) async {
+  testWidgets('All 7 Category Drawers render properly', (WidgetTester tester) async {
     final viewModel = EditorViewModel();
 
     // 1. Edit Drawer
@@ -117,18 +116,13 @@ void main() {
     await tester.pump();
     expect(find.byType(FiltersDrawer), findsOneWidget);
 
-    // 7. Canvas Drawer
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: CanvasDrawer(viewModel: viewModel))));
-    await tester.pump();
-    expect(find.byType(CanvasDrawer), findsOneWidget);
-
-    // 8. Adjust Drawer
+    // 7. Adjust Drawer
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: AdjustDrawer(viewModel: viewModel))));
     await tester.pump();
     expect(find.byType(AdjustDrawer), findsOneWidget);
   });
 
-  testWidgets('MediaPickerSheet renders video, photo, canvas tabs and device upload button', (WidgetTester tester) async {
+  testWidgets('MediaPickerSheet renders video, photo tabs and device upload button', (WidgetTester tester) async {
     final viewModel = EditorViewModel();
 
     await tester.pumpWidget(
@@ -142,7 +136,7 @@ void main() {
 
     expect(find.text('Videos'), findsOneWidget);
     expect(find.text('Photos'), findsOneWidget);
-    expect(find.text('Canvases'), findsOneWidget);
+    expect(find.text('Canvases'), findsNothing);
     expect(find.text('Upload File from Device Storage'), findsOneWidget);
   });
 }

@@ -97,4 +97,38 @@ class StickerOverlay {
       rotation: rotation ?? this.rotation,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'presetId': preset.id,
+      'startTimeMs': startTime.inMilliseconds,
+      'durationMs': duration.inMilliseconds,
+      'posX': position.dx,
+      'posY': position.dy,
+      'scale': scale,
+      'rotation': rotation,
+    };
+  }
+
+  factory StickerOverlay.fromJson(Map<String, dynamic> json) {
+    final presetId = json['presetId'] as String? ?? 's_fire';
+    final preset = StickerPreset.catalog.firstWhere(
+      (p) => p.id == presetId,
+      orElse: () => StickerPreset.catalog.first,
+    );
+
+    return StickerOverlay(
+      id: json['id'] as String,
+      preset: preset,
+      startTime: Duration(milliseconds: (json['startTimeMs'] as num?)?.toInt() ?? 0),
+      duration: Duration(milliseconds: (json['durationMs'] as num?)?.toInt() ?? 3000),
+      position: Offset(
+        (json['posX'] as num?)?.toDouble() ?? 0.5,
+        (json['posY'] as num?)?.toDouble() ?? 0.5,
+      ),
+      scale: (json['scale'] as num?)?.toDouble() ?? 1.0,
+      rotation: (json['rotation'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
 }

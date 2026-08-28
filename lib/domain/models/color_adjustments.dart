@@ -65,4 +65,26 @@ class ColorAdjustments {
       0, 0, 0, 1, 0,
     ]);
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'brightness': brightness,
+      'contrast': contrast,
+      'saturation': saturation,
+      'exposure': exposure,
+      'temperature': temperature,
+      'vignette': vignette,
+    };
+  }
+
+  factory ColorAdjustments.fromJson(Map<String, dynamic> json) {
+    return ColorAdjustments(
+      brightness: (json['brightness'] as num?)?.toDouble() ?? 0.0,
+      contrast: (json['contrast'] as num?)?.toDouble() ?? 1.0,
+      saturation: (json['saturation'] as num?)?.toDouble() ?? 1.0,
+      exposure: (json['exposure'] as num?)?.toDouble() ?? 0.0,
+      temperature: (json['temperature'] as num?)?.toDouble() ?? 0.0,
+      vignette: (json['vignette'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
 }

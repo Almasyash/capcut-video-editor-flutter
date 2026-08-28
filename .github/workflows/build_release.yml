@@ -1,4 +1,4 @@
-name: Build & Release CapCut APK
+name: Build & Release Mahmas Studio APK
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK & Web
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
@@ -31,25 +31,22 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Ensure Android & Web platform scaffolding exists
-        run: flutter create . --platforms=android,web
-
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Run Tests
+      - name: Run Analysis
+        run: flutter analyze
+
+      - name: Run Unit & Widget Tests
         run: flutter test
 
       - name: Build Android APK
         run: flutter build apk --release
 
-      - name: Build Web
-        run: flutter build web --release
-
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: capcut-app-release.apk
+          name: mahmas-studio-app-release.apk
           path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Create GitHub Release

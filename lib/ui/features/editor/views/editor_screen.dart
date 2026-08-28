@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
+import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/action_toolbar.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/bottom_tool_selector.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/adjust_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/audio_drawer.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/canvas_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/edit_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/effects_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/filters_drawer.dart';
@@ -24,23 +24,37 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_previ
 /// 4. Interactive Multi-Track Timeline Track at bottom
 /// 5. Signature Category Selector / Active Category Drawer Panels
 class EditorScreen extends StatefulWidget {
-  const EditorScreen({super.key});
+  final Project? initialProject;
+
+  const EditorScreen({super.key, this.initialProject});
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> {
+class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver {
   late final EditorViewModel _viewModel;
 
   @override
   void initState() {
     super.initState();
-    _viewModel = EditorViewModel();
+    WidgetsBinding.instance.addObserver(this);
+    _viewModel = EditorViewModel(initialProject: widget.initialProject);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden) {
+      _viewModel.saveCurrentProject();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _viewModel.saveCurrentProject();
     _viewModel.dispose();
     super.dispose();
   }
@@ -59,8 +73,6 @@ class _EditorScreenState extends State<EditorScreen> {
         return EffectsDrawer(viewModel: _viewModel);
       case EditorCategory.filters:
         return FiltersDrawer(viewModel: _viewModel);
-      case EditorCategory.canvas:
-        return CanvasDrawer(viewModel: _viewModel);
       case EditorCategory.adjust:
         return AdjustDrawer(viewModel: _viewModel);
     }

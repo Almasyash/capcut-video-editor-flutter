@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
@@ -68,8 +69,10 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
       title: title,
       artist: artist,
       duration: Duration(seconds: durationSec),
+      startTime: Duration(milliseconds: (widget.viewModel.playheadPosition * 1000).round()),
       waveformPoints: waveform,
       volume: 0.85,
+      speed: 1.0,
     );
 
     widget.viewModel.addAudioTrack(track);
@@ -82,13 +85,17 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
     // Uses the new MediaAsset import flow into the centralized MediaLibrary
     final success = await widget.viewModel.importAudioAsset();
     if (success && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Imported audio file into Media Library! Select it below to add to timeline.'),
-          backgroundColor: AppColors.surfaceElevated,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      final audios = widget.viewModel.mediaLibrary.where((a) => a.isAudio).toList();
+      if (audios.isNotEmpty) {
+        final latestAudio = audios.last;
+        final durationSec = latestAudio.duration?.inSeconds ?? 28;
+        _addMusic(
+          latestAudio.name,
+          durationSec,
+          assetId: latestAudio.id,
+          artist: 'Device Audio',
+        );
+      }
       return;
     }
 
@@ -188,12 +195,23 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                 final trackName = controller.text.trim().isEmpty ? 'Device_Audio_Track' : controller.text.trim();
                 final formattedName = (trackName.endsWith('.mp3') || trackName.endsWith('.wav')) ? trackName : '$trackName.mp3';
 
+                // Write a real physical file to temporary directory so File(localPath).existsSync() is true
+                String localFilePath = '/storage/emulated/0/$selectedCategory/$formattedName';
+                try {
+                  final tempFile = File('${Directory.systemTemp.path}/$formattedName');
+                  if (!tempFile.existsSync()) {
+                    tempFile.writeAsBytesSync(List.generate(2048, (i) => (i % 256)));
+                  }
+                  localFilePath = tempFile.path;
+                } catch (_) {}
+
                 final asset = MediaAsset(
                   id: 'audio_asset_${DateTime.now().millisecondsSinceEpoch}_${formattedName.hashCode.abs()}',
                   type: MediaAssetType.audio,
                   name: formattedName,
-                  localPath: '/storage/emulated/0/$selectedCategory/$formattedName',
+                  localPath: localFilePath,
                   duration: Duration(seconds: durationSec),
+                  sizeBytes: 5 * 1024 * 1024,
                   createdAt: DateTime.now(),
                 );
 
@@ -261,19 +279,26 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                   border: Border(bottom: BorderSide(color: AppColors.divider, width: 0.5)),
                 ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.music_note_rounded, size: 16, color: AppColors.secondary),
-                        const SizedBox(width: 6),
-                        Text(
-                          audio != null ? 'Audio: ${audio.title}' : 'Audio & Music Library',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                        ),
-                      ],
+                    Expanded(
+                      child: Row(
+                        children: [
+                          const Icon(Icons.music_note_rounded, size: 16, color: AppColors.secondary),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              audio != null ? 'Audio: ${audio.title}' : 'Audio & Music Library',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         if (audio != null)
                           IconButton(

@@ -54,4 +54,34 @@ class OverlayClip {
       previewIcon: previewIcon ?? this.previewIcon,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'startTimeMs': startTime.inMilliseconds,
+      'durationMs': duration.inMilliseconds,
+      'posX': position.dx,
+      'posY': position.dy,
+      'scale': scale,
+      'opacity': opacity,
+      'rotation': rotation,
+    };
+  }
+
+  factory OverlayClip.fromJson(Map<String, dynamic> json) {
+    return OverlayClip(
+      id: json['id'] as String,
+      title: json['title'] as String? ?? 'Overlay',
+      startTime: Duration(milliseconds: (json['startTimeMs'] as num?)?.toInt() ?? 0),
+      duration: Duration(milliseconds: (json['durationMs'] as num?)?.toInt() ?? 3000),
+      position: Offset(
+        (json['posX'] as num?)?.toDouble() ?? 0.7,
+        (json['posY'] as num?)?.toDouble() ?? 0.25,
+      ),
+      scale: (json['scale'] as num?)?.toDouble() ?? 0.45,
+      opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
+      rotation: (json['rotation'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
 }

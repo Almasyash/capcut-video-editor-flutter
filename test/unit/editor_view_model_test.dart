@@ -8,11 +8,16 @@ import 'package:capcut_video_editor/domain/models/color_adjustments.dart';
 import 'package:capcut_video_editor/domain/models/editor_filter.dart';
 import 'package:capcut_video_editor/domain/models/media_asset.dart';
 import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
+import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/domain/models/sticker_item.dart';
+import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
+import 'package:capcut_video_editor/core/services/project_storage_service.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('EditorViewModel State & Actions Test', () {
     late EditorViewModel viewModel;
 
@@ -719,6 +724,1018 @@ void main() {
 
         final resolvedAudioPath = viewModel.getAssetById(viewModel.audioTrack!.assetId)?.localPath;
         expect(resolvedAudioPath, equals('/storage/emulated/0/Music/Playback_Soundtrack.mp3'));
+      });
+    });
+
+    group('Gallery Video Resolution & Playback Verification (Tests A, B, C, D)', () {
+      test('Test A — Gallery video: imported, MediaAsset created, duration detected, thumbnail created, Timeline clip resolves', () {
+        final sampleVideoAsset = MediaAsset(
+          id: 'gallery_asset_mp4_1',
+          type: MediaAssetType.video,
+          name: 'VID_873687.mp4',
+          uri: 'content://media/external/video/media/873687',
+          localPath: '/data/user/0/com.example.capcut_video_editor/cache/VID_873687.mp4',
+          thumbnailPath: '/data/user/0/com.example.capcut_video_editor/cache/VID_873687_thumb.jpg',
+          duration: const Duration(seconds: 12),
+          sizeBytes: 15 * 1024 * 1024,
+          createdAt: DateTime.now(),
+        );
+
+        viewModel.addMediaAsset(sampleVideoAsset);
+        expect(viewModel.mediaLibrary.length, equals(1));
+        expect(viewModel.mediaLibrary.first.duration, equals(const Duration(seconds: 12)));
+        expect(viewModel.mediaLibrary.first.thumbnailPath, isNotNull);
+
+        viewModel.addNewClipFromMedia(
+          assetId: sampleVideoAsset.id,
+          title: sampleVideoAsset.name,
+          duration: sampleVideoAsset.duration ?? const Duration(seconds: 8),
+          gradient: const [Colors.teal, Colors.blue],
+        );
+
+        final activeClip = viewModel.videoClips.last;
+        expect(activeClip.title, equals('VID_873687.mp4'));
+        expect(activeClip.durationInSeconds, equals(12.0));
+
+        final resolvedAsset = viewModel.getAssetById(activeClip.assetId);
+        expect(resolvedAsset, isNotNull);
+        expect(resolvedAsset!.localPath, equals('/data/user/0/com.example.capcut_video_editor/cache/VID_873687.mp4'));
+        expect(resolvedAsset.thumbnailPath, equals('/data/user/0/com.example.capcut_video_editor/cache/VID_873687_thumb.jpg'));
+        expect(resolvedAsset.duration, equals(const Duration(seconds: 12)));
+      });
+
+      test('Test B — Different video: second video with different duration resolves independently without stale previous data', () {
+        final video1 = MediaAsset(
+          id: 'gallery_vid_1',
+          type: MediaAssetType.video,
+          name: 'Vlog_Day1.mp4',
+          localPath: '/data/user/0/cache/Vlog_Day1.mp4',
+          thumbnailPath: '/data/user/0/cache/Vlog_Day1_thumb.jpg',
+          duration: const Duration(seconds: 15),
+          createdAt: DateTime.now(),
+        );
+
+        final video2 = MediaAsset(
+          id: 'gallery_vid_2',
+          type: MediaAssetType.video,
+          name: 'Drone_Shot.mp4',
+          localPath: '/data/user/0/cache/Drone_Shot.mp4',
+          thumbnailPath: '/data/user/0/cache/Drone_Shot_thumb.jpg',
+          duration: const Duration(seconds: 45),
+          createdAt: DateTime.now(),
+        );
+
+        viewModel.addMediaAsset(video1);
+        viewModel.addMediaAsset(video2);
+
+        viewModel.addNewClipFromMedia(
+          assetId: video1.id,
+          title: video1.name,
+          duration: video1.duration!,
+          gradient: const [Colors.red, Colors.orange],
+        );
+        final clip1 = viewModel.videoClips.last;
+
+        viewModel.addNewClipFromMedia(
+          assetId: video2.id,
+          title: video2.name,
+          duration: video2.duration!,
+          gradient: const [Colors.purple, Colors.blue],
+        );
+        final clip2 = viewModel.videoClips.last;
+
+        expect(clip1.durationInSeconds, equals(15.0));
+        expect(clip2.durationInSeconds, equals(45.0));
+        expect(viewModel.getAssetById(clip1.assetId)?.localPath, equals('/data/user/0/cache/Vlog_Day1.mp4'));
+        expect(viewModel.getAssetById(clip2.assetId)?.localPath, equals('/data/user/0/cache/Drone_Shot.mp4'));
+      });
+
+      test('Test C — App restart / persistence: MediaAsset serialized and restored preserves playable source', () {
+        final originalAsset = MediaAsset(
+          id: 'persisted_vid_99',
+          type: MediaAssetType.video,
+          name: 'Cinema_Reel.mp4',
+          uri: 'content://media/external/video/media/99',
+          localPath: '/data/user/0/cache/Cinema_Reel.mp4',
+          thumbnailPath: '/data/user/0/cache/Cinema_Reel_thumb.jpg',
+          duration: const Duration(seconds: 30),
+          sizeBytes: 25 * 1024 * 1024,
+          createdAt: DateTime.now(),
+        );
+
+        final json = originalAsset.toJson();
+        final restoredAsset = MediaAsset.fromJson(json);
+
+        expect(restoredAsset.id, equals(originalAsset.id));
+        expect(restoredAsset.localPath, equals(originalAsset.localPath));
+        expect(restoredAsset.thumbnailPath, equals(originalAsset.thumbnailPath));
+        expect(restoredAsset.duration, equals(originalAsset.duration));
+
+        viewModel.addMediaAsset(restoredAsset);
+        final fetched = viewModel.getAssetById(restoredAsset.id);
+        expect(fetched?.localPath, equals('/data/user/0/cache/Cinema_Reel.mp4'));
+      });
+
+      test('Test D — Invalid/missing file: missing assetId or non-existent path handles gracefully without crash', () {
+        const ghostClip = VideoClip(
+          id: 'clip_ghost_999',
+          assetId: 'non_existent_asset_id',
+          title: 'Ghost Clip',
+          originalDuration: Duration(seconds: 5),
+          trimStart: Duration.zero,
+          trimEnd: Duration(seconds: 5),
+          previewGradient: [Colors.grey, Colors.black],
+          previewIcon: Icons.broken_image,
+        );
+
+        expect(viewModel.getAssetById(ghostClip.assetId), isNull);
+        expect(viewModel.getAssetById(ghostClip.assetId)?.localPath, isNull);
+        expect(viewModel.getAssetById(ghostClip.assetId)?.thumbnailPath, isNull);
+      });
+    });
+
+    group('Separate Audio Import & Timeline Playback Suite', () {
+      test('1. Audio file imported -> MediaAsset created with correct duration and localPath', () {
+        final audioAsset = MediaAsset(
+          id: 'audio_import_101',
+          type: MediaAssetType.audio,
+          name: 'Beat_Drop.mp3',
+          localPath: '/data/user/0/files/media/Beat_Drop.mp3',
+          duration: const Duration(seconds: 42),
+          sizeBytes: 3 * 1024 * 1024,
+          createdAt: DateTime.now(),
+        );
+
+        viewModel.addMediaAsset(audioAsset);
+        expect(viewModel.mediaLibrary.contains(audioAsset), isTrue);
+
+        final track = AudioTrack(
+          id: 'timeline_audio_1',
+          assetId: audioAsset.id,
+          title: audioAsset.name,
+          artist: 'Device Audio',
+          duration: audioAsset.duration!,
+          volume: 0.8,
+          waveformPoints: const [0.2, 0.5, 0.8, 0.4],
+        );
+        viewModel.addAudioTrack(track);
+
+        expect(viewModel.audioTrack, isNotNull);
+        expect(viewModel.audioTrack?.assetId, equals('audio_import_101'));
+        expect(viewModel.audioTrack?.title, equals('Beat_Drop.mp3'));
+        expect(viewModel.audioTrack?.durationInSeconds, equals(42.0));
+      });
+
+      test('2. Audio track volume and trimming operate independently of video clips', () {
+        final audioAsset = MediaAsset(
+          id: 'audio_import_102',
+          type: MediaAssetType.audio,
+          name: 'Chill_Vibes.mp3',
+          localPath: '/data/user/0/files/media/Chill_Vibes.mp3',
+          duration: const Duration(seconds: 60),
+          createdAt: DateTime.now(),
+        );
+        viewModel.addMediaAsset(audioAsset);
+
+        final track = AudioTrack(
+          id: 'timeline_audio_2',
+          assetId: audioAsset.id,
+          title: audioAsset.name,
+          duration: const Duration(seconds: 60),
+          volume: 1.0,
+          waveformPoints: const [0.3, 0.6],
+        );
+        viewModel.addAudioTrack(track);
+
+        viewModel.setAudioTrackVolume(0.45);
+        expect(viewModel.audioTrack?.volume, equals(0.45));
+
+        viewModel.updateAudioTrackTiming(const Duration(seconds: 5), const Duration(seconds: 30));
+        expect(viewModel.audioTrack?.startTimeInSeconds, equals(5.0));
+        expect(viewModel.audioTrack?.durationInSeconds, equals(30.0));
+      });
+
+      test('3. Removing audio track clears state and disposes session cleanly', () {
+        expect(viewModel.audioTrack, isNotNull);
+        viewModel.removeAudioTrack();
+        expect(viewModel.audioTrack, isNull);
+        expect(viewModel.isAudioSelected, isFalse);
+      });
+    });
+
+    group('Separate Text Overlay Suite', () {
+      late TextOverlay sampleText;
+
+      setUp(() {
+        sampleText = const TextOverlay(
+          id: 'text_custom_1',
+          text: '⚡ Exclusive BTS Footage',
+          startTime: Duration(milliseconds: 3500),
+          duration: Duration(seconds: 5),
+          textColor: Colors.amber,
+          fontSize: 26.0,
+          position: Offset(0.5, 0.4),
+        );
+        viewModel.addTextOverlay(sampleText);
+      });
+
+      test('1. User enters custom text -> TextOverlay created with custom styling and playhead start time', () {
+        expect(viewModel.textOverlays.any((t) => t.id == 'text_custom_1'), isTrue);
+        expect(viewModel.selectedTextId, equals('text_custom_1'));
+
+        final retrieved = viewModel.textOverlays.firstWhere((t) => t.id == 'text_custom_1');
+        expect(retrieved.text, equals('⚡ Exclusive BTS Footage'));
+        expect(retrieved.startTimeInSeconds, equals(3.5));
+        expect(retrieved.durationInSeconds, equals(5.0));
+        expect(retrieved.color, equals(Colors.amber));
+        expect(retrieved.fontSize, equals(26.0));
+      });
+
+      test('2. activeTextOverlaysAtPlayhead correctly reflects visibility over time range', () {
+        // Text is from 3.5s to 8.5s
+        viewModel.seekTo(1.0);
+        expect(viewModel.activeTextOverlaysAtPlayhead.any((t) => t.id == 'text_custom_1'), isFalse);
+
+        viewModel.seekTo(3.5);
+        expect(viewModel.activeTextOverlaysAtPlayhead.any((t) => t.id == 'text_custom_1'), isTrue);
+
+        viewModel.seekTo(6.0);
+        expect(viewModel.activeTextOverlaysAtPlayhead.any((t) => t.id == 'text_custom_1'), isTrue);
+
+        viewModel.seekTo(9.0);
+        expect(viewModel.activeTextOverlaysAtPlayhead.any((t) => t.id == 'text_custom_1'), isFalse);
+      });
+
+      test('3. Dragging/repositioning text updates position offset in state', () {
+        viewModel.updateTextPosition('text_custom_1', const Offset(0.7, 0.3));
+        final updated = viewModel.textOverlays.firstWhere((t) => t.id == 'text_custom_1');
+        expect(updated.position, equals(const Offset(0.7, 0.3)));
+      });
+
+      test('4. Editing and deleting text overlay updates state and removes cleanly', () {
+        final existing = viewModel.textOverlays.firstWhere((t) => t.id == 'text_custom_1');
+        viewModel.updateTextOverlay(existing.copyWith(text: 'Updated Title'));
+        expect(viewModel.textOverlays.firstWhere((t) => t.id == 'text_custom_1').text, equals('Updated Title'));
+
+        viewModel.removeTextOverlay('text_custom_1');
+        expect(viewModel.textOverlays.any((t) => t.id == 'text_custom_1'), isFalse);
+        expect(viewModel.selectedTextId, isNull);
+      });
+    });
+
+    group('Project & Draft Persistence Suite', () {
+      test('1. Project model serializes to JSON and deserializes with complete fidelity', () {
+        final project = Project(
+          id: 'proj_persistence_test_1',
+          name: 'Vlog Edit Reel',
+          createdAt: DateTime(2026, 8, 28, 12, 0),
+          updatedAt: DateTime(2026, 8, 28, 12, 30),
+          aspectRatio: AspectRatioPreset.ratio9x16,
+          videoClips: const [
+            VideoClip(
+              id: 'clip_p1',
+              assetId: 'asset_vid_p1',
+              title: 'Drone Intro.mp4',
+              originalDuration: Duration(seconds: 15),
+              trimStart: Duration.zero,
+              trimEnd: Duration(seconds: 15),
+              previewGradient: [Colors.blue, Colors.cyan],
+            ),
+          ],
+          audioTracks: const [
+            AudioTrack(
+              id: 'audio_p1',
+              assetId: 'asset_aud_p1',
+              title: 'Beat.mp3',
+              duration: Duration(seconds: 25),
+              waveformPoints: [0.2, 0.6, 0.4],
+            ),
+          ],
+          textOverlays: const [
+            TextOverlay(
+              id: 'text_p1',
+              text: 'Welcome to Dubai',
+              startTime: Duration(seconds: 1),
+              duration: Duration(seconds: 4),
+            ),
+          ],
+        );
+
+        final json = project.toJson();
+        final restored = Project.fromJson(json);
+
+        expect(restored.id, equals(project.id));
+        expect(restored.name, equals('Vlog Edit Reel'));
+        expect(restored.videoClips.length, equals(1));
+        expect(restored.videoClips.first.title, equals('Drone Intro.mp4'));
+        expect(restored.audioTrack?.title, equals('Beat.mp3'));
+        expect(restored.textOverlays.length, equals(1));
+        expect(restored.textOverlays.first.text, equals('Welcome to Dubai'));
+      });
+
+      test('2. ProjectStorageService saves and retrieves drafts', () async {
+        final project = await ProjectStorageService.instance.createNewProject(name: 'AutoSaved Draft');
+        expect(project.id, startsWith('proj_'));
+
+        final fetched = await ProjectStorageService.instance.getProjectById(project.id);
+        expect(fetched, isNotNull);
+        expect(fetched?.name, equals('AutoSaved Draft'));
+
+        final all = await ProjectStorageService.instance.getAllProjects();
+        expect(all.any((p) => p.id == project.id), isTrue);
+
+        await ProjectStorageService.instance.deleteProject(project.id);
+        final afterDelete = await ProjectStorageService.instance.getProjectById(project.id);
+        expect(afterDelete, isNull);
+      });
+
+      test('3. EditorViewModel loads existing project and retains full timeline state', () {
+        final project = Project(
+          id: 'proj_load_test',
+          name: 'Restored Reel',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          aspectRatio: AspectRatioPreset.ratio16x9,
+          videoClips: const [
+            VideoClip(
+              id: 'c_restored',
+              assetId: 'a_restored',
+              title: 'Reel Clip',
+              originalDuration: Duration(seconds: 20),
+              trimStart: Duration(seconds: 2),
+              trimEnd: Duration(seconds: 18),
+              previewGradient: [Colors.purple, Colors.pink],
+            ),
+          ],
+        );
+
+        final freshViewModel = EditorViewModel(initialProject: project);
+        expect(freshViewModel.currentProject.id, equals('proj_load_test'));
+        expect(freshViewModel.aspectRatio, equals(AspectRatioPreset.ratio16x9));
+        expect(freshViewModel.videoClips.length, equals(1));
+        expect(freshViewModel.videoClips.first.title, equals('Reel Clip'));
+        expect(freshViewModel.videoClips.first.durationInSeconds, equals(16.0));
+      });
+
+      test('4. Missing media on disk does not crash ViewModel', () {
+        final missingMediaProject = Project(
+          id: 'proj_missing_media',
+          name: 'Missing Media Project',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          videoClips: const [
+            VideoClip(
+              id: 'c_ghost',
+              assetId: 'ghost_asset_404',
+              title: 'Deleted_On_Storage.mp4',
+              originalDuration: Duration(seconds: 10),
+              trimStart: Duration.zero,
+              trimEnd: Duration(seconds: 10),
+              previewGradient: [Colors.grey, Colors.black],
+            ),
+          ],
+        );
+
+        final freshViewModel = EditorViewModel(initialProject: missingMediaProject);
+        expect(freshViewModel.videoClips.length, equals(1));
+        expect(freshViewModel.getAssetById('ghost_asset_404'), isNull);
+        expect(freshViewModel.getAssetById('ghost_asset_404')?.localPath, isNull);
+      });
+    });
+
+    group('9. Local Audio Editing Controls (Trim, Split, Duplicate, Speed, Volume, Delete, Multi-track)', () {
+      late EditorViewModel viewModel;
+
+      setUp(() {
+        viewModel = EditorViewModel();
+        // Clear default tracks for controlled test isolation
+        while (viewModel.audioTracks.isNotEmpty) {
+          viewModel.removeAudioTrack(viewModel.audioTracks.first.id);
+        }
+      });
+
+      test('1. Audio Selection State: Selecting audio isolates selection and deselects video/text', () {
+        const track1 = AudioTrack(
+          id: 'audio_test_1',
+          assetId: 'asset_test_1',
+          title: 'Cinematic_Beat.mp3',
+          duration: Duration(seconds: 30),
+        );
+        viewModel.addAudioTrack(track1);
+
+        expect(viewModel.audioTracks.length, equals(1));
+        expect(viewModel.isAudioSelected, isTrue);
+        expect(viewModel.selectedAudioTrackId, equals('audio_test_1'));
+        expect(viewModel.selectedAudioTrack?.title, equals('Cinematic_Beat.mp3'));
+        expect(viewModel.selectedClip, isNull);
+        expect(viewModel.selectedTextId, isNull);
+
+        // Select a video clip -> audio should deselect
+        if (viewModel.videoClips.isNotEmpty) {
+          viewModel.selectClip(0);
+          expect(viewModel.selectedClip, isNotNull);
+          expect(viewModel.isAudioSelected, isFalse);
+          expect(viewModel.selectedAudioTrackId, isNull);
+        }
+
+        // Reselect audio
+        viewModel.selectAudioTrack('audio_test_1');
+        expect(viewModel.isAudioSelected, isTrue);
+        expect(viewModel.selectedClip, isNull);
+      });
+
+      test('2. Audio Trimming: Non-destructive Trim Left and Trim Right update trim boundaries', () {
+        const track = AudioTrack(
+          id: 'audio_trim_test',
+          assetId: 'asset_trim_1',
+          title: 'Upbeat_Vlog.mp3',
+          duration: Duration(seconds: 40),
+          trimStart: Duration.zero,
+          trimEnd: Duration(seconds: 40),
+          startTime: Duration.zero,
+        );
+        viewModel.addAudioTrack(track);
+        viewModel.selectAudioTrack('audio_trim_test');
+
+        // Move playhead to 10.0s and Trim Left
+        viewModel.seekTo(10.0);
+        final trimmedLeft = viewModel.trimAudioLeftToPlayhead();
+        expect(trimmedLeft, isTrue);
+        expect(viewModel.selectedAudioTrack!.startTimeInSeconds, equals(10.0));
+        expect(viewModel.selectedAudioTrack!.trimStart.inSeconds, equals(10));
+        expect(viewModel.selectedAudioTrack!.durationInSeconds, equals(30.0));
+
+        // Move playhead to 30.0s and Trim Right
+        viewModel.seekTo(30.0);
+        final trimmedRight = viewModel.trimAudioRightToPlayhead();
+        expect(trimmedRight, isTrue);
+        expect(viewModel.selectedAudioTrack!.trimEnd!.inSeconds, equals(30));
+        expect(viewModel.selectedAudioTrack!.durationInSeconds, equals(20.0));
+      });
+
+      test('3. Audio Split: Splits audio at playhead into Part 1 and Part 2 sharing assetId', () {
+        const track = AudioTrack(
+          id: 'audio_split_test',
+          assetId: 'asset_split_1',
+          title: 'Background_Ambience.mp3',
+          duration: Duration(seconds: 60),
+          startTime: Duration.zero,
+        );
+        viewModel.addAudioTrack(track);
+        viewModel.selectAudioTrack('audio_split_test');
+
+        viewModel.seekTo(25.0);
+        final splitSuccess = viewModel.splitAudioAtPlayhead();
+        expect(splitSuccess, isTrue);
+        expect(viewModel.audioTracks.length, equals(2));
+
+        final partA = viewModel.audioTracks[0];
+        final partB = viewModel.audioTracks[1];
+
+        expect(partA.title, contains('Part 1'));
+        expect(partA.assetId, equals('asset_split_1'));
+        expect(partA.trimEnd!.inSeconds, equals(25));
+        expect(partA.durationInSeconds, equals(25.0));
+
+        expect(partB.title, contains('Part 2'));
+        expect(partB.assetId, equals('asset_split_1'));
+        expect(partB.startTimeInSeconds, equals(25.0));
+        expect(partB.trimStart.inSeconds, equals(25));
+        expect(partB.durationInSeconds, equals(35.0));
+      });
+
+      test('4. Audio Duplicate: Creates independent instance starting at original track end', () {
+        const track = AudioTrack(
+          id: 'audio_dup_test',
+          assetId: 'asset_dup_1',
+          title: 'HipHop_Loop.mp3',
+          duration: Duration(seconds: 15),
+          startTime: Duration.zero,
+        );
+        viewModel.addAudioTrack(track);
+        viewModel.selectAudioTrack('audio_dup_test');
+
+        final duplicate = viewModel.duplicateSelectedAudioTrack();
+        expect(duplicate, isNotNull);
+        expect(viewModel.audioTracks.length, equals(2));
+        expect(duplicate!.assetId, equals('asset_dup_1'));
+        expect(duplicate.startTimeInSeconds, equals(15.0));
+        expect(duplicate.title, contains('Copy'));
+        expect(duplicate.id, isNot(equals('audio_dup_test')));
+      });
+
+      test('5. Audio Speed Control: Changes speed and accurately scales effectiveDuration', () {
+        const track = AudioTrack(
+          id: 'audio_speed_test',
+          assetId: 'asset_speed_1',
+          title: 'Podcast_Track.mp3',
+          duration: Duration(seconds: 20),
+          startTime: Duration.zero,
+          speed: 1.0,
+        );
+        viewModel.addAudioTrack(track);
+
+        // 1.0x -> duration = 20s
+        expect(viewModel.audioTracks.first.durationInSeconds, equals(20.0));
+
+        // 2.0x -> duration = 10s
+        viewModel.updateAudioSpeed('audio_speed_test', 2.0);
+        expect(viewModel.audioTracks.first.speed, equals(2.0));
+        expect(viewModel.audioTracks.first.durationInSeconds, equals(10.0));
+
+        // 0.5x -> duration = 40s
+        viewModel.updateAudioSpeed('audio_speed_test', 0.5);
+        expect(viewModel.audioTracks.first.speed, equals(0.5));
+        expect(viewModel.audioTracks.first.durationInSeconds, equals(40.0));
+      });
+
+      test('6. Audio Volume & Mute: Per-track volume adjustment and mute toggle', () {
+        const track = AudioTrack(
+          id: 'audio_vol_test',
+          assetId: 'asset_vol_1',
+          title: 'Voiceover.mp3',
+          duration: Duration(seconds: 10),
+          volume: 0.8,
+          isMuted: false,
+        );
+        viewModel.addAudioTrack(track);
+
+        viewModel.updateAudioVolume('audio_vol_test', 0.45);
+        expect(viewModel.audioTracks.first.volume, closeTo(0.45, 0.001));
+        expect(viewModel.audioTracks.first.isMuted, isFalse);
+
+        viewModel.toggleAudioMute('audio_vol_test');
+        expect(viewModel.audioTracks.first.isMuted, isTrue);
+
+        viewModel.toggleAudioMute('audio_vol_test');
+        expect(viewModel.audioTracks.first.isMuted, isFalse);
+      });
+
+      test('7. Audio Delete: Removes track, cleans up selection and stops playback', () {
+        const track = AudioTrack(
+          id: 'audio_del_test',
+          assetId: 'asset_del_1',
+          title: 'To_Be_Deleted.mp3',
+          duration: Duration(seconds: 12),
+        );
+        viewModel.addAudioTrack(track);
+        viewModel.selectAudioTrack('audio_del_test');
+        expect(viewModel.isAudioSelected, isTrue);
+
+        viewModel.deleteSelectedAudioTrack();
+        expect(viewModel.audioTracks, isEmpty);
+        expect(viewModel.selectedAudioTrackId, isNull);
+        expect(viewModel.isAudioSelected, isFalse);
+      });
+
+      test('8. Multi-track Audio & Project Persistence: Preserves all audio tracks and metadata', () {
+        final project = Project(
+          id: 'proj_multi_audio',
+          name: 'Multi-Track Music Video',
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          audioTracks: const [
+            AudioTrack(
+              id: 'track_bgm',
+              assetId: 'asset_bgm_1',
+              title: 'Main_Theme.mp3',
+              duration: Duration(seconds: 60),
+              trimStart: Duration(seconds: 5),
+              trimEnd: Duration(seconds: 55),
+              startTime: Duration.zero,
+              volume: 0.7,
+              speed: 1.0,
+            ),
+            AudioTrack(
+              id: 'track_sfx',
+              assetId: 'asset_sfx_1',
+              title: 'Explosion_FX.mp3',
+              duration: Duration(seconds: 4),
+              startTime: Duration(seconds: 12),
+              volume: 1.0,
+              speed: 1.5,
+              isMuted: false,
+            ),
+          ],
+        );
+
+        final json = project.toJson();
+        final restored = Project.fromJson(json);
+
+        expect(restored.audioTracks.length, equals(2));
+        expect(restored.audioTracks[0].title, equals('Main_Theme.mp3'));
+        expect(restored.audioTracks[0].trimStart.inSeconds, equals(5));
+        expect(restored.audioTracks[0].trimEnd!.inSeconds, equals(55));
+        expect(restored.audioTracks[0].volume, closeTo(0.7, 0.01));
+
+        expect(restored.audioTracks[1].title, equals('Explosion_FX.mp3'));
+        expect(restored.audioTracks[1].startTime.inSeconds, equals(12));
+        expect(restored.audioTracks[1].speed, equals(1.5));
+        expect(restored.audioTracks[1].durationInSeconds, closeTo(4.0 / 1.5, 0.005));
+      });
+    });
+
+    group('Text Layer Editing Controls & Audio Auto-Play Prevention Tests', () {
+      test('1. Text Layer Selection & Isolation: Selecting text isolates selection from audio/video/overlay', () {
+        final viewModel = EditorViewModel();
+        const text = TextOverlay(
+          id: 'text_sel_test',
+          text: 'Super Intro',
+          startTime: Duration(seconds: 1),
+          duration: Duration(seconds: 5),
+          textColor: Colors.amber,
+          fontSize: 24,
+        );
+        viewModel.addTextOverlay(text);
+        expect(viewModel.selectedTextId, equals('text_sel_test'));
+        expect(viewModel.isTextSelected, isTrue);
+        expect(viewModel.selectedClipIndex, isNull);
+        expect(viewModel.selectedOverlayIndex, isNull);
+        expect(viewModel.selectedAudioTrackId, isNull);
+        expect(viewModel.isAudioSelected, isFalse);
+
+        // Deselect text
+        viewModel.deselectText();
+        expect(viewModel.selectedTextId, isNull);
+        expect(viewModel.isTextSelected, isFalse);
+      });
+
+      test('2. Text Layer Trim Left: Non-destructively moves startTime and advances trimStart', () {
+        final viewModel = EditorViewModel();
+        const text = TextOverlay(
+          id: 'text_trim_left_test',
+          text: 'Vlog Chapter 1',
+          startTime: Duration(seconds: 2),
+          duration: Duration(seconds: 6),
+          speed: 1.0,
+        );
+        viewModel.addTextOverlay(text);
+        viewModel.selectText(text.id);
+
+        // Position playhead inside text range at 4.0s (2s past start)
+        viewModel.seekTo(4.0);
+        final trimmed = viewModel.trimTextLeftToPlayhead();
+        expect(trimmed, isTrue);
+
+        final updated = viewModel.selectedTextOverlay!;
+        expect(updated.startTimeInSeconds, closeTo(4.0, 0.01));
+        expect(updated.trimStartInSeconds, closeTo(2.0, 0.01));
+        expect(updated.durationInSeconds, closeTo(4.0, 0.01));
+      });
+
+      test('3. Text Layer Trim Right: Non-destructively truncates trimEnd', () {
+        final viewModel = EditorViewModel();
+        const text = TextOverlay(
+          id: 'text_trim_right_test',
+          text: 'Subscribe Now',
+          startTime: Duration(seconds: 1),
+          duration: Duration(seconds: 8),
+          speed: 1.0,
+        );
+        viewModel.addTextOverlay(text);
+        viewModel.selectText(text.id);
+
+        // Position playhead inside text range at 5.0s (4s duration from start)
+        viewModel.seekTo(5.0);
+        final trimmed = viewModel.trimTextRightToPlayhead();
+        expect(trimmed, isTrue);
+
+        final updated = viewModel.selectedTextOverlay!;
+        expect(updated.startTimeInSeconds, closeTo(1.0, 0.01));
+        expect(updated.trimEndInSeconds, closeTo(4.0, 0.01));
+        expect(updated.durationInSeconds, closeTo(4.0, 0.01));
+      });
+
+      test('4. Text Layer Split: Splits into two independent TextOverlays at playhead', () {
+        final viewModel = EditorViewModel();
+        const text = TextOverlay(
+          id: 'text_split_test',
+          text: 'Split Subtitle Text',
+          startTime: Duration(seconds: 2),
+          duration: Duration(seconds: 6),
+          speed: 1.0,
+          textColor: Colors.cyanAccent,
+          fontSize: 22,
+          isBold: true,
+        );
+        viewModel.addTextOverlay(text);
+        viewModel.selectText(text.id);
+
+        // Seek to 5.0s (3s offset into text)
+        viewModel.seekTo(5.0);
+        final split = viewModel.splitTextAtPlayhead();
+        expect(split, isTrue);
+
+        final partA = viewModel.textOverlays.firstWhere((t) => t.id.contains('part1'));
+        final partB = viewModel.textOverlays.firstWhere((t) => t.id.contains('part2'));
+
+        expect(partA.startTimeInSeconds, closeTo(2.0, 0.01));
+        expect(partA.durationInSeconds, closeTo(3.0, 0.01));
+        expect(partA.text, equals('Split Subtitle Text'));
+        expect(partA.textColor, equals(Colors.cyanAccent));
+
+        expect(partB.startTimeInSeconds, closeTo(5.0, 0.01));
+        expect(partB.durationInSeconds, closeTo(3.0, 0.01));
+        expect(partB.text, equals('Split Subtitle Text'));
+        expect(viewModel.selectedTextId, equals(partB.id));
+      });
+
+      test('5. Text Layer Duplicate: Creates clone right after original preserving styling and assigning new ID', () {
+        final viewModel = EditorViewModel();
+        const text = TextOverlay(
+          id: 'text_dup_orig',
+          text: 'Animated Title',
+          startTime: Duration(seconds: 3),
+          duration: Duration(seconds: 4),
+          speed: 1.0,
+          textColor: Colors.yellow,
+          fontSize: 28,
+          isItalic: true,
+        );
+        viewModel.addTextOverlay(text);
+        viewModel.selectText(text.id);
+
+        final dup = viewModel.duplicateSelectedText();
+        expect(dup, isNotNull);
+        expect(dup!.id, isNot(equals(text.id)));
+        expect(dup.startTimeInSeconds, closeTo(7.0, 0.01)); // 3s start + 4s duration
+        expect(dup.text, equals('Animated Title'));
+        expect(dup.textColor, equals(Colors.yellow));
+        expect(dup.isItalic, isTrue);
+        expect(viewModel.selectedTextId, equals(dup.id));
+      });
+
+      test('6. Text Layer Speed: Adjusting speed scales effective duration', () {
+        final viewModel = EditorViewModel();
+        const text = TextOverlay(
+          id: 'text_speed_test',
+          text: 'Fast Kinetic Typography',
+          startTime: Duration.zero,
+          duration: Duration(seconds: 4),
+          speed: 1.0,
+        );
+        viewModel.addTextOverlay(text);
+        viewModel.selectText(text.id);
+
+        // Change speed to 2.0x
+        viewModel.setTextSpeed(2.0);
+        expect(viewModel.selectedTextOverlay!.speed, equals(2.0));
+        expect(viewModel.selectedTextOverlay!.durationInSeconds, closeTo(2.0, 0.01));
+
+        // Change speed to 0.5x
+        viewModel.setTextSpeed(0.5);
+        expect(viewModel.selectedTextOverlay!.speed, equals(0.5));
+        expect(viewModel.selectedTextOverlay!.durationInSeconds, closeTo(8.0, 0.01));
+      });
+
+      test('7. Text Layer Delete: Deletes text layer, clears selection, updates total duration', () {
+        final viewModel = EditorViewModel();
+        final initialTextCount = viewModel.textOverlays.length;
+        const text = TextOverlay(
+          id: 'text_to_delete',
+          text: 'Temporary Text',
+          startTime: Duration(seconds: 10),
+          duration: Duration(seconds: 5),
+        );
+        viewModel.addTextOverlay(text);
+        expect(viewModel.textOverlays.length, equals(initialTextCount + 1));
+        expect(viewModel.selectedTextId, equals('text_to_delete'));
+
+        viewModel.deleteSelectedText();
+        expect(viewModel.textOverlays.any((t) => t.id == 'text_to_delete'), isFalse);
+        expect(viewModel.selectedTextId, isNull);
+        expect(viewModel.isTextSelected, isFalse);
+      });
+
+      test('8. Audio Auto-Play Prevention: Importing/adding audio track leaves playback PAUSED', () {
+        final viewModel = EditorViewModel();
+        expect(viewModel.isPlaying, isFalse);
+
+        const audioTrack = AudioTrack(
+          id: 'audio_import_test',
+          assetId: 'asset_imported_audio',
+          title: 'Imported_Beat.mp3',
+          duration: Duration(seconds: 30),
+          startTime: Duration.zero,
+        );
+
+        viewModel.addAudioTrack(audioTrack);
+        // Playback MUST remain strictly paused upon import!
+        expect(viewModel.isPlaying, isFalse);
+        expect(viewModel.selectedAudioTrackId, equals('audio_import_test'));
+      });
+
+      test('9. TextOverlay JSON Persistence: Serializes and deserializes all editing and styling properties', () {
+        const text = TextOverlay(
+          id: 'text_json_full',
+          text: 'Persistent Cinematic Title',
+          startTime: Duration(seconds: 3),
+          duration: Duration(seconds: 10),
+          trimStart: Duration(seconds: 1),
+          trimEnd: Duration(seconds: 9),
+          speed: 1.5,
+          textColor: Colors.deepOrangeAccent,
+          fontSize: 26.0,
+          position: Offset(0.5, 0.8),
+          fontFamily: 'Roboto',
+          backgroundColor: Colors.black54,
+          textAlign: TextAlign.center,
+          isBold: true,
+          isItalic: true,
+          isUnderline: true,
+          shadowColor: Colors.black,
+        );
+
+        final json = text.toJson();
+        final restored = TextOverlay.fromJson(json);
+
+        expect(restored.id, equals('text_json_full'));
+        expect(restored.text, equals('Persistent Cinematic Title'));
+        expect(restored.startTimeInSeconds, closeTo(3.0, 0.01));
+        expect(restored.trimStartInSeconds, closeTo(1.0, 0.01));
+        expect(restored.trimEndInSeconds, closeTo(9.0, 0.01));
+        expect(restored.speed, equals(1.5));
+        expect(restored.fontSize, equals(26.0));
+        expect(restored.isBold, isTrue);
+        expect(restored.isItalic, isTrue);
+        expect(restored.isUnderline, isTrue);
+        expect(restored.fontFamily, equals('Roboto'));
+        expect(restored.textAlign, equals(TextAlign.center));
+      });
+    });
+
+    group('Video Layer Controls, Speed, Volume, Add Clip & Canvases Removal Tests', () {
+      test('1. Video selection isolation and properties', () {
+        viewModel.selectAudio();
+        expect(viewModel.isAudioSelected, isTrue);
+
+        // Selecting video clip must cleanly clear audio, text, and sticker selection
+        viewModel.selectClip(0);
+        expect(viewModel.selectedClipIndex, equals(0));
+        expect(viewModel.isAudioSelected, isFalse);
+        expect(viewModel.selectedAudioTrackId, isNull);
+        expect(viewModel.selectedTextId, isNull);
+        expect(viewModel.selectedStickerId, isNull);
+        expect(viewModel.selectedOverlayIndex, isNull);
+      });
+
+      test('2. Video Speed Control: 0.5x, 1.0x, 1.5x, 2.0x updates active duration correctly', () {
+        viewModel.selectClip(0);
+        final clip = viewModel.selectedClip!;
+        final initialTrimmedDuration = (clip.trimEnd.inMilliseconds - clip.trimStart.inMilliseconds) / 1000.0;
+
+        // 1.0x (normal)
+        viewModel.setClipSpeed(1.0);
+        expect(viewModel.selectedClip!.speed, equals(1.0));
+        expect(viewModel.selectedClip!.durationInSeconds, closeTo(initialTrimmedDuration, 0.01));
+
+        // 0.5x (slow motion -> 2x duration)
+        viewModel.setClipSpeed(0.5);
+        expect(viewModel.selectedClip!.speed, equals(0.5));
+        expect(viewModel.selectedClip!.durationInSeconds, closeTo(initialTrimmedDuration / 0.5, 0.01));
+
+        // 1.5x
+        viewModel.setClipSpeed(1.5);
+        expect(viewModel.selectedClip!.speed, equals(1.5));
+        expect(viewModel.selectedClip!.durationInSeconds, closeTo(initialTrimmedDuration / 1.5, 0.01));
+
+        // 2.0x (fast forward -> 0.5x duration)
+        viewModel.setClipSpeed(2.0);
+        expect(viewModel.selectedClip!.speed, equals(2.0));
+        expect(viewModel.selectedClip!.durationInSeconds, closeTo(initialTrimmedDuration / 2.0, 0.01));
+      });
+
+      test('3. Video Volume Control: 0%, 25%, 50%, 100% and track isolation', () {
+        viewModel.selectClip(0);
+        viewModel.setClipVolume(0.5);
+        expect(viewModel.selectedClip!.volume, equals(0.5));
+
+        // 0% (silent)
+        viewModel.setClipVolume(0.0);
+        expect(viewModel.selectedClip!.volume, equals(0.0));
+
+        // 25%
+        viewModel.setClipVolume(0.25);
+        expect(viewModel.selectedClip!.volume, equals(0.25));
+
+        // 100%
+        viewModel.setClipVolume(1.0);
+        expect(viewModel.selectedClip!.volume, equals(1.0));
+
+        // Video volume change does NOT mutate audio track volume
+        if (viewModel.audioTrack != null) {
+          final originalAudioVol = viewModel.audioTrack!.volume;
+          viewModel.setClipVolume(0.0);
+          expect(viewModel.audioTrack!.volume, equals(originalAudioVol));
+        }
+      });
+
+      test('4. Video Trim Left and Right non-destructive operation', () {
+        viewModel.selectClip(0);
+        final initialLength = viewModel.selectedClip!.durationInSeconds;
+
+        viewModel.seekTo(2.0);
+        final trimmedLeft = viewModel.trimLeftToPlayhead();
+        expect(trimmedLeft, isTrue);
+        expect(viewModel.selectedClip!.trimStart.inMilliseconds, greaterThan(0));
+        expect(viewModel.selectedClip!.durationInSeconds, lessThan(initialLength));
+
+        final trimmedLen = viewModel.selectedClip!.durationInSeconds;
+        viewModel.seekTo(1.0); // Inside remaining clip
+        final trimmedRight = viewModel.trimRightToPlayhead();
+        expect(trimmedRight, isTrue);
+        expect(viewModel.selectedClip!.durationInSeconds, lessThan(trimmedLen));
+      });
+
+      test('5. Video Duplicate Property Isolation: duplicate gets unique ID and independent properties', () {
+        viewModel.selectClip(0);
+        viewModel.setClipSpeed(1.5);
+        viewModel.setClipVolume(0.4);
+
+        final initialCount = viewModel.videoClips.length;
+        viewModel.duplicateSelectedClip();
+
+        expect(viewModel.videoClips.length, equals(initialCount + 1));
+        final original = viewModel.videoClips[0];
+        final duplicate = viewModel.videoClips[1];
+
+        expect(duplicate.id, isNot(equals(original.id)));
+        expect(duplicate.speed, equals(1.5));
+        expect(duplicate.volume, equals(0.4));
+
+        // Modifying duplicate does not affect original
+        viewModel.selectClip(1);
+        viewModel.setClipSpeed(0.5);
+        viewModel.setClipVolume(1.0);
+
+        expect(viewModel.videoClips[1].speed, equals(0.5));
+        expect(viewModel.videoClips[1].volume, equals(1.0));
+        expect(viewModel.videoClips[0].speed, equals(1.5));
+        expect(viewModel.videoClips[0].volume, equals(0.4));
+      });
+
+      test('6. Video Delete removes selected clip and updates timeline', () {
+        final initialCount = viewModel.videoClips.length;
+        viewModel.selectClip(0);
+        final clipToDeleteId = viewModel.selectedClip!.id;
+
+        viewModel.deleteSelectedClip();
+        expect(viewModel.videoClips.length, equals(initialCount - 1));
+        expect(viewModel.videoClips.any((c) => c.id == clipToDeleteId), isFalse);
+      });
+
+      test('7. Add Clip from MediaAsset: imports real asset and adds to timeline', () {
+        final realAsset = MediaAsset(
+          id: 'asset_real_device_999',
+          type: MediaAssetType.video,
+          name: 'Device_Camera_Test.mp4',
+          localPath: '/data/user/0/com.example.capcut_video_editor/files/media/Device_Camera_Test.mp4',
+          duration: const Duration(seconds: 14),
+          createdAt: DateTime.now(),
+        );
+
+        viewModel.addMediaAsset(realAsset);
+        expect(viewModel.mediaLibrary.contains(realAsset), isTrue);
+
+        final countBefore = viewModel.videoClips.length;
+        viewModel.addNewClipFromMedia(
+          assetId: realAsset.id,
+          title: realAsset.name,
+          duration: realAsset.duration!,
+          gradient: const [Colors.blue, Colors.teal],
+        );
+
+        expect(viewModel.videoClips.length, equals(countBefore + 1));
+        final added = viewModel.videoClips.last;
+        expect(added.assetId, equals(realAsset.id));
+        expect(added.title, equals('Device_Camera_Test.mp4'));
+        expect(added.durationInSeconds, equals(14.0));
+      });
+
+      test('8. VideoClip JSON Persistence preserves speed, volume, and trim boundaries', () {
+        const clip = VideoClip(
+          id: 'video_clip_persist_1',
+          assetId: 'asset_ref_123',
+          title: 'Cinematic Sunset',
+          originalDuration: Duration(seconds: 20),
+          trimStart: Duration(seconds: 2),
+          trimEnd: Duration(seconds: 18),
+          speed: 1.5,
+          volume: 0.65,
+          previewGradient: [Colors.purple, Colors.orange],
+        );
+
+        final json = clip.toJson();
+        final restored = VideoClip.fromJson(json);
+
+        expect(restored.id, equals('video_clip_persist_1'));
+        expect(restored.assetId, equals('asset_ref_123'));
+        expect(restored.title, equals('Cinematic Sunset'));
+        expect(restored.speed, equals(1.5));
+        expect(restored.volume, equals(0.65));
+        expect(restored.trimStart.inSeconds, equals(2));
+        expect(restored.trimEnd.inSeconds, equals(18));
+        expect(restored.durationInSeconds, closeTo((18 - 2) / 1.5, 0.01));
       });
     });
   });

@@ -16,7 +16,7 @@ class TopNavigationBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: AppDimensions.topBarHeight,
-      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.sm),
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
       decoration: const BoxDecoration(
         color: AppColors.background,
         border: Border(bottom: BorderSide(color: AppColors.divider, width: 0.8)),
@@ -24,20 +24,35 @@ class TopNavigationBar extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          // Home / Back Button
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 15, color: AppColors.textPrimary),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+            tooltip: 'Home & Drafts',
+            onPressed: () {
+              viewModel.saveCurrentProject();
+              Navigator.of(context).maybePop();
+            },
+          ),
+
           // Left: Mahmas Studio Brand Badge
           _buildBrandBadge(context),
 
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
 
           // Center-Left: Aspect Ratio Selector Dropdown/Badge
           _buildAspectRatioSelector(context),
 
           const Spacer(),
 
+          // Voice Feedback (TTS) Toggle Button
+          _buildTtsToggleButton(),
+
           // Center-Right: Undo & Redo Buttons
           _buildUndoRedoButtons(),
 
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
 
           // Right: Resolution & Export Button
           _buildExportButton(context),
@@ -46,9 +61,25 @@ class TopNavigationBar extends StatelessWidget {
     );
   }
 
+  Widget _buildTtsToggleButton() {
+    final isEnabled = viewModel.isTtsEnabled;
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+      onTap: () => viewModel.toggleTts(),
+      child: Padding(
+        padding: const EdgeInsets.all(3.0),
+        child: Icon(
+          isEnabled ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+          size: 15,
+          color: isEnabled ? AppColors.primary : AppColors.iconDisabled,
+        ),
+      ),
+    );
+  }
+
   Widget _buildBrandBadge(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
@@ -57,12 +88,12 @@ class TopNavigationBar extends StatelessWidget {
       child: const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.movie_filter_rounded, size: 14, color: AppColors.primary),
-          SizedBox(width: 4),
+          Icon(Icons.movie_filter_rounded, size: 13, color: AppColors.primary),
+          SizedBox(width: 3),
           Text(
-            'Mahmas Studio',
+            'Mahmas',
             style: TextStyle(
-              fontSize: 11,
+              fontSize: 10.5,
               fontWeight: FontWeight.w900,
               letterSpacing: 0.2,
               color: AppColors.textPrimary,

@@ -41,6 +41,7 @@ class AppColors {
   // Text & Neutral Colors
   static const Color textPrimary = Color(0xFFFFFFFF);
   static const Color textSecondary = Color(0xFFA0A0B2);
+  static const Color textTertiary = Color(0xFF757588);
   static const Color textMuted = Color(0xFF656578);
   static const Color divider = Color(0xFF272733);
   static const Color iconDefault = Color(0xFFE0E0E8);

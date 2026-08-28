@@ -17,6 +17,10 @@ class ActionToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasSelectedClip = viewModel.selectedClip != null;
+    final hasSelectedAudio = viewModel.selectedAudioTrack != null;
+    final hasSelectedText = viewModel.selectedTextId != null;
+    final hasSelectedOverlay = viewModel.selectedOverlay != null;
+    final hasAnySelection = hasSelectedClip || hasSelectedAudio || hasSelectedText || hasSelectedOverlay;
 
     return Container(
       height: AppDimensions.actionToolbarHeight,
@@ -44,19 +48,35 @@ class ActionToolbar extends StatelessWidget {
               physics: const BouncingScrollPhysics(),
               padding: const EdgeInsets.symmetric(vertical: 2.0),
               children: [
-                // Split Action (Primary Highlighted)
+                // Split Action
                 _buildActionButton(
                   context: context,
                   icon: Icons.call_split_rounded,
-                  label: 'Split',
+                  label: hasSelectedText ? 'Split Text' : (hasSelectedAudio ? 'Split Audio' : 'Split'),
                   isPrimary: true,
-                  enabled: viewModel.videoClips.isNotEmpty,
+                  enabled: (hasSelectedClip && viewModel.videoClips.isNotEmpty) || hasSelectedAudio || hasSelectedText,
                   onTap: () {
-                    final success = viewModel.splitClipAtPlayhead();
-                    if (success) {
-                      _showFeedback(context, '✂️ Clip split successfully at playhead');
+                    if (hasSelectedText) {
+                      final success = viewModel.splitTextAtPlayhead();
+                      if (success) {
+                        _showFeedback(context, '✂️ Text layer split at playhead');
+                      } else {
+                        _showFeedback(context, 'Position playhead inside text layer to split');
+                      }
+                    } else if (hasSelectedAudio) {
+                      final success = viewModel.splitAudioAtPlayhead();
+                      if (success) {
+                        _showFeedback(context, '✂️ Audio track split at playhead');
+                      } else {
+                        _showFeedback(context, 'Position playhead inside audio track to split');
+                      }
                     } else {
-                      _showFeedback(context, 'Place playhead inside a clip to split');
+                      final success = viewModel.splitClipAtPlayhead();
+                      if (success) {
+                        _showFeedback(context, '✂️ Clip split successfully at playhead');
+                      } else {
+                        _showFeedback(context, 'Place playhead inside a clip to split');
+                      }
                     }
                   },
                 ),
@@ -66,13 +86,29 @@ class ActionToolbar extends StatelessWidget {
                   context: context,
                   icon: Icons.align_horizontal_left_rounded,
                   label: 'Trim Left',
-                  enabled: hasSelectedClip,
+                  enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
                   onTap: () {
-                    final success = viewModel.trimLeftToPlayhead();
-                    if (success) {
-                      _showFeedback(context, 'Trimmed start to playhead');
+                    if (hasSelectedText) {
+                      final success = viewModel.trimTextLeftToPlayhead();
+                      if (success) {
+                        _showFeedback(context, 'Trimmed text start to playhead');
+                      } else {
+                        _showFeedback(context, 'Position playhead past text start');
+                      }
+                    } else if (hasSelectedAudio) {
+                      final success = viewModel.trimAudioLeftToPlayhead();
+                      if (success) {
+                        _showFeedback(context, 'Trimmed audio start to playhead');
+                      } else {
+                        _showFeedback(context, 'Position playhead past audio start');
+                      }
                     } else {
-                      _showFeedback(context, 'Select clip & position playhead past start');
+                      final success = viewModel.trimLeftToPlayhead();
+                      if (success) {
+                        _showFeedback(context, 'Trimmed start to playhead');
+                      } else {
+                        _showFeedback(context, 'Select clip & position playhead past start');
+                      }
                     }
                   },
                 ),
@@ -82,29 +118,57 @@ class ActionToolbar extends StatelessWidget {
                   context: context,
                   icon: Icons.align_horizontal_right_rounded,
                   label: 'Trim Right',
-                  enabled: hasSelectedClip,
+                  enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
                   onTap: () {
-                    final success = viewModel.trimRightToPlayhead();
-                    if (success) {
-                      _showFeedback(context, 'Trimmed end to playhead');
+                    if (hasSelectedText) {
+                      final success = viewModel.trimTextRightToPlayhead();
+                      if (success) {
+                        _showFeedback(context, 'Trimmed text end to playhead');
+                      } else {
+                        _showFeedback(context, 'Position playhead before text end');
+                      }
+                    } else if (hasSelectedAudio) {
+                      final success = viewModel.trimAudioRightToPlayhead();
+                      if (success) {
+                        _showFeedback(context, 'Trimmed audio end to playhead');
+                      } else {
+                        _showFeedback(context, 'Position playhead before audio end');
+                      }
                     } else {
-                      _showFeedback(context, 'Select clip & position playhead before end');
+                      final success = viewModel.trimRightToPlayhead();
+                      if (success) {
+                        _showFeedback(context, 'Trimmed end to playhead');
+                      } else {
+                        _showFeedback(context, 'Select clip & position playhead before end');
+                      }
                     }
                   },
                 ),
 
-                // Duplicate Clip (Opens choice: Timeline vs Overlay Layer)
+                // Duplicate Action
                 _buildActionButton(
                   context: context,
                   icon: Icons.copy_all_rounded,
                   label: 'Duplicate',
-                  enabled: hasSelectedClip,
+                  enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
                   onTap: () {
-                    showModalBottomSheet(
-                      context: context,
-                      backgroundColor: Colors.transparent,
-                      builder: (ctx) => DuplicateOptionsSheet(viewModel: viewModel),
-                    );
+                    if (hasSelectedText) {
+                      final dup = viewModel.duplicateSelectedText();
+                      if (dup != null) {
+                        _showFeedback(context, '📋 Duplicated text layer "${dup.text}"');
+                      }
+                    } else if (hasSelectedAudio) {
+                      final dup = viewModel.duplicateSelectedAudioTrack();
+                      if (dup != null) {
+                        _showFeedback(context, '📋 Duplicated audio track "${dup.title}"');
+                      }
+                    } else {
+                      showModalBottomSheet(
+                        context: context,
+                        backgroundColor: Colors.transparent,
+                        builder: (ctx) => DuplicateOptionsSheet(viewModel: viewModel),
+                      );
+                    }
                   },
                 ),
 
@@ -124,42 +188,73 @@ class ActionToolbar extends StatelessWidget {
                   },
                 ),
 
-                // Edit Clip Detailed Drawer
+                // Edit Detailed Drawer
                 _buildActionButton(
                   context: context,
                   icon: Icons.edit_note_rounded,
-                  label: 'Edit Tools',
-                  enabled: hasSelectedClip,
-                  onTap: () => viewModel.openDrawer(EditorCategory.edit),
+                  label: hasSelectedText ? 'Edit Text' : (hasSelectedAudio ? 'Audio Tools' : 'Edit Tools'),
+                  enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
+                  onTap: () {
+                    if (hasSelectedText) {
+                      viewModel.openDrawer(EditorCategory.text);
+                    } else if (hasSelectedAudio) {
+                      viewModel.openDrawer(EditorCategory.audio);
+                    } else {
+                      viewModel.openDrawer(EditorCategory.edit);
+                    }
+                  },
                 ),
 
                 // Speed Controller
                 _buildActionButton(
                   context: context,
                   icon: Icons.speed_rounded,
-                  label: 'Speed (${viewModel.selectedClip?.speed.toStringAsFixed(1) ?? '1.0'}x)',
-                  enabled: hasSelectedClip,
+                  label: hasSelectedText
+                      ? 'Speed (${viewModel.selectedTextOverlay?.speed.toStringAsFixed(1) ?? '1.0'}x)'
+                      : (hasSelectedAudio
+                          ? 'Speed (${viewModel.selectedAudioTrack?.speed.toStringAsFixed(1) ?? '1.0'}x)'
+                          : 'Speed (${viewModel.selectedClip?.speed.toStringAsFixed(1) ?? '1.0'}x)'),
+                  enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
                   onTap: () => _showSpeedDialog(context),
                 ),
 
                 // Volume Controller
                 _buildActionButton(
                   context: context,
-                  icon: Icons.volume_up_rounded,
-                  label: 'Volume',
-                  enabled: hasSelectedClip,
+                  icon: (hasSelectedAudio && (viewModel.selectedAudioTrack?.isMuted ?? false))
+                      ? Icons.volume_off_rounded
+                      : Icons.volume_up_rounded,
+                  label: hasSelectedAudio
+                      ? (viewModel.selectedAudioTrack!.isMuted
+                          ? 'Muted'
+                          : 'Vol (${(viewModel.selectedAudioTrack!.volume * 100).round()}%)')
+                      : (hasSelectedClip
+                          ? 'Vol (${(viewModel.selectedClip!.volume * 100).round()}%)'
+                          : 'Volume'),
+                  enabled: hasSelectedClip || hasSelectedAudio,
                   onTap: () => _showVolumeDialog(context),
                 ),
 
-                // Delete Clip
+                // Delete Action
                 _buildActionButton(
                   context: context,
                   icon: Icons.delete_outline_rounded,
                   label: 'Delete',
-                  enabled: hasSelectedClip,
+                  enabled: hasAnySelection,
                   onTap: () {
-                    viewModel.deleteSelectedClip();
-                    _showFeedback(context, '🗑️ Clip removed');
+                    if (hasSelectedText) {
+                      viewModel.deleteSelectedText();
+                      _showFeedback(context, '🗑️ Text layer removed');
+                    } else if (hasSelectedAudio) {
+                      viewModel.deleteSelectedAudioTrack();
+                      _showFeedback(context, '🗑️ Audio track removed');
+                    } else if (hasSelectedOverlay) {
+                      viewModel.removeOverlayClip(viewModel.selectedOverlay!.id);
+                      _showFeedback(context, '🗑️ Overlay layer removed');
+                    } else if (hasSelectedClip) {
+                      viewModel.deleteSelectedClip();
+                      _showFeedback(context, '🗑️ Clip removed');
+                    }
                   },
                 ),
 
@@ -169,7 +264,7 @@ class ActionToolbar extends StatelessWidget {
                   icon: Icons.file_upload_outlined,
                   label: 'Export',
                   isAccent: true,
-                  enabled: viewModel.videoClips.isNotEmpty,
+                  enabled: viewModel.videoClips.isNotEmpty || viewModel.audioTracks.isNotEmpty,
                   onTap: () {
                     showModalBottomSheet(
                       context: context,
@@ -279,10 +374,15 @@ class ActionToolbar extends StatelessWidget {
   }
 
   void _showSpeedDialog(BuildContext context) {
+    final audio = viewModel.selectedAudioTrack;
+    final text = viewModel.selectedTextOverlay;
     final clip = viewModel.selectedClip;
-    if (clip == null) return;
+    if (audio == null && clip == null && text == null) return;
 
-    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
+    final isAudio = audio != null;
+    final isText = text != null;
+    final currentSpeed = isText ? text.speed : (isAudio ? audio.speed : clip!.speed);
+    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
     showModalBottomSheet(
       context: context,
@@ -297,16 +397,27 @@ class ActionToolbar extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Speed Adjustment',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    isText
+                        ? 'Text Speed Multiplier'
+                        : (isAudio ? 'Audio Playback Speed' : 'Video Clip Speed'),
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  ),
+                  Text(
+                    '${currentSpeed.toStringAsFixed(2)}x',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.primary),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               Wrap(
                 spacing: 10,
                 runSpacing: 10,
                 children: speeds.map((s) {
-                  final isSelected = clip.speed == s;
+                  final isSelected = (currentSpeed - s).abs() < 0.05;
                   return ChoiceChip(
                     label: Text('${s}x'),
                     selected: isSelected,
@@ -318,7 +429,13 @@ class ActionToolbar extends StatelessWidget {
                     ),
                     onSelected: (selected) {
                       if (selected) {
-                        viewModel.setClipSpeed(s);
+                        if (isText) {
+                          viewModel.updateTextSpeed(text.id, s);
+                        } else if (isAudio) {
+                          viewModel.updateAudioSpeed(audio.id, s);
+                        } else {
+                          viewModel.setClipSpeed(s);
+                        }
                         Navigator.of(ctx).pop();
                       }
                     },
@@ -334,8 +451,11 @@ class ActionToolbar extends StatelessWidget {
   }
 
   void _showVolumeDialog(BuildContext context) {
+    final audio = viewModel.selectedAudioTrack;
     final clip = viewModel.selectedClip;
-    if (clip == null) return;
+    if (audio == null && clip == null) return;
+
+    final isAudio = audio != null;
 
     showModalBottomSheet(
       context: context,
@@ -346,6 +466,9 @@ class ActionToolbar extends StatelessWidget {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            final double currentVolume = isAudio ? (viewModel.selectedAudioTrack?.volume ?? 0.8) : (viewModel.selectedClip?.volume ?? 1.0);
+            final bool isMuted = isAudio ? (viewModel.selectedAudioTrack?.isMuted ?? false) : false;
+
             return Padding(
               padding: const EdgeInsets.all(AppDimensions.lg),
               child: Column(
@@ -355,27 +478,56 @@ class ActionToolbar extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Clip Volume',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                      ),
                       Text(
-                        '${(clip.volume * 100).round()}%',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.primary),
+                        isAudio ? 'Audio Track Volume' : 'Clip Volume',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      ),
+                      Row(
+                        children: [
+                          if (isAudio) ...[
+                            IconButton(
+                              icon: Icon(
+                                isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                color: isMuted ? AppColors.error : AppColors.primary,
+                                size: 20,
+                              ),
+                              tooltip: isMuted ? 'Unmute' : 'Mute',
+                              onPressed: () {
+                                viewModel.toggleAudioMute(audio.id);
+                                setSheetState(() {});
+                              },
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                          Text(
+                            isMuted ? 'Muted' : '${(currentVolume * 100).round()}%',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isMuted ? AppColors.error : AppColors.primary,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Slider(
-                    value: clip.volume,
+                    value: currentVolume.clamp(0.0, 1.0),
                     min: 0.0,
                     max: 1.0,
                     divisions: 100,
-                    activeColor: AppColors.primary,
-                    onChanged: (val) {
-                      setSheetState(() {});
-                      viewModel.setClipVolume(val);
-                    },
+                    activeColor: isMuted ? AppColors.textMuted : AppColors.primary,
+                    onChanged: isMuted
+                        ? null
+                        : (val) {
+                            setSheetState(() {});
+                            if (isAudio) {
+                              viewModel.updateAudioVolume(audio.id, val);
+                            } else {
+                              viewModel.setClipVolume(val);
+                            }
+                          },
                   ),
                   const SizedBox(height: 16),
                 ],

@@ -32,18 +32,24 @@ class EditDrawer extends StatelessWidget {
               border: Border(bottom: BorderSide(color: AppColors.divider, width: 0.5)),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    const Icon(Icons.content_cut_rounded, size: 16, color: AppColors.primary),
-                    const SizedBox(width: 6),
-                    Text(
-                      clip != null ? 'Edit: ${clip.title}' : 'Edit Clip (Select a clip)',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                    ),
-                  ],
+                Expanded(
+                  child: Row(
+                    children: [
+                      const Icon(Icons.content_cut_rounded, size: 16, color: AppColors.primary),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          clip != null ? 'Edit: ${clip.title}' : 'Edit Clip (Select a clip)',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+                const SizedBox(width: 8),
                 IconButton(
                   icon: const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 20),
                   padding: EdgeInsets.zero,

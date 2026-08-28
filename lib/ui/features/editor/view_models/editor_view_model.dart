@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
+import 'package:capcut_video_editor/core/services/audio_playback_service.dart';
+import 'package:capcut_video_editor/core/services/tts_service.dart';
 import 'package:capcut_video_editor/domain/enums/aspect_ratio_preset.dart';
-import 'package:capcut_video_editor/domain/enums/export_resolution.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/domain/models/audio_track.dart';
 import 'package:capcut_video_editor/domain/models/color_adjustments.dart';
@@ -12,10 +14,12 @@ import 'package:capcut_video_editor/domain/models/export_settings.dart';
 import 'package:capcut_video_editor/core/services/device_media_service.dart';
 import 'package:capcut_video_editor/domain/models/media_asset.dart';
 import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
+import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/domain/models/sticker_item.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
+import 'package:capcut_video_editor/core/services/project_storage_service.dart';
 import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
 
 /// State representation for undo/redo history
@@ -24,8 +28,10 @@ class _EditorSnapshot {
   final List<OverlayClip> overlayClips;
   final List<StickerOverlay> stickerOverlays;
   final List<TextOverlay> textOverlays;
-  final AudioTrack? audioTrack;
+  final List<AudioTrack> audioTracks;
   final int? selectedIndex;
+  final String? selectedAudioTrackId;
+  final String? selectedTextId;
   final double playheadPosition;
   final EditorFilter activeFilter;
   final ColorAdjustments colorAdjustments;
@@ -36,8 +42,10 @@ class _EditorSnapshot {
     required this.overlayClips,
     required this.stickerOverlays,
     required this.textOverlays,
-    required this.audioTrack,
+    required this.audioTracks,
     required this.selectedIndex,
+    this.selectedAudioTrackId,
+    this.selectedTextId,
     required this.playheadPosition,
     required this.activeFilter,
     required this.colorAdjustments,
@@ -48,9 +56,19 @@ class _EditorSnapshot {
 /// Comprehensive ViewModel managing the Mahmas Studio video editor state, timeline playback,
 /// universal multi-track trimming and dragging, undo/redo history, and export.
 class EditorViewModel extends ChangeNotifier {
-  EditorViewModel() {
-    _initializeProject();
+  EditorViewModel({Project? initialProject}) {
+    if (initialProject != null) {
+      loadProject(initialProject);
+    } else {
+      _initializeProject();
+    }
   }
+
+  // --- Project & Persistence State ---
+  late Project _currentProject;
+  Timer? _autoSaveDebounceTimer;
+
+  Project get currentProject => _currentProject;
 
   // --- State Variables ---
 
@@ -58,13 +76,14 @@ class EditorViewModel extends ChangeNotifier {
   List<VideoClip> _videoClips = [];
   List<OverlayClip> _overlayClips = [];
   List<StickerOverlay> _stickerOverlays = [];
-  AudioTrack? _audioTrack;
+  List<AudioTrack> _audioTracks = [];
   List<TextOverlay> _textOverlays = [];
 
   int? _selectedClipIndex;
   int? _selectedOverlayIndex;
   String? _selectedTextId;
   String? _selectedStickerId;
+  String? _selectedAudioTrackId;
   bool _isAudioSelected = false;
 
   double _playheadPosition = 0.0; // In seconds
@@ -101,14 +120,24 @@ class EditorViewModel extends ChangeNotifier {
   List<VideoClip> get videoClips => List.unmodifiable(_videoClips);
   List<OverlayClip> get overlayClips => List.unmodifiable(_overlayClips);
   List<StickerOverlay> get stickerOverlays => List.unmodifiable(_stickerOverlays);
-  AudioTrack? get audioTrack => _audioTrack;
+  List<AudioTrack> get audioTracks => List.unmodifiable(_audioTracks);
+  AudioTrack? get audioTrack => _audioTracks.isNotEmpty
+      ? (_selectedAudioTrackId != null
+          ? (_audioTracks.firstWhere((a) => a.id == _selectedAudioTrackId, orElse: () => _audioTracks.first))
+          : _audioTracks.first)
+      : null;
   List<TextOverlay> get textOverlays => List.unmodifiable(_textOverlays);
 
   int? get selectedClipIndex => _selectedClipIndex;
   int? get selectedOverlayIndex => _selectedOverlayIndex;
   String? get selectedTextId => _selectedTextId;
   String? get selectedStickerId => _selectedStickerId;
-  bool get isAudioSelected => _isAudioSelected;
+  String? get selectedAudioTrackId => _selectedAudioTrackId;
+  bool get isAudioSelected => _isAudioSelected || _selectedAudioTrackId != null;
+
+  AudioTrack? get selectedAudioTrack => _selectedAudioTrackId != null
+      ? (_audioTracks.firstWhere((a) => a.id == _selectedAudioTrackId, orElse: () => _audioTracks.first))
+      : (_isAudioSelected && _audioTracks.isNotEmpty ? _audioTracks.first : null);
 
   VideoClip? get selectedClip =>
       (_selectedClipIndex != null && _selectedClipIndex! >= 0 && _selectedClipIndex! < _videoClips.length)
@@ -140,10 +169,35 @@ class EditorViewModel extends ChangeNotifier {
   bool get isExporting => _isExporting;
   double get exportProgress => _exportProgress;
 
-  /// Total timeline duration in seconds based on active video clips
+  /// Centralized TTS accessibility state
+  bool get isTtsEnabled => TtsService.isEnabled;
+
+  /// Toggles TTS state and notifies listeners
+  void toggleTts() {
+    TtsService.toggle();
+    notifyListeners();
+  }
+
+  bool get isTextSelected => _selectedTextId != null;
+
+  TextOverlay? get selectedTextOverlay => _selectedTextId != null
+      ? (_textOverlays.firstWhere((t) => t.id == _selectedTextId, orElse: () => _textOverlays.first))
+      : null;
+
+  /// Total timeline duration in seconds based on active video clips, audio tracks, and text overlays
   double get totalDurationInSeconds {
-    if (_videoClips.isEmpty) return 0.0;
-    return _videoClips.fold(0.0, (sum, clip) => sum + clip.durationInSeconds);
+    double videoTotal = _videoClips.fold(0.0, (sum, clip) => sum + clip.durationInSeconds);
+    double audioEnd = 0.0;
+    for (final track in _audioTracks) {
+      final trackEnd = track.startTimeInSeconds + track.durationInSeconds;
+      if (trackEnd > audioEnd) audioEnd = trackEnd;
+    }
+    double textEnd = 0.0;
+    for (final text in _textOverlays) {
+      final tEnd = text.startTimeInSeconds + text.durationInSeconds;
+      if (tEnd > textEnd) textEnd = tEnd;
+    }
+    return math.max(videoTotal, math.max(audioEnd, textEnd));
   }
 
   /// Formatted duration object
@@ -179,28 +233,114 @@ class EditorViewModel extends ChangeNotifier {
     }).toList();
   }
 
-  /// Returns active text overlay at current playhead position
-  TextOverlay? get activeTextOverlay {
-    for (final text in _textOverlays) {
-      if (_playheadPosition >= text.startTimeInSeconds &&
-          _playheadPosition <= (text.startTimeInSeconds + text.durationInSeconds)) {
-        return text;
-      }
-    }
-    return null;
+  /// Returns all active text overlays visible at current playhead position
+  List<TextOverlay> get activeTextOverlaysAtPlayhead {
+    return _textOverlays.where((t) {
+      return _playheadPosition >= t.startTimeInSeconds &&
+          _playheadPosition <= (t.startTimeInSeconds + t.durationInSeconds);
+    }).toList();
   }
 
-  // --- Initialization ---
+  /// Returns active text overlay at current playhead position (for backwards compatibility)
+  TextOverlay? get activeTextOverlay {
+    final list = activeTextOverlaysAtPlayhead;
+    return list.isNotEmpty ? list.first : null;
+  }
+
+  // --- Project & Draft Management ---
 
   void _initializeProject() {
+    final now = DateTime.now();
+    _currentProject = Project(
+      id: 'proj_${now.millisecondsSinceEpoch}',
+      name: 'Project ${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')}',
+      createdAt: now,
+      updatedAt: now,
+    );
     _videoClips = MockMediaRepository.getInitialVideoClips();
-    _audioTrack = MockMediaRepository.getInitialAudioTrack();
+    final initialAudio = MockMediaRepository.getInitialAudioTrack();
+    _audioTracks = [initialAudio];
     _textOverlays = MockMediaRepository.getInitialTextOverlays();
     _overlayClips = [];
     _stickerOverlays = [];
     _selectedClipIndex = 0;
+    _selectedAudioTrackId = null;
+    _isAudioSelected = false;
     _playheadPosition = 0.0;
     notifyListeners();
+  }
+
+  /// Loads an existing project into the editor session
+  void loadProject(Project project) {
+    _currentProject = project;
+    _aspectRatio = project.aspectRatio;
+    _mediaLibrary = List.from(project.mediaLibrary);
+    _videoClips = List.from(project.videoClips);
+    _overlayClips = List.from(project.overlayClips);
+    _stickerOverlays = List.from(project.stickerOverlays);
+    _textOverlays = List.from(project.textOverlays);
+    _audioTracks = List.from(project.audioTracks);
+    if (_audioTracks.isEmpty && project.audioTrack != null) {
+      _audioTracks.add(project.audioTrack!);
+    }
+    _activeFilter = project.activeFilter;
+    _colorAdjustments = project.colorAdjustments;
+    _activeEffect = project.activeEffect;
+    _canvasBackgroundColor = project.canvasBackgroundColor;
+    _canvasBlurSigma = project.canvasBlurSigma;
+    _playheadPosition = project.playheadPosition.clamp(
+      0.0,
+      totalDurationInSeconds > 0 ? totalDurationInSeconds : 10.0,
+    );
+    _selectedClipIndex = _videoClips.isNotEmpty ? 0 : null;
+    _selectedOverlayIndex = null;
+    _selectedTextId = null;
+    _selectedStickerId = null;
+    _selectedAudioTrackId = null;
+    _isAudioSelected = false;
+    _undoStack.clear();
+    _redoStack.clear();
+    notifyListeners();
+  }
+
+  /// Renames the active draft project
+  void updateProjectName(String newName) {
+    _currentProject = _currentProject.copyWith(name: newName);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  /// Schedules a debounced auto-save of the project state to disk
+  void scheduleAutoSave() {
+    _autoSaveDebounceTimer?.cancel();
+    _autoSaveDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      saveCurrentProject();
+    });
+  }
+
+  /// Explicitly flushes and saves the active project state to disk
+  Future<void> saveCurrentProject() async {
+    _currentProject = _currentProject.copyWith(
+      aspectRatio: _aspectRatio,
+      videoClips: _videoClips,
+      overlayClips: _overlayClips,
+      stickerOverlays: _stickerOverlays,
+      textOverlays: _textOverlays,
+      audioTracks: _audioTracks,
+      audioTrack: audioTrack,
+      clearAudioTrack: _audioTracks.isEmpty,
+      mediaLibrary: _mediaLibrary,
+      activeFilter: _activeFilter,
+      colorAdjustments: _colorAdjustments,
+      activeEffect: _activeEffect,
+      canvasBackgroundColor: _canvasBackgroundColor,
+      canvasBlurSigma: _canvasBlurSigma,
+      playheadPosition: _playheadPosition,
+      thumbnailPath: _videoClips.isNotEmpty
+          ? getAssetById(_videoClips.first.assetId)?.thumbnailPath
+          : null,
+    );
+    await ProjectStorageService.instance.saveProject(_currentProject);
   }
 
   // --- History Management (Undo / Redo) ---
@@ -212,8 +352,10 @@ class EditorViewModel extends ChangeNotifier {
         overlayClips: List.from(_overlayClips),
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
-        audioTrack: _audioTrack,
+        audioTracks: List.from(_audioTracks),
         selectedIndex: _selectedClipIndex,
+        selectedAudioTrackId: _selectedAudioTrackId,
+        selectedTextId: _selectedTextId,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
         colorAdjustments: _colorAdjustments,
@@ -224,6 +366,7 @@ class EditorViewModel extends ChangeNotifier {
     if (_undoStack.length > 30) {
       _undoStack.removeAt(0);
     }
+    scheduleAutoSave();
   }
 
   void undo() {
@@ -234,8 +377,10 @@ class EditorViewModel extends ChangeNotifier {
         overlayClips: List.from(_overlayClips),
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
-        audioTrack: _audioTrack,
+        audioTracks: List.from(_audioTracks),
         selectedIndex: _selectedClipIndex,
+        selectedAudioTrackId: _selectedAudioTrackId,
+        selectedTextId: _selectedTextId,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
         colorAdjustments: _colorAdjustments,
@@ -248,14 +393,18 @@ class EditorViewModel extends ChangeNotifier {
     _overlayClips = List.from(snapshot.overlayClips);
     _stickerOverlays = List.from(snapshot.stickerOverlays);
     _textOverlays = List.from(snapshot.textOverlays);
-    _audioTrack = snapshot.audioTrack;
+    _audioTracks = List.from(snapshot.audioTracks);
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
+    _selectedAudioTrackId = snapshot.selectedAudioTrackId;
+    _isAudioSelected = _selectedAudioTrackId != null;
+    _selectedTextId = snapshot.selectedTextId;
     _playheadPosition = snapshot.playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
     _activeFilter = snapshot.activeFilter;
     _colorAdjustments = snapshot.colorAdjustments;
     _activeEffect = snapshot.activeEffect;
+    _syncAudioPlayback(forceSeek: true);
     notifyListeners();
   }
 
@@ -267,8 +416,10 @@ class EditorViewModel extends ChangeNotifier {
         overlayClips: List.from(_overlayClips),
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
-        audioTrack: _audioTrack,
+        audioTracks: List.from(_audioTracks),
         selectedIndex: _selectedClipIndex,
+        selectedAudioTrackId: _selectedAudioTrackId,
+        selectedTextId: _selectedTextId,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
         colorAdjustments: _colorAdjustments,
@@ -281,14 +432,18 @@ class EditorViewModel extends ChangeNotifier {
     _overlayClips = List.from(snapshot.overlayClips);
     _stickerOverlays = List.from(snapshot.stickerOverlays);
     _textOverlays = List.from(snapshot.textOverlays);
-    _audioTrack = snapshot.audioTrack;
+    _audioTracks = List.from(snapshot.audioTracks);
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
+    _selectedAudioTrackId = snapshot.selectedAudioTrackId;
+    _isAudioSelected = _selectedAudioTrackId != null;
+    _selectedTextId = snapshot.selectedTextId;
     _playheadPosition = snapshot.playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
     _activeFilter = snapshot.activeFilter;
     _colorAdjustments = snapshot.colorAdjustments;
     _activeEffect = snapshot.activeEffect;
+    _syncAudioPlayback(forceSeek: true);
     notifyListeners();
   }
 
@@ -308,13 +463,14 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   void play() {
-    if (_videoClips.isEmpty) return;
+    if (_videoClips.isEmpty && _audioTracks.isEmpty) return;
     if (_playheadPosition >= totalDurationInSeconds) {
       _playheadPosition = 0.0;
     }
 
     _isPlaying = true;
     _playbackTimer?.cancel();
+    _syncAudioPlayback();
 
     // 33ms interval (~30 FPS smooth playback loop)
     const intervalMs = 33;
@@ -324,6 +480,7 @@ class EditorViewModel extends ChangeNotifier {
         if (_isLooping && totalDurationInSeconds > 0.0) {
           _playheadPosition = 0.0;
           _autoSelectActiveClip();
+          _syncAudioPlayback();
           notifyListeners();
         } else {
           _playheadPosition = totalDurationInSeconds;
@@ -332,6 +489,7 @@ class EditorViewModel extends ChangeNotifier {
       } else {
         _playheadPosition = nextPos;
         _autoSelectActiveClip();
+        _syncAudioPlayback();
         notifyListeners();
       }
     });
@@ -342,13 +500,90 @@ class EditorViewModel extends ChangeNotifier {
     _isPlaying = false;
     _playbackTimer?.cancel();
     _playbackTimer = null;
+    if (AudioPlaybackService.instance.isPlaying) {
+      AudioPlaybackService.instance.pause();
+    }
     notifyListeners();
   }
 
   void seekTo(double positionInSeconds) {
     _playheadPosition = positionInSeconds.clamp(0.0, math.max(0.0, totalDurationInSeconds));
     _autoSelectActiveClip();
+    _syncAudioPlayback(forceSeek: true);
     notifyListeners();
+  }
+
+  /// Synchronizes audio playback with master playhead, respecting track trims, speed, and volume
+  void _syncAudioPlayback({bool forceSeek = false}) {
+    if (_audioTracks.isEmpty) {
+      if (AudioPlaybackService.instance.isInitialized) {
+        AudioPlaybackService.instance.dispose();
+      }
+      return;
+    }
+
+    // Find active audio track at current playhead position
+    AudioTrack? activeTrack;
+    for (final track in _audioTracks) {
+      if (_playheadPosition >= track.startTimeInSeconds && _playheadPosition < track.endTimeInSeconds) {
+        activeTrack = track;
+        break;
+      }
+    }
+
+    if (activeTrack == null) {
+      // Playhead is outside audio ranges
+      if (AudioPlaybackService.instance.isPlaying) {
+        AudioPlaybackService.instance.pause();
+      }
+      return;
+    }
+
+    final asset = getAssetById(activeTrack.assetId);
+    final localPath = asset?.localPath;
+
+    if (localPath == null || !File(localPath).existsSync()) {
+      return;
+    }
+
+    // Calculate source audio offset taking trimStart and speed into account
+    final deltaFromTrackStart = _playheadPosition - activeTrack.startTimeInSeconds;
+    final sourceOffsetSec = activeTrack.trimStartInSeconds + (deltaFromTrackStart * activeTrack.speed);
+    final sourceOffsetMs = (sourceOffsetSec * 1000).round();
+    final effectiveVolume = activeTrack.isMuted ? 0.0 : activeTrack.volume;
+
+    if (AudioPlaybackService.instance.loadedPath != localPath) {
+      AudioPlaybackService.instance.initialize(localPath).then((_) {
+        AudioPlaybackService.instance.setVolume(effectiveVolume);
+        AudioPlaybackService.instance.setSpeed(activeTrack!.speed);
+        AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
+        if (_isPlaying) {
+          AudioPlaybackService.instance.play();
+        } else {
+          AudioPlaybackService.instance.pause();
+        }
+      });
+      return;
+    }
+
+    // Update volume & speed dynamically
+    AudioPlaybackService.instance.setVolume(effectiveVolume);
+    AudioPlaybackService.instance.setSpeed(activeTrack.speed);
+
+    if (forceSeek) {
+      AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
+    }
+
+    if (_isPlaying) {
+      if (!AudioPlaybackService.instance.isPlaying) {
+        AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
+        AudioPlaybackService.instance.play();
+      }
+    } else {
+      if (AudioPlaybackService.instance.isPlaying) {
+        AudioPlaybackService.instance.pause();
+      }
+    }
   }
 
   void _autoSelectActiveClip() {
@@ -373,9 +608,16 @@ class EditorViewModel extends ChangeNotifier {
     if (index >= 0 && index < _videoClips.length) {
       _selectedClipIndex = index;
       _selectedOverlayIndex = null;
+      _selectedAudioTrackId = null;
       _isAudioSelected = false;
       _selectedTextId = null;
       _selectedStickerId = null;
+
+      final clip = _videoClips[index];
+      final clipStart = getClipStartTime(index);
+      debugPrint('[VideoSelection] selectedVideoClipId: ${clip.id}, assetId: ${clip.assetId}, '
+          'playhead: $_playheadPosition, volume: ${clip.volume}, speed: ${clip.speed}, '
+          'clipStart: $clipStart, clipDuration: ${clip.durationInSeconds}');
       notifyListeners();
     }
   }
@@ -384,6 +626,7 @@ class EditorViewModel extends ChangeNotifier {
     if (index >= 0 && index < _overlayClips.length) {
       _selectedOverlayIndex = index;
       _selectedClipIndex = null;
+      _selectedAudioTrackId = null;
       _isAudioSelected = false;
       _selectedTextId = null;
       _selectedStickerId = null;
@@ -391,21 +634,55 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
+  void selectAudioTrack(String? id) {
+    _selectedAudioTrackId = id;
+    _isAudioSelected = id != null;
+    if (id != null) {
+      _selectedClipIndex = null;
+      _selectedOverlayIndex = null;
+      _selectedTextId = null;
+      _selectedStickerId = null;
+    }
+    notifyListeners();
+  }
+
   void selectAudio() {
-    _isAudioSelected = true;
+    final firstId = _audioTracks.isNotEmpty ? _audioTracks.first.id : null;
+    selectAudioTrack(firstId);
+  }
+
+  void deselectAudio() {
+    _selectedAudioTrackId = null;
+    _isAudioSelected = false;
+    notifyListeners();
+  }
+
+  void deselectAll() {
     _selectedClipIndex = null;
     _selectedOverlayIndex = null;
+    _selectedAudioTrackId = null;
+    _isAudioSelected = false;
     _selectedTextId = null;
     _selectedStickerId = null;
     notifyListeners();
   }
 
-  void selectText(String id) {
+  void clearSelection() => deselectAll();
+
+  void selectText(String? id) {
     _selectedTextId = id;
-    _selectedClipIndex = null;
-    _selectedOverlayIndex = null;
-    _isAudioSelected = false;
-    _selectedStickerId = null;
+    if (id != null) {
+      _selectedClipIndex = null;
+      _selectedOverlayIndex = null;
+      _selectedAudioTrackId = null;
+      _isAudioSelected = false;
+      _selectedStickerId = null;
+    }
+    notifyListeners();
+  }
+
+  void deselectText() {
+    _selectedTextId = null;
     notifyListeners();
   }
 
@@ -413,17 +690,9 @@ class EditorViewModel extends ChangeNotifier {
     _selectedStickerId = id;
     _selectedClipIndex = null;
     _selectedOverlayIndex = null;
+    _selectedAudioTrackId = null;
     _isAudioSelected = false;
     _selectedTextId = null;
-    notifyListeners();
-  }
-
-  void clearSelection() {
-    _selectedClipIndex = null;
-    _selectedOverlayIndex = null;
-    _isAudioSelected = false;
-    _selectedTextId = null;
-    _selectedStickerId = null;
     notifyListeners();
   }
 
@@ -448,33 +717,6 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   // --- Universal Timeline Trimming & Dragging ---
-
-  /// Trims or moves audio track timing
-  void updateAudioTrackTiming(Duration newStart, Duration newDuration) {
-    if (_audioTrack == null) return;
-    if (newDuration.inMilliseconds < 400) return; // Minimum 0.4s
-    _saveSnapshot();
-
-    _audioTrack = _audioTrack!.copyWith(
-      startTime: newStart,
-      duration: newDuration,
-    );
-    notifyListeners();
-  }
-
-  /// Trims or moves text overlay timing
-  void updateTextOverlayTiming(String id, Duration newStart, Duration newDuration) {
-    final index = _textOverlays.indexWhere((t) => t.id == id);
-    if (index == -1) return;
-    if (newDuration.inMilliseconds < 300) return; // Minimum 0.3s
-    _saveSnapshot();
-
-    _textOverlays[index] = _textOverlays[index].copyWith(
-      startTime: newStart,
-      duration: newDuration,
-    );
-    notifyListeners();
-  }
 
   /// Trims or moves PIP overlay layer timing
   void updateOverlayClipTiming(String id, Duration newStart, Duration newDuration) {
@@ -738,6 +980,7 @@ class EditorViewModel extends ChangeNotifier {
     if (asset == null) return false;
     if (containsMediaAsset(asset)) return false;
     _mediaLibrary.add(asset);
+    TtsService.announce('Imported ${asset.displayName}');
     notifyListeners();
     return true;
   }
@@ -748,6 +991,7 @@ class EditorViewModel extends ChangeNotifier {
     if (asset == null) return false;
     if (containsMediaAsset(asset)) return false;
     _mediaLibrary.add(asset);
+    TtsService.announce('Imported ${asset.displayName}');
     notifyListeners();
     return true;
   }
@@ -773,6 +1017,7 @@ class EditorViewModel extends ChangeNotifier {
     );
     _videoClips.add(newClip);
     _selectedClipIndex = _videoClips.length - 1;
+    TtsService.announce('Added clip to timeline');
     notifyListeners();
   }
 
@@ -899,13 +1144,27 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Imports a photo from device storage into the central Media Library
+  Future<bool> importPhotoAsset() async {
+    final asset = await DeviceMediaService.pickMediaAsset(type: 'photo');
+    if (asset == null) return false;
+    if (containsMediaAsset(asset)) return false;
+    _mediaLibrary.add(asset);
+    TtsService.announce('Imported ${asset.displayName}');
+    notifyListeners();
+    return true;
+  }
+
   // --- Speed & Volume Adjustments ---
 
   void setClipSpeed(double speed) {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
     final clip = _videoClips[_selectedClipIndex!];
-    _videoClips[_selectedClipIndex!] = clip.copyWith(speed: speed);
+    final clampedSpeed = speed.clamp(0.25, 4.0);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(speed: clampedSpeed);
+    _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -914,6 +1173,7 @@ class EditorViewModel extends ChangeNotifier {
     _saveSnapshot();
     final clip = _videoClips[_selectedClipIndex!];
     _videoClips[_selectedClipIndex!] = clip.copyWith(volume: volume.clamp(0.0, 1.0));
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -921,22 +1181,258 @@ class EditorViewModel extends ChangeNotifier {
 
   void addAudioTrack(AudioTrack track) {
     _saveSnapshot();
-    _audioTrack = track;
+    _isPlaying = false;
+    _playbackTimer?.cancel();
+    _playbackTimer = null;
+    _audioTracks.add(track);
+    _selectedAudioTrackId = track.id;
+    _isAudioSelected = true;
+    _selectedClipIndex = null;
+    _selectedOverlayIndex = null;
+    _selectedTextId = null;
+    _selectedStickerId = null;
+    _syncAudioPlayback(forceSeek: true);
+    TtsService.announce('Added audio track ${track.title}');
     notifyListeners();
   }
 
-  void removeAudioTrack() {
+  void addAudioTrackFromAsset(MediaAsset asset, {Duration? startTime}) {
+    final duration = asset.duration ?? const Duration(seconds: 30);
+    final random = math.Random(asset.name.hashCode);
+    final waveform = List.generate(40, (_) => 0.2 + random.nextDouble() * 0.8);
+    final track = AudioTrack(
+      id: 'audio_${DateTime.now().millisecondsSinceEpoch}',
+      assetId: asset.id,
+      title: asset.displayName,
+      artist: 'Local Audio',
+      duration: duration,
+      startTime: startTime ?? Duration(milliseconds: (_playheadPosition * 1000).round()),
+      waveformPoints: waveform,
+      volume: 0.85,
+      speed: 1.0,
+    );
+    addAudioTrack(track);
+  }
+
+  void removeAudioTrack([String? id]) {
+    final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
+    if (targetId == null) return;
     _saveSnapshot();
-    _audioTrack = null;
-    _isAudioSelected = false;
+    _audioTracks.removeWhere((t) => t.id == targetId);
+    if (_selectedAudioTrackId == targetId) {
+      _selectedAudioTrackId = null;
+      _isAudioSelected = false;
+    }
+    if (_audioTracks.isEmpty) {
+      AudioPlaybackService.instance.dispose();
+    } else {
+      _syncAudioPlayback(forceSeek: true);
+    }
     notifyListeners();
   }
 
-  void setAudioTrackVolume(double volume) {
-    if (_audioTrack == null) return;
+  void deleteSelectedAudioTrack() {
+    removeAudioTrack();
+  }
+
+  bool trimAudioLeftToPlayhead() {
+    final track = selectedAudioTrack;
+    if (track == null) return false;
+
+    if (_playheadPosition <= track.startTimeInSeconds ||
+        _playheadPosition >= track.endTimeInSeconds - 0.2) {
+      return false;
+    }
+
     _saveSnapshot();
-    _audioTrack = _audioTrack!.copyWith(volume: volume.clamp(0.0, 1.0));
+    final deltaSec = _playheadPosition - track.startTimeInSeconds;
+    final sourceDeltaMs = (deltaSec * track.speed * 1000).round();
+    final newTrimStart = Duration(milliseconds: track.trimStart.inMilliseconds + sourceDeltaMs);
+    final newStartTime = Duration(milliseconds: (_playheadPosition * 1000).round());
+
+    final index = _audioTracks.indexWhere((t) => t.id == track.id);
+    if (index != -1) {
+      _audioTracks[index] = track.copyWith(
+        trimStart: newTrimStart,
+        startTime: newStartTime,
+      );
+      _syncAudioPlayback(forceSeek: true);
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  bool trimAudioRightToPlayhead() {
+    final track = selectedAudioTrack;
+    if (track == null) return false;
+
+    if (_playheadPosition <= track.startTimeInSeconds + 0.2 ||
+        _playheadPosition >= track.endTimeInSeconds) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final offsetSec = _playheadPosition - track.startTimeInSeconds;
+    final sourceOffsetMs = (offsetSec * track.speed * 1000).round();
+    final newTrimEnd = Duration(milliseconds: track.trimStart.inMilliseconds + sourceOffsetMs);
+
+    final index = _audioTracks.indexWhere((t) => t.id == track.id);
+    if (index != -1) {
+      _audioTracks[index] = track.copyWith(trimEnd: newTrimEnd);
+      _syncAudioPlayback(forceSeek: true);
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  void updateAudioTrim(String id, Duration newTrimStart, Duration newTrimEnd) {
+    final index = _audioTracks.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    if (newTrimEnd.inMilliseconds - newTrimStart.inMilliseconds < 300) return;
+
+    _saveSnapshot();
+    _audioTracks[index] = _audioTracks[index].copyWith(
+      trimStart: newTrimStart,
+      trimEnd: newTrimEnd,
+    );
+    _syncAudioPlayback(forceSeek: true);
     notifyListeners();
+  }
+
+  void updateAudioTrackTiming(Duration newStart, Duration newDuration, {String? id}) {
+    final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
+    if (targetId == null) return;
+    final index = _audioTracks.indexWhere((t) => t.id == targetId);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final track = _audioTracks[index];
+    final calculatedTrimEnd = Duration(
+      milliseconds: track.trimStart.inMilliseconds + (newDuration.inMilliseconds * track.speed).round(),
+    );
+    _audioTracks[index] = track.copyWith(
+      startTime: newStart,
+      trimEnd: calculatedTrimEnd,
+    );
+    _syncAudioPlayback(forceSeek: true);
+    notifyListeners();
+  }
+
+  bool splitAudioAtPlayhead() {
+    final track = selectedAudioTrack;
+    if (track == null) return false;
+
+    if (_playheadPosition <= track.startTimeInSeconds + 0.2 ||
+        _playheadPosition >= track.endTimeInSeconds - 0.2) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final offsetSec = _playheadPosition - track.startTimeInSeconds;
+    final splitSourceMs = (offsetSec * track.speed * 1000).round();
+    final splitPoint = Duration(milliseconds: track.trimStart.inMilliseconds + splitSourceMs);
+
+    final index = _audioTracks.indexWhere((t) => t.id == track.id);
+    if (index == -1) return false;
+
+    final partA = track.copyWith(
+      id: '${track.id}_a_${DateTime.now().millisecondsSinceEpoch}',
+      title: '${track.title} (Part 1)',
+      trimEnd: splitPoint,
+    );
+
+    final partB = track.copyWith(
+      id: '${track.id}_b_${DateTime.now().millisecondsSinceEpoch}',
+      title: '${track.title} (Part 2)',
+      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
+      trimStart: splitPoint,
+    );
+
+    _audioTracks.removeAt(index);
+    _audioTracks.insert(index, partA);
+    _audioTracks.insert(index + 1, partB);
+
+    _selectedAudioTrackId = partB.id;
+    _isAudioSelected = true;
+    _syncAudioPlayback(forceSeek: true);
+    notifyListeners();
+    return true;
+  }
+
+  AudioTrack? duplicateSelectedAudioTrack() {
+    final track = selectedAudioTrack;
+    if (track == null) return null;
+
+    _saveSnapshot();
+    final newStartTime = Duration(milliseconds: (track.endTimeInSeconds * 1000).round());
+    final duplicate = track.copyWith(
+      id: 'audio_${DateTime.now().millisecondsSinceEpoch}',
+      title: '${track.title} (Copy)',
+      startTime: newStartTime,
+    );
+
+    _audioTracks.add(duplicate);
+    _selectedAudioTrackId = duplicate.id;
+    _isAudioSelected = true;
+    _syncAudioPlayback(forceSeek: true);
+    notifyListeners();
+    return duplicate;
+  }
+
+  void setAudioTrackVolume(double volume, {String? id}) {
+    final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
+    if (targetId == null) return;
+    final index = _audioTracks.indexWhere((t) => t.id == targetId);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final clamped = volume.clamp(0.0, 1.0);
+    _audioTracks[index] = _audioTracks[index].copyWith(volume: clamped);
+    if (_audioTracks[index].id == selectedAudioTrack?.id) {
+      AudioPlaybackService.instance.setVolume(_audioTracks[index].isMuted ? 0.0 : clamped);
+    }
+    notifyListeners();
+  }
+
+  void updateAudioVolume(String id, double volume) {
+    setAudioTrackVolume(volume, id: id);
+  }
+
+  void toggleAudioMute([String? id]) {
+    final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
+    if (targetId == null) return;
+    final index = _audioTracks.indexWhere((t) => t.id == targetId);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final newMuted = !_audioTracks[index].isMuted;
+    _audioTracks[index] = _audioTracks[index].copyWith(isMuted: newMuted);
+    if (_audioTracks[index].id == selectedAudioTrack?.id) {
+      AudioPlaybackService.instance.setVolume(newMuted ? 0.0 : _audioTracks[index].volume);
+    }
+    notifyListeners();
+  }
+
+  void setAudioTrackSpeed(double speed, {String? id}) {
+    final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
+    if (targetId == null) return;
+    final index = _audioTracks.indexWhere((t) => t.id == targetId);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final clamped = speed.clamp(0.25, 4.0);
+    _audioTracks[index] = _audioTracks[index].copyWith(speed: clamped);
+    if (_audioTracks[index].id == selectedAudioTrack?.id) {
+      AudioPlaybackService.instance.setSpeed(clamped);
+    }
+    _syncAudioPlayback(forceSeek: true);
+    notifyListeners();
+  }
+
+  void updateAudioSpeed(String id, double speed) {
+    setAudioTrackSpeed(speed, id: id);
   }
 
   // --- Text Overlay Operations ---
@@ -944,6 +1440,14 @@ class EditorViewModel extends ChangeNotifier {
   void addTextOverlay(TextOverlay overlay) {
     _saveSnapshot();
     _textOverlays.add(overlay);
+    _selectedTextId = overlay.id;
+    _selectedClipIndex = null;
+    _selectedOverlayIndex = null;
+    _selectedStickerId = null;
+    _selectedAudioTrackId = null;
+    _isAudioSelected = false;
+    scheduleAutoSave();
+    TtsService.announce('Added text ${overlay.text}');
     notifyListeners();
   }
 
@@ -951,7 +1455,14 @@ class EditorViewModel extends ChangeNotifier {
     _saveSnapshot();
     _textOverlays.removeWhere((t) => t.id == id);
     if (_selectedTextId == id) _selectedTextId = null;
+    scheduleAutoSave();
     notifyListeners();
+  }
+
+  void deleteSelectedText() {
+    if (_selectedTextId != null) {
+      removeTextOverlay(_selectedTextId!);
+    }
   }
 
   void updateTextOverlay(TextOverlay overlay) {
@@ -959,8 +1470,211 @@ class EditorViewModel extends ChangeNotifier {
     final index = _textOverlays.indexWhere((t) => t.id == overlay.id);
     if (index != -1) {
       _textOverlays[index] = overlay;
+      scheduleAutoSave();
       notifyListeners();
     }
+  }
+
+  void updateTextPosition(String id, Offset newPos) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index != -1) {
+      _textOverlays[index] = _textOverlays[index].copyWith(position: newPos);
+      scheduleAutoSave();
+      notifyListeners();
+    }
+  }
+
+  void updateTextContent(String id, String newText) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index != -1) {
+      _saveSnapshot();
+      _textOverlays[index] = _textOverlays[index].copyWith(text: newText);
+      scheduleAutoSave();
+      notifyListeners();
+    }
+  }
+
+  void updateTextStyle(
+    String id, {
+    Color? color,
+    double? fontSize,
+    String? fontFamily,
+    Color? backgroundColor,
+    TextAlign? textAlign,
+    bool? isBold,
+    bool? isItalic,
+    bool? isUnderline,
+    Color? shadowColor,
+  }) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index != -1) {
+      _saveSnapshot();
+      _textOverlays[index] = _textOverlays[index].copyWith(
+        color: color,
+        fontSize: fontSize,
+        fontFamily: fontFamily,
+        backgroundColor: backgroundColor,
+        textAlign: textAlign,
+        isBold: isBold,
+        isItalic: isItalic,
+        isUnderline: isUnderline,
+        shadowColor: shadowColor,
+      );
+      scheduleAutoSave();
+      notifyListeners();
+    }
+  }
+
+  void updateTextOverlayTiming(
+    String id,
+    Duration newStart,
+    Duration newDuration, {
+    Duration? trimStart,
+    Duration? trimEnd,
+  }) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _textOverlays[index] = _textOverlays[index].copyWith(
+      startTime: newStart,
+      duration: newDuration,
+      trimStart: trimStart,
+      trimEnd: trimEnd,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  bool trimTextLeftToPlayhead() {
+    final text = selectedTextOverlay;
+    if (text == null) return false;
+
+    if (_playheadPosition <= text.startTimeInSeconds ||
+        _playheadPosition >= text.endTimeInSeconds - 0.2) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final deltaSec = _playheadPosition - text.startTimeInSeconds;
+    final deltaMs = (deltaSec * text.speed * 1000).round();
+    final newTrimStart = Duration(milliseconds: text.trimStart.inMilliseconds + deltaMs);
+    final newStartTime = Duration(milliseconds: (_playheadPosition * 1000).round());
+
+    final index = _textOverlays.indexWhere((t) => t.id == text.id);
+    if (index != -1) {
+      _textOverlays[index] = text.copyWith(
+        startTime: newStartTime,
+        trimStart: newTrimStart,
+      );
+    }
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
+  }
+
+  bool trimTextRightToPlayhead() {
+    final text = selectedTextOverlay;
+    if (text == null) return false;
+
+    if (_playheadPosition >= text.endTimeInSeconds ||
+        _playheadPosition <= text.startTimeInSeconds + 0.2) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final deltaSec = _playheadPosition - text.startTimeInSeconds;
+    final deltaMs = (deltaSec * text.speed * 1000).round();
+    final newTrimEnd = Duration(milliseconds: text.trimStart.inMilliseconds + deltaMs);
+
+    final index = _textOverlays.indexWhere((t) => t.id == text.id);
+    if (index != -1) {
+      _textOverlays[index] = text.copyWith(
+        trimEnd: newTrimEnd,
+      );
+    }
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
+  }
+
+  bool splitTextAtPlayhead() {
+    final text = selectedTextOverlay;
+    if (text == null) return false;
+
+    if (_playheadPosition <= text.startTimeInSeconds + 0.2 ||
+        _playheadPosition >= text.endTimeInSeconds - 0.2) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final index = _textOverlays.indexWhere((t) => t.id == text.id);
+    if (index == -1) return false;
+
+    final offsetSec = _playheadPosition - text.startTimeInSeconds;
+    final splitMs = (offsetSec * text.speed * 1000).round();
+    final newSplitPoint = Duration(milliseconds: text.trimStart.inMilliseconds + splitMs);
+
+    final textPartA = text.copyWith(
+      id: '${text.id}_part1_${DateTime.now().millisecondsSinceEpoch}',
+      trimEnd: newSplitPoint,
+    );
+
+    final textPartB = text.copyWith(
+      id: '${text.id}_part2_${DateTime.now().millisecondsSinceEpoch}',
+      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
+      trimStart: newSplitPoint,
+    );
+
+    _textOverlays.removeAt(index);
+    _textOverlays.insert(index, textPartA);
+    _textOverlays.insert(index + 1, textPartB);
+
+    _selectedTextId = textPartB.id;
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
+  }
+
+  TextOverlay? duplicateSelectedText() {
+    final text = selectedTextOverlay;
+    if (text == null) return null;
+
+    _saveSnapshot();
+    final index = _textOverlays.indexWhere((t) => t.id == text.id);
+    final newStart = text.startTime + text.effectiveDuration;
+
+    final duplicated = text.copyWith(
+      id: '${text.id}_dup_${DateTime.now().millisecondsSinceEpoch}',
+      startTime: newStart,
+    );
+
+    if (index != -1) {
+      _textOverlays.insert(index + 1, duplicated);
+    } else {
+      _textOverlays.add(duplicated);
+    }
+
+    _selectedTextId = duplicated.id;
+    scheduleAutoSave();
+    notifyListeners();
+    return duplicated;
+  }
+
+  void setTextSpeed(double speed, {String? id}) {
+    final targetId = id ?? _selectedTextId;
+    if (targetId == null) return;
+    final index = _textOverlays.indexWhere((t) => t.id == targetId);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final clamped = speed.clamp(0.25, 4.0);
+    _textOverlays[index] = _textOverlays[index].copyWith(speed: clamped);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void updateTextSpeed(String id, double speed) {
+    setTextSpeed(speed, id: id);
   }
 
   // --- Sticker Operations ---
@@ -1079,6 +1793,8 @@ class EditorViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _autoSaveDebounceTimer?.cancel();
+    saveCurrentProject();
     _playbackTimer?.cancel();
     _exportTimer?.cancel();
     super.dispose();

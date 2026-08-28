@@ -8,24 +8,142 @@ import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/core/constants/app_typography.dart';
 import 'package:capcut_video_editor/core/utils/time_formatter.dart';
 import 'package:capcut_video_editor/domain/models/editor_filter.dart';
+import 'package:capcut_video_editor/domain/models/media_asset.dart';
+import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
+import 'package:capcut_video_editor/core/services/video_playback_service.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
 /// Top Video Preview Screen containing the live video canvas, aspect-ratio viewport,
 /// color grading LUT filters, adjustments, Picture-in-Picture (PIP) layers,
-/// active stickers, subtitles, and playback overlay.
-class VideoPreviewSection extends StatelessWidget {
+/// active stickers, subtitles, and hardware-accelerated playback surface.
+class VideoPreviewSection extends StatefulWidget {
   final EditorViewModel viewModel;
 
   const VideoPreviewSection({super.key, required this.viewModel});
+
+  @override
+  State<VideoPreviewSection> createState() => _VideoPreviewSectionState();
+}
+
+class _VideoPreviewSectionState extends State<VideoPreviewSection> {
+  EditorViewModel get viewModel => widget.viewModel;
+
+  VideoPlayerSession? _session;
+  String? _loadedPath;
+  bool _isPlaying = false;
+  double _lastPlayheadPosition = -1.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncPlayerWithModel();
+  }
+
+  @override
+  void didUpdateWidget(covariant VideoPreviewSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncPlayerWithModel();
+  }
+
+  @override
+  void dispose() {
+    if (_session != null) {
+      VideoPlaybackService.instance.disposeSession(_session!.textureId);
+      _session = null;
+    }
+    super.dispose();
+  }
+
+  void _syncPlayerWithModel() {
+    final activeClip = widget.viewModel.currentActiveClipAtPlayhead;
+    String? localPath;
+    if (activeClip is VideoClip) {
+      final asset = widget.viewModel.getAssetById(activeClip.assetId);
+      if (asset != null && !asset.isPhoto) {
+        localPath = asset.localPath;
+      }
+    }
+
+    // 1. If path changed, initialize new native player session
+    if (localPath != _loadedPath) {
+      _loadedPath = localPath;
+      if (_session != null) {
+        VideoPlaybackService.instance.disposeSession(_session!.textureId);
+        _session = null;
+      }
+
+      if (localPath != null && !localPath.startsWith('content://') && !kIsWeb && File(localPath).existsSync()) {
+        VideoPlaybackService.instance.createSession(localPath).then((session) {
+          if (mounted && _loadedPath == localPath) {
+            setState(() {
+              _session = session;
+            });
+            if (session != null && activeClip is VideoClip) {
+              VideoPlaybackService.instance.setVolume(session.textureId, activeClip.volume);
+              VideoPlaybackService.instance.setSpeed(session.textureId, activeClip.speed);
+              final clipStart = widget.viewModel.selectedClipIndex != null
+                  ? widget.viewModel.getClipStartTime(widget.viewModel.selectedClipIndex!)
+                  : 0.0;
+              final delta = (widget.viewModel.playheadPosition - clipStart).clamp(0.0, activeClip.durationInSeconds);
+              final srcSec = (activeClip.trimStart.inMilliseconds / 1000.0) + (delta * activeClip.speed);
+              VideoPlaybackService.instance.seekTo(session.textureId, Duration(milliseconds: (srcSec * 1000).round()));
+            }
+            // If viewModel is currently playing, start playing immediately
+            if (widget.viewModel.isPlaying && session != null) {
+              VideoPlaybackService.instance.play(session.textureId);
+              _isPlaying = true;
+            }
+          }
+        });
+      }
+    }
+
+    // 2. Sync dynamic volume & speed properties
+    if (_session != null && _session!.isInitialized && activeClip is VideoClip) {
+      VideoPlaybackService.instance.setVolume(_session!.textureId, activeClip.volume);
+      VideoPlaybackService.instance.setSpeed(_session!.textureId, activeClip.speed);
+    }
+
+    // 3. Sync play/pause state
+    if (_session != null && _session!.isInitialized) {
+      if (widget.viewModel.isPlaying && !_isPlaying) {
+        _isPlaying = true;
+        VideoPlaybackService.instance.play(_session!.textureId);
+      } else if (!widget.viewModel.isPlaying && _isPlaying) {
+        _isPlaying = false;
+        VideoPlaybackService.instance.pause(_session!.textureId);
+      }
+
+      // 4. Sync seek position if changed while paused or scrubbed
+      if (!widget.viewModel.isPlaying && (_lastPlayheadPosition - widget.viewModel.playheadPosition).abs() > 0.05) {
+        _lastPlayheadPosition = widget.viewModel.playheadPosition;
+        double clipStart = 0.0;
+        if (activeClip is VideoClip && widget.viewModel.selectedClipIndex != null) {
+          clipStart = widget.viewModel.getClipStartTime(widget.viewModel.selectedClipIndex!);
+        }
+        final deltaInClipSec = (widget.viewModel.playheadPosition - clipStart).clamp(
+          0.0,
+          activeClip is VideoClip ? activeClip.durationInSeconds : 1000.0,
+        );
+        final sourceOffsetSec = (activeClip is VideoClip)
+            ? (activeClip.trimStart.inMilliseconds / 1000.0) + (deltaInClipSec * activeClip.speed)
+            : deltaInClipSec;
+        VideoPlaybackService.instance.seekTo(
+          _session!.textureId,
+          Duration(milliseconds: (sourceOffsetSec * 1000).round()),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final activeClip = viewModel.currentActiveClipAtPlayhead;
     final activeOverlays = viewModel.activeOverlayClipsAtPlayhead;
     final activeStickers = viewModel.activeStickersAtPlayhead;
-    final activeText = viewModel.activeTextOverlay;
+    final activeTexts = viewModel.activeTextOverlaysAtPlayhead;
     final targetRatio = viewModel.aspectRatio.ratio ?? (9 / 16);
 
     final filter = viewModel.activeFilter.getColorFilter();
@@ -80,34 +198,7 @@ class VideoPreviewSection extends StatelessWidget {
                     // 4. Active Stickers Overlays
                     ...activeStickers.map((sticker) => _buildStickerOverlay(sticker)),
 
-                    // 5. Active Text / Subtitle Overlay
-                    if (activeText != null)
-                      Align(
-                        alignment: FractionalOffset(activeText.position.dx, activeText.position.dy),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          margin: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.6),
-                            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                            border: Border.all(color: activeText.color.withOpacity(0.5)),
-                          ),
-                          child: Text(
-                            activeText.text,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: activeText.fontSize,
-                              fontWeight: FontWeight.w900,
-                              color: activeText.color,
-                              shadows: const [
-                                Shadow(blurRadius: 4, color: Colors.black, offset: Offset(1, 1)),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-
-                    // 6. Tap to Play / Pause Gesture Overlay
+                    // 5. Tap to Play / Pause Gesture Overlay
                     GestureDetector(
                       behavior: HitTestBehavior.translucent,
                       onTap: viewModel.togglePlayPause,
@@ -132,6 +223,9 @@ class VideoPreviewSection extends StatelessWidget {
                         ),
                       ),
                     ),
+
+                    // 6. Active Text / Subtitle Overlays (Positioned on top for drag and interaction)
+                    ...activeTexts.map((text) => _buildTextOverlay(text)),
 
                     // 7. Top-Left: Badges (Aspect Ratio & Active Filter)
                     Positioned(
@@ -208,10 +302,16 @@ class VideoPreviewSection extends StatelessWidget {
   }
 
   Widget _buildMainVideoCanvas(dynamic activeClip, ColorFilter? filter, ColorFilter? adjustments) {
+    MediaAsset? asset;
     String? localPath;
+    String? thumbnailPath;
+    bool isPhoto = false;
+
     if (activeClip is VideoClip) {
-      final asset = viewModel.getAssetById(activeClip.assetId);
+      asset = viewModel.getAssetById(activeClip.assetId);
       localPath = asset?.localPath;
+      thumbnailPath = asset?.thumbnailPath;
+      isPhoto = asset?.isPhoto ?? false;
     }
 
     final hasLocalFile = localPath != null &&
@@ -219,50 +319,106 @@ class VideoPreviewSection extends StatelessWidget {
         !kIsWeb &&
         File(localPath).existsSync();
 
+    final hasThumbnail = thumbnailPath != null &&
+        !thumbnailPath.startsWith('content://') &&
+        !kIsWeb &&
+        File(thumbnailPath).existsSync();
+
+    // Diagnostic logging for media resolution
+    if (activeClip is VideoClip) {
+      debugPrint(
+        '[VideoPreviewSection] Clip "${activeClip.title}" (id: ${activeClip.id}, assetId: ${activeClip.assetId}) -> '
+        'MediaAsset: ${asset?.name}, type: ${asset?.type}, localPath: $localPath (exists: $hasLocalFile), '
+        'thumbnailPath: $thumbnailPath (exists: $hasThumbnail), isPlaying: ${viewModel.isPlaying}',
+      );
+    }
+
     Widget canvasChild;
 
     if (hasLocalFile) {
-      canvasChild = Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.file(
-            File(localPath),
-            fit: BoxFit.contain,
-            errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(activeClip),
-          ),
-          Positioned(
-            bottom: 8,
-            left: 8,
-            right: 8,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.65),
-                borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                border: Border.all(color: AppColors.primary.withOpacity(0.5), width: 0.8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle_rounded, size: 12, color: AppColors.primary),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      activeClip.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                  ),
-                  Text(
-                    'PLAYING FROM STORAGE',
-                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.primary.withOpacity(0.9)),
-                  ),
-                ],
-              ),
+      if (isPhoto) {
+        // Still photo rendering
+        canvasChild = Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(
+              File(localPath),
+              fit: BoxFit.contain,
+              errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(activeClip),
             ),
-          ),
-        ],
-      );
+            _buildLocalSourceBadge(activeClip, localPath, isPhoto: true),
+          ],
+        );
+      } else {
+        // Real Video rendering: Uses native hardware decoded Flutter Texture when session is active,
+        // and falls back seamlessly to extracted frame 0 thumbnail while attaching.
+        Widget videoPlayerWidget;
+
+        if (_session != null && _session!.isInitialized) {
+          videoPlayerWidget = Center(
+            child: AspectRatio(
+              aspectRatio: _session!.aspectRatio,
+              child: Texture(textureId: _session!.textureId),
+            ),
+          );
+        } else if (hasThumbnail) {
+          videoPlayerWidget = Image.file(
+            File(thumbnailPath),
+            fit: BoxFit.contain,
+            errorBuilder: (ctx, err, stack) => _buildVideoPlaybackSurface(activeClip, localPath),
+          );
+        } else {
+          videoPlayerWidget = _buildVideoPlaybackSurface(activeClip, localPath);
+        }
+
+        canvasChild = Stack(
+          fit: StackFit.expand,
+          children: [
+            videoPlayerWidget,
+
+            // Live Playback Indicator
+            if (viewModel.isPlaying)
+              Positioned(
+                top: 10,
+                right: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                    border: Border.all(color: AppColors.primary, width: 1),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'HARDWARE DECODED',
+                        style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.primary,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // Storage badge
+            _buildLocalSourceBadge(activeClip, localPath, isPhoto: false),
+          ],
+        );
+      }
     } else {
       canvasChild = _buildPlaceholderGraphic(activeClip);
     }
@@ -375,6 +531,113 @@ class VideoPreviewSection extends StatelessWidget {
                   ],
                 ],
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoPlaybackSurface(dynamic activeClip, String? localPath) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F141C),
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF141E30),
+            Color(0xFF243B55),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.primary.withOpacity(0.15),
+                border: Border.all(color: AppColors.primary.withOpacity(0.6), width: 1.5),
+              ),
+              child: Icon(
+                viewModel.isPlaying ? Icons.play_circle_filled_rounded : Icons.videocam_rounded,
+                size: 32,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              activeClip.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: Text(
+                viewModel.isPlaying
+                    ? 'PLAYING • ${TimeFormatter.formatSeconds(viewModel.playheadPosition)}'
+                    : 'PAUSED • ${TimeFormatter.formatSeconds(activeClip.durationInSeconds)}',
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600,
+                  color: viewModel.isPlaying ? AppColors.primary : AppColors.textMuted,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocalSourceBadge(dynamic activeClip, String localPath, {required bool isPhoto}) {
+    return Positioned(
+      bottom: 8,
+      left: 8,
+      right: 8,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.75),
+          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+          border: Border.all(color: AppColors.primary.withOpacity(0.6), width: 0.8),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isPhoto ? Icons.photo_library_rounded : Icons.check_circle_rounded,
+              size: 12,
+              color: AppColors.primary,
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                activeClip.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ),
+            Text(
+              isPhoto ? 'LOCAL PHOTO' : 'PLAYING FROM STORAGE',
+              style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.primary.withOpacity(0.9)),
             ),
           ],
         ),
@@ -515,6 +778,88 @@ class VideoPreviewSection extends StatelessWidget {
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  Widget _buildTextOverlay(TextOverlay text) {
+    final isSelected = viewModel.selectedTextId == text.id;
+
+    return Align(
+      alignment: FractionalOffset(
+        text.position.dx.clamp(0.05, 0.95),
+        text.position.dy.clamp(0.05, 0.95),
+      ),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => viewModel.selectText(text.id),
+        onPanUpdate: (details) {
+          final newX = (text.position.dx + details.delta.dx / 300.0).clamp(0.05, 0.95);
+          final newY = (text.position.dy + details.delta.dy / 400.0).clamp(0.05, 0.95);
+          viewModel.updateTextPosition(text.id, Offset(newX, newY));
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: text.backgroundColor ?? Colors.black.withOpacity(0.65),
+            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+            border: Border.all(
+              color: isSelected ? AppColors.primary : text.color.withOpacity(0.6),
+              width: isSelected ? 2.0 : 1.0,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: AppColors.primary.withOpacity(0.4),
+                      blurRadius: 8,
+                      spreadRadius: 1,
+                    )
+                  ]
+                : null,
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Text(
+                text.text,
+                textAlign: text.textAlign,
+                style: TextStyle(
+                  fontSize: text.fontSize,
+                  fontFamily: text.fontFamily,
+                  fontWeight: text.isBold ? FontWeight.w900 : FontWeight.w600,
+                  fontStyle: text.isItalic ? FontStyle.italic : FontStyle.normal,
+                  decoration: text.isUnderline ? TextDecoration.underline : TextDecoration.none,
+                  decorationColor: text.color,
+                  color: text.color,
+                  shadows: [
+                    Shadow(
+                      blurRadius: 6,
+                      color: text.shadowColor ?? Colors.black,
+                      offset: const Offset(1, 1),
+                    ),
+                  ],
+                ),
+              ),
+              if (isSelected)
+                Positioned(
+                  top: -14,
+                  right: -14,
+                  child: GestureDetector(
+                    onTap: () => viewModel.removeTextOverlay(text.id),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: AppColors.error,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close, size: 12, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -125,6 +125,12 @@ class DeviceMediaService {
         }
       }
 
+      final durationMs = (result['durationMs'] as num?)?.toInt();
+      final thumbnailPath = result['thumbnailPath'] as String?;
+      final detectedDuration = (durationMs != null && durationMs > 0)
+          ? Duration(milliseconds: durationMs)
+          : null;
+
       final isPhoto = mime.startsWith('image') ||
           name.toLowerCase().endsWith('.jpg') ||
           name.toLowerCase().endsWith('.jpeg') ||
@@ -133,17 +139,21 @@ class DeviceMediaService {
 
       final assetType = isPhoto ? MediaAssetType.photo : MediaAssetType.video;
 
-      return MediaAsset(
+      final asset = MediaAsset(
         id: 'asset_${DateTime.now().millisecondsSinceEpoch}_${name.hashCode.abs()}',
         type: assetType,
         name: name,
         uri: uri,
         localPath: localPath,
-        duration: null, // Rule 4: No fake durations, use null until real metadata extraction exists
-        sizeBytes: sizeBytes, // Rule 5: Preserve exact native sizeBytes
-        thumbnailPath: isPhoto ? localPath : null,
+        duration: detectedDuration,
+        sizeBytes: sizeBytes,
+        thumbnailPath: isPhoto ? localPath : thumbnailPath,
         createdAt: DateTime.now(),
       );
+
+      debugPrint('[DeviceMediaService] Imported MediaAsset: id=${asset.id}, name=${asset.name}, type=${asset.type}, localPath=${asset.localPath}, exists=${!kIsWeb && File(localPath).existsSync()}, sizeBytes=${asset.sizeBytes}, duration=${asset.duration}, thumbnailPath=${asset.thumbnailPath}');
+
+      return asset;
     } on MissingPluginException {
       debugPrint('[DeviceMediaService] MethodChannel not available on this platform');
       return null;
@@ -169,6 +179,10 @@ class DeviceMediaService {
       final localPath = result['path'] as String?;
       final name = (result['name'] as String?) ?? 'Selected_Audio';
       final sizeBytes = (result['size'] as num?)?.toInt();
+      final durationMs = (result['durationMs'] as num?)?.toInt();
+      final detectedDuration = (durationMs != null && durationMs > 0)
+          ? Duration(milliseconds: durationMs)
+          : null;
 
       // Rule 2: If Android returns null/empty localPath, fail import
       if (localPath == null || localPath.trim().isEmpty) {
@@ -191,17 +205,21 @@ class DeviceMediaService {
         }
       }
 
-      return MediaAsset(
+      final asset = MediaAsset(
         id: 'audio_asset_${DateTime.now().millisecondsSinceEpoch}_${name.hashCode.abs()}',
         type: MediaAssetType.audio,
         name: name,
         uri: uri,
         localPath: localPath,
-        duration: null, // Rule 4: No fake durations, use null until real metadata extraction exists
-        sizeBytes: sizeBytes, // Rule 5: Preserve exact native sizeBytes
+        duration: detectedDuration,
+        sizeBytes: sizeBytes,
         thumbnailPath: null,
         createdAt: DateTime.now(),
       );
+
+      debugPrint('[DeviceMediaService] Imported Audio MediaAsset: id=${asset.id}, name=${asset.name}, localPath=${asset.localPath}, exists=${!kIsWeb && File(localPath).existsSync()}, sizeBytes=${asset.sizeBytes}, duration=${asset.duration}');
+
+      return asset;
     } on MissingPluginException {
       debugPrint('[DeviceMediaService] MethodChannel not available on this platform');
       return null;

@@ -23,7 +23,8 @@ class AudioTrackItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final trackWidth = math.max(40.0, audioTrack.durationInSeconds * pixelsPerSecond);
     final startOffset = audioTrack.startTimeInSeconds * pixelsPerSecond;
-    final isSelected = viewModel.isAudioSelected;
+    final isSelected = (viewModel.selectedAudioTrackId == audioTrack.id) ||
+        (viewModel.isAudioSelected && viewModel.audioTracks.length == 1);
     final audioAsset = viewModel.getAssetById(audioTrack.assetId);
     final hasLocalAudio = audioAsset?.localPath != null &&
         !audioAsset!.localPath!.startsWith('content://');
@@ -33,7 +34,7 @@ class AudioTrackItem extends StatelessWidget {
       width: trackWidth,
       height: AppDimensions.audioTrackHeight,
       child: GestureDetector(
-        onTap: viewModel.selectAudio,
+        onTap: () => viewModel.selectAudioTrack(audioTrack.id),
         onHorizontalDragUpdate: (details) {
           // Middle drag: slide audio track position across timeline
           final deltaSeconds = details.primaryDelta! / pixelsPerSecond;
@@ -41,6 +42,7 @@ class AudioTrackItem extends StatelessWidget {
           viewModel.updateAudioTrackTiming(
             Duration(milliseconds: (newStartSec * 1000).round()),
             audioTrack.duration,
+            id: audioTrack.id,
           );
         },
         child: Container(
@@ -69,7 +71,9 @@ class AudioTrackItem extends StatelessWidget {
                   child: CustomPaint(
                     painter: _WaveformPainter(
                       points: audioTrack.waveformPoints,
-                      color: AppColors.audioTrackWaveform.withOpacity(0.6),
+                      color: audioTrack.isMuted
+                          ? AppColors.textMuted.withOpacity(0.3)
+                          : AppColors.audioTrackWaveform.withOpacity(0.6),
                     ),
                   ),
                 ),
@@ -82,23 +86,31 @@ class AudioTrackItem extends StatelessWidget {
                 right: 14,
                 child: Row(
                   children: [
-                    const Icon(Icons.music_note_rounded, size: 13, color: AppColors.primary),
+                    Icon(
+                      audioTrack.isMuted ? Icons.volume_off_rounded : Icons.music_note_rounded,
+                      size: 13,
+                      color: audioTrack.isMuted ? AppColors.error : AppColors.primary,
+                    ),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        '${audioTrack.name} • ${audioTrack.artist}',
+                        '${audioTrack.title} • ${audioTrack.speed > 1.05 || audioTrack.speed < 0.95 ? '${audioTrack.speed.toStringAsFixed(1)}x • ' : ''}${audioTrack.artist}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
+                          color: audioTrack.isMuted ? AppColors.textMuted : AppColors.textPrimary,
                         ),
                       ),
                     ),
                     Text(
-                      '${(audioTrack.volume * 100).round()}%',
-                      style: const TextStyle(fontSize: 9, color: AppColors.textSecondary),
+                      audioTrack.isMuted ? 'MUTED' : '${(audioTrack.volume * 100).round()}%',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        color: audioTrack.isMuted ? AppColors.error : AppColors.textSecondary,
+                      ),
                     ),
                   ],
                 ),
@@ -135,19 +147,26 @@ class AudioTrackItem extends StatelessWidget {
                   child: _buildTrimHandle(
                     isLeft: true,
                     onDrag: (dx) {
+                      final currentTrimEnd = audioTrack.effectiveTrimEnd;
                       final deltaSec = dx / pixelsPerSecond;
-                      final currentStartSec = audioTrack.startTimeInSeconds;
-                      final currentDurationSec = audioTrack.durationInSeconds;
+                      final sourceDeltaMs = (deltaSec * audioTrack.speed * 1000).round();
+                      final newTrimStartMs = (audioTrack.trimStart.inMilliseconds + sourceDeltaMs)
+                          .clamp(0, currentTrimEnd.inMilliseconds - 300)
+                          .toInt();
+                      final actualAppliedDeltaMs = newTrimStartMs - audioTrack.trimStart.inMilliseconds;
+                      final timelineDeltaSec = actualAppliedDeltaMs / 1000.0 / audioTrack.speed;
+                      final newStartSec = math.max(0.0, audioTrack.startTimeInSeconds + timelineDeltaSec);
 
-                      final newStartSec = math.max(0.0, currentStartSec + deltaSec);
-                      final newDurationSec = currentDurationSec - (newStartSec - currentStartSec);
-
-                      if (newDurationSec >= 0.5) {
-                        viewModel.updateAudioTrackTiming(
-                          Duration(milliseconds: (newStartSec * 1000).round()),
-                          Duration(milliseconds: (newDurationSec * 1000).round()),
-                        );
-                      }
+                      viewModel.updateAudioTrim(
+                        audioTrack.id,
+                        Duration(milliseconds: newTrimStartMs),
+                        currentTrimEnd,
+                      );
+                      viewModel.updateAudioTrackTiming(
+                        Duration(milliseconds: (newStartSec * 1000).round()),
+                        audioTrack.duration,
+                        id: audioTrack.id,
+                      );
                     },
                   ),
                 ),
@@ -158,11 +177,17 @@ class AudioTrackItem extends StatelessWidget {
                   child: _buildTrimHandle(
                     isLeft: false,
                     onDrag: (dx) {
+                      final currentTrimEnd = audioTrack.effectiveTrimEnd;
                       final deltaSec = dx / pixelsPerSecond;
-                      final newDurationSec = math.max(0.5, audioTrack.durationInSeconds + deltaSec);
-                      viewModel.updateAudioTrackTiming(
-                        audioTrack.startTime,
-                        Duration(milliseconds: (newDurationSec * 1000).round()),
+                      final sourceDeltaMs = (deltaSec * audioTrack.speed * 1000).round();
+                      final newTrimEndMs = (currentTrimEnd.inMilliseconds + sourceDeltaMs)
+                          .clamp(audioTrack.trimStart.inMilliseconds + 300, audioTrack.duration.inMilliseconds)
+                          .toInt();
+
+                      viewModel.updateAudioTrim(
+                        audioTrack.id,
+                        audioTrack.trimStart,
+                        Duration(milliseconds: newTrimEndMs),
                       );
                     },
                   ),

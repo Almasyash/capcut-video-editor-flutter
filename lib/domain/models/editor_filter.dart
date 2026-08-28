@@ -163,4 +163,25 @@ class EditorFilter {
         return null;
     }
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'type': type.name,
+      'intensity': intensity,
+    };
+  }
+
+  factory EditorFilter.fromJson(Map<String, dynamic> json) {
+    final typeName = json['type'] as String? ?? 'none';
+    final type = FilterType.values.firstWhere(
+      (t) => t.name == typeName,
+      orElse: () => FilterType.none,
+    );
+    final intensity = (json['intensity'] as num?)?.toDouble() ?? 0.8;
+    final preset = presets.firstWhere(
+      (p) => p.type == type,
+      orElse: () => presets.first,
+    );
+    return preset.copyWith(intensity: intensity);
+  }
 }

@@ -89,6 +89,45 @@ class VideoClip {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'assetId': assetId,
+      'title': title,
+      'originalDurationMs': originalDuration.inMilliseconds,
+      'trimStartMs': trimStart.inMilliseconds,
+      'trimEndMs': trimEnd.inMilliseconds,
+      'speed': speed,
+      'volume': volume,
+      'opacity': opacity,
+      'rotationDegrees': rotationDegrees,
+      'flipHorizontal': flipHorizontal,
+      'flipVertical': flipVertical,
+      'isReversed': isReversed,
+      'isFrozen': isFrozen,
+    };
+  }
+
+  factory VideoClip.fromJson(Map<String, dynamic> json) {
+    return VideoClip(
+      id: json['id'] as String,
+      assetId: json['assetId'] as String? ?? '',
+      title: json['title'] as String? ?? 'Video Clip',
+      originalDuration: Duration(milliseconds: (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
+      trimStart: Duration(milliseconds: (json['trimStartMs'] as num?)?.toInt() ?? 0),
+      trimEnd: Duration(milliseconds: (json['trimEndMs'] as num?)?.toInt() ?? (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
+      speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
+      volume: (json['volume'] as num?)?.toDouble() ?? 1.0,
+      opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
+      rotationDegrees: (json['rotationDegrees'] as num?)?.toInt() ?? 0,
+      flipHorizontal: json['flipHorizontal'] as bool? ?? false,
+      flipVertical: json['flipVertical'] as bool? ?? false,
+      isReversed: json['isReversed'] as bool? ?? false,
+      isFrozen: json['isFrozen'] as bool? ?? false,
+      previewGradient: const [Color(0xFF141E30), Color(0xFF243B55)],
+    );
+  }
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||

@@ -29,6 +29,9 @@ class MediaAsset {
 
   final DateTime createdAt;
 
+  /// Original display name
+  String get displayName => name;
+
   const MediaAsset({
     required this.id,
     required this.type,

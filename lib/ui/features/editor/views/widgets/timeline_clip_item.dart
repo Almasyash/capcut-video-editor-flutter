@@ -12,6 +12,8 @@ import 'package:capcut_video_editor/domain/models/video_clip.dart';
 class TimelineClipItem extends StatelessWidget {
   final VideoClip clip;
   final String? localPath;
+  final String? thumbnailPath;
+  final bool isPhoto;
   final int index;
   final bool isSelected;
   final double pixelsPerSecond;
@@ -22,6 +24,8 @@ class TimelineClipItem extends StatelessWidget {
     super.key,
     required this.clip,
     this.localPath,
+    this.thumbnailPath,
+    this.isPhoto = false,
     required this.index,
     required this.isSelected,
     required this.pixelsPerSecond,
@@ -36,6 +40,12 @@ class TimelineClipItem extends StatelessWidget {
         !localPath!.startsWith('content://') &&
         !kIsWeb &&
         File(localPath!).existsSync();
+
+    final displayImagePath = isPhoto ? localPath : thumbnailPath;
+    final hasDisplayImage = displayImagePath != null &&
+        !displayImagePath.startsWith('content://') &&
+        !kIsWeb &&
+        File(displayImagePath).existsSync();
 
     return GestureDetector(
       onTap: onTap,
@@ -64,13 +74,13 @@ class TimelineClipItem extends StatelessWidget {
                 ),
                 child: Stack(
                   children: [
-                    // Real image thumbnail if localPath is available
-                    if (hasLocalFile)
+                    // Real image thumbnail if displayImagePath is available
+                    if (hasDisplayImage)
                       Positioned.fill(
                         child: Opacity(
                           opacity: 0.6,
                           child: Image.file(
-                            File(localPath!),
+                            File(displayImagePath),
                             fit: BoxFit.cover,
                             errorBuilder: (ctx, err, stack) => const SizedBox.shrink(),
                           ),
@@ -89,39 +99,51 @@ class TimelineClipItem extends StatelessWidget {
                       top: 4,
                       left: isSelected ? AppDimensions.trimHandleWidth + 2 : 6,
                       right: isSelected ? AppDimensions.trimHandleWidth + 2 : 6,
-                      child: Row(
-                        children: [
-                          Icon(clip.previewIcon, size: 12, color: Colors.white70),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              clip.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                shadows: [Shadow(blurRadius: 2, color: Colors.black)],
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.6),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                            child: Text(
-                              TimeFormatter.formatSeconds(clip.durationInSeconds, showMilliseconds: false),
-                              style: const TextStyle(
-                                fontSize: 9,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          ),
-                        ],
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          if (constraints.maxWidth < 30) {
+                            return const SizedBox.shrink();
+                          }
+                          return Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(clip.previewIcon, size: 10, color: Colors.white70),
+                              if (constraints.maxWidth > 70) ...[
+                                const SizedBox(width: 3),
+                                Expanded(
+                                  child: Text(
+                                    clip.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      shadows: [Shadow(blurRadius: 2, color: Colors.black)],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (constraints.maxWidth > 50)
+                                Container(
+                                  margin: const EdgeInsets.only(left: 2),
+                                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.6),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: Text(
+                                    TimeFormatter.formatSeconds(clip.durationInSeconds, showMilliseconds: false),
+                                    style: const TextStyle(
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
                       ),
                     ),
 
@@ -130,21 +152,26 @@ class TimelineClipItem extends StatelessWidget {
                       Positioned(
                         bottom: 3,
                         left: isSelected ? AppDimensions.trimHandleWidth + 4 : 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.7),
-                            borderRadius: BorderRadius.circular(2),
-                            border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 0.5),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.folder_open_rounded, size: 8, color: AppColors.primary),
-                              SizedBox(width: 2),
-                              Text('LOCAL FILE', style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: AppColors.primary)),
-                            ],
-                          ),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            if (clipWidth < 60) return const SizedBox.shrink();
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.7),
+                                borderRadius: BorderRadius.circular(2),
+                                border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 0.5),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.folder_open_rounded, size: 8, color: AppColors.primary),
+                                  SizedBox(width: 2),
+                                  Text('LOCAL FILE', style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                                ],
+                              ),
+                            );
+                          },
                         ),
                       ),
 
@@ -153,16 +180,21 @@ class TimelineClipItem extends StatelessWidget {
                       Positioned(
                         bottom: 4,
                         right: isSelected ? AppDimensions.trimHandleWidth + 4 : 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: Text(
-                            '${clip.speed.toStringAsFixed(1)}x',
-                            style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.black),
-                          ),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            if (clipWidth < 40) return const SizedBox.shrink();
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                '${clip.speed.toStringAsFixed(1)}x',
+                                style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.black),
+                              ),
+                            );
+                          },
                         ),
                       ),
                   ],
