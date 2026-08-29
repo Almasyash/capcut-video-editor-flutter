@@ -3,8 +3,8 @@
 # Copy this file to `android/key.properties` (which is gitignored):
 #   cp android/key.properties.example android/key.properties
 #
-# 1. GENERATING A NEW PRODUCTION KEYSTORE:
-#    keytool -genkey -v -keystore android/app/mahmas-release.keystore -alias mahmas-key -keyalg RSA -keysize 2048 -validity 10000
+# 1. GENERATING A NEW PRODUCTION KEYSTORE (if needed):
+#    keytool -genkeypair -v -keystore android/app/mahmas-release.keystore -alias mahmas-key -keyalg RSA -keysize 2048 -validity 10000 -storetype PKCS12
 #
 # 2. LOCAL CONFIGURATION (in android/key.properties):
 #    keyAlias=mahmas-key

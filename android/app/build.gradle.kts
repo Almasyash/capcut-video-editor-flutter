@@ -20,6 +20,27 @@ if (actualPropertiesFile != null) {
     keystoreProperties.load(FileInputStream(actualPropertiesFile))
 }
 
+val keyAliasProp = keystoreProperties.getProperty("keyAlias") ?: System.getenv("ANDROID_KEY_ALIAS") ?: "mahmas-key"
+val keyPasswordProp = keystoreProperties.getProperty("keyPassword") ?: System.getenv("ANDROID_KEY_PASSWORD")
+val storeFileProp = keystoreProperties.getProperty("storeFile") ?: System.getenv("ANDROID_STORE_FILE") ?: "app/mahmas-release.keystore"
+val storePasswordProp = keystoreProperties.getProperty("storePassword") ?: System.getenv("ANDROID_STORE_PASSWORD")
+
+val resolvedStoreFile = when {
+    file(storeFileProp).isAbsolute && file(storeFileProp).exists() -> file(storeFileProp)
+    file(storeFileProp).exists() -> file(storeFileProp)
+    rootProject.file(storeFileProp).exists() -> rootProject.file(storeFileProp)
+    rootProject.file("app/$storeFileProp").exists() -> rootProject.file("app/$storeFileProp")
+    file("app/$storeFileProp").exists() -> file("app/$storeFileProp")
+    rootProject.file("app/mahmas-release.keystore").exists() -> rootProject.file("app/mahmas-release.keystore")
+    file("mahmas-release.keystore").exists() -> file("mahmas-release.keystore")
+    else -> null
+}
+
+val isReleaseSigningConfigured = !keyPasswordProp.isNullOrBlank() &&
+    !storePasswordProp.isNullOrBlank() &&
+    resolvedStoreFile != null &&
+    resolvedStoreFile.exists()
+
 android {
     namespace = "com.example.capcut_video_editor"
     compileSdk = 34
@@ -39,51 +60,24 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            val keyAliasProp = keystoreProperties.getProperty("keyAlias") ?: System.getenv("ANDROID_KEY_ALIAS")
-            val keyPasswordProp = keystoreProperties.getProperty("keyPassword") ?: System.getenv("ANDROID_KEY_PASSWORD")
-            val storeFileProp = keystoreProperties.getProperty("storeFile") ?: System.getenv("ANDROID_STORE_FILE")
-            val storePasswordProp = keystoreProperties.getProperty("storePassword") ?: System.getenv("ANDROID_STORE_PASSWORD")
-
-            if (!keyAliasProp.isNullOrBlank() &&
-                !keyPasswordProp.isNullOrBlank() &&
-                !storeFileProp.isNullOrBlank() &&
-                !storePasswordProp.isNullOrBlank()) {
-                val resolvedStoreFile = when {
-                    file(storeFileProp).isAbsolute && file(storeFileProp).exists() -> file(storeFileProp)
-                    file(storeFileProp).exists() -> file(storeFileProp)
-                    rootProject.file(storeFileProp).exists() -> rootProject.file(storeFileProp)
-                    rootProject.file("app/$storeFileProp").exists() -> rootProject.file("app/$storeFileProp")
-                    file("app/$storeFileProp").exists() -> file("app/$storeFileProp")
-                    else -> null
-                }
-                if (resolvedStoreFile != null && resolvedStoreFile.exists()) {
-                    keyAlias = keyAliasProp
-                    keyPassword = keyPasswordProp
-                    storeFile = resolvedStoreFile
-                    storePassword = storePasswordProp
-                    println("[SigningConfig] Using production release keystore: ${resolvedStoreFile.absolutePath}")
-                } else {
-                    println("[SigningConfig] WARNING: Keystore file '$storeFileProp' not found. Falling back to debug signing.")
-                    val debugConfig = signingConfigs.getByName("debug")
-                    keyAlias = debugConfig.keyAlias
-                    keyPassword = debugConfig.keyPassword
-                    storeFile = debugConfig.storeFile
-                    storePassword = debugConfig.storePassword
-                }
-            } else {
-                val debugConfig = signingConfigs.getByName("debug")
-                keyAlias = debugConfig.keyAlias
-                keyPassword = debugConfig.keyPassword
-                storeFile = debugConfig.storeFile
-                storePassword = debugConfig.storePassword
+        if (isReleaseSigningConfigured) {
+            create("release") {
+                keyAlias = keyAliasProp
+                keyPassword = keyPasswordProp
+                storeFile = resolvedStoreFile
+                storePassword = storePasswordProp
             }
+            println("[SigningConfig] Configured release signing with keystore: ${resolvedStoreFile?.absolutePath}")
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            if (isReleaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
         debug {
             signingConfig = signingConfigs.getByName("debug")

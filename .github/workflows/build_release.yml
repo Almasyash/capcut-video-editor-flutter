@@ -31,19 +31,27 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Verify Environment
+        run: |
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
+
+      - name: Get dependencies
+        run: flutter pub get
+
       - name: Configure Production Signing Keystore
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "Configuring production signing keystore from repository secrets..."
+            echo "Decoding persistent production signing keystore from secrets..."
             mkdir -p android/app
-            echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
+            echo "$KEYSTORE_BASE64" | base64 --decode > android/app/mahmas-release.keystore
             cat <<EOF > android/key.properties
           keyAlias=${{ secrets.ANDROID_KEY_ALIAS || secrets.KEY_ALIAS || 'mahmas-key' }}
           keyPassword=${{ secrets.ANDROID_KEY_PASSWORD || secrets.KEY_PASSWORD }}
-          storeFile=app/release.keystore
+          storeFile=app/mahmas-release.keystore
           storePassword=${{ secrets.ANDROID_STORE_PASSWORD || secrets.STORE_PASSWORD }}
           EOF
-            echo "Production keystore configured successfully."
+            echo "Production keystore and key.properties configured successfully."
           elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
             echo "::error::Release build triggered by version tag ${{ github.ref_name }} requires ANDROID_KEYSTORE_BASE64, ANDROID_KEY_PASSWORD, and ANDROID_STORE_PASSWORD repository secrets to be configured."
             exit 1
@@ -53,13 +61,15 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
 
-      - name: Verify Environment
+      - name: Verify Production Signing Configuration
         run: |
-          java -version
-          echo "JAVA_HOME=$JAVA_HOME"
-
-      - name: Get dependencies
-        run: flutter pub get
+          if [ -f android/key.properties ] && [ -f android/app/mahmas-release.keystore ]; then
+            echo "Keystore size: $(wc -c < android/app/mahmas-release.keystore) bytes"
+            echo "Signing configuration verified."
+          elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            echo "::error::Missing production keystore files for release tag build."
+            exit 1
+          fi
 
       - name: Run Analysis
         run: flutter analyze
@@ -69,6 +79,30 @@ jobs:
 
       - name: Build Android APK
         run: flutter build apk --release --android-skip-build-dependency-validation
+
+      - name: Verify APK Signature & Production Fingerprint
+        run: |
+          echo "Verifying release APK signing certificate..."
+          APKSIGNER_OUTPUT=$(apksigner verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk)
+          echo "$APKSIGNER_OUTPUT"
+
+          if [ -f android/app/mahmas-release.keystore ]; then
+            if echo "$APKSIGNER_OUTPUT" | grep -qi "CN=Android Debug"; then
+              echo "::error::Release APK was signed with the Android Debug certificate! Expected Mahmas Studio production certificate."
+              exit 1
+            fi
+
+            EXPECTED_SHA256="52208b88a16718acbab27c8326869b02ab1aad3f1179da48e5718b26eb405509"
+            CLEAN_OUTPUT=$(echo "$APKSIGNER_OUTPUT" | tr -d ': ' | tr '[:upper:]' '[:lower:]')
+            if [[ "$CLEAN_OUTPUT" == *"$EXPECTED_SHA256"* ]]; then
+              echo "SUCCESS: Release APK verified with Mahmas Studio production certificate."
+            else
+              echo "::error::Release APK certificate SHA-256 does not match expected production fingerprint ($EXPECTED_SHA256)."
+              exit 1
+            fi
+          else
+            echo "Notice: Build completed without production keystore (development mode)."
+          fi
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
