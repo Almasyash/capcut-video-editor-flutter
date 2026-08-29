@@ -44,6 +44,7 @@ build/
 **/android/.cxx/
 local.properties
 key.properties
+**/key.properties
 **/*.keystore
 **/*.jks
 

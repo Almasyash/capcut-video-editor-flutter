@@ -1,0 +1,29 @@
+# Mahmas Studio - Android Release Signing Configuration Template
+# ---------------------------------------------------------------
+# Copy this file to `android/key.properties` (which is gitignored):
+#   cp android/key.properties.example android/key.properties
+#
+# 1. GENERATING A NEW PRODUCTION KEYSTORE:
+#    keytool -genkey -v -keystore android/app/mahmas-release.keystore -alias mahmas-key -keyalg RSA -keysize 2048 -validity 10000
+#
+# 2. LOCAL CONFIGURATION (in android/key.properties):
+#    keyAlias=mahmas-key
+#    keyPassword=your_key_password
+#    storeFile=app/mahmas-release.keystore
+#    storePassword=your_store_password
+#
+# 3. GITHUB ACTIONS CI/CD CONFIGURATION (via GitHub Secrets):
+#    Encode your keystore to Base64:
+#      - Linux/macOS: base64 -w 0 android/app/mahmas-release.keystore
+#      - Windows PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes('android/app/mahmas-release.keystore'))
+#
+#    Add the following Repository Secrets in GitHub Settings -> Secrets and variables -> Actions:
+#      - ANDROID_KEYSTORE_BASE64 : <base64 encoded string from above>
+#      - ANDROID_KEY_ALIAS       : mahmas-key
+#      - ANDROID_KEY_PASSWORD    : your_key_password
+#      - ANDROID_STORE_PASSWORD  : your_store_password
+#
+keyAlias=mahmas-key
+keyPassword=your_key_password
+storeFile=app/mahmas-release.keystore
+storePassword=your_store_password
