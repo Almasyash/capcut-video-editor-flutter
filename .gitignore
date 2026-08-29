@@ -3,7 +3,11 @@
 *.log
 *.pyc
 *.swp
+*.bak
+*.tmp
+*.orig
 .DS_Store
+Thumbs.db
 .atom/
 .buildlog/
 .history
@@ -29,6 +33,24 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+build/
+
+# Android & Gradle related
+.gradle/
+**/android/.gradle/
+**/android/captures/
+**/android/local.properties
+**/android/GeneratedPluginRegistrant.java
+**/android/.cxx/
+local.properties
+key.properties
+**/*.keystore
+**/*.jks
+
+# Build artifacts
+*.apk
+*.aab
+*.ipa
 
 # Web related
 lib/generated_plugin_registrant.dart
