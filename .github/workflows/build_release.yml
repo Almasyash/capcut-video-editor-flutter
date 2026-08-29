@@ -41,35 +41,53 @@ jobs:
 
       - name: Configure Production Signing Keystore
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "Decoding persistent production signing keystore from secrets..."
-            mkdir -p android/app
-            echo "$KEYSTORE_BASE64" | base64 --decode > android/app/mahmas-release.keystore
-            cat <<EOF > android/key.properties
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS || secrets.KEY_ALIAS || 'mahmas-key' }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD || secrets.KEY_PASSWORD }}
-          storeFile=app/mahmas-release.keystore
-          storePassword=${{ secrets.ANDROID_STORE_PASSWORD || secrets.STORE_PASSWORD }}
-          EOF
-            echo "Production keystore and key.properties configured successfully."
-          elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            echo "::error::Release build triggered by version tag ${{ github.ref_name }} requires ANDROID_KEYSTORE_BASE64, ANDROID_KEY_PASSWORD, and ANDROID_STORE_PASSWORD repository secrets to be configured."
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::CRITICAL: ANDROID_KEYSTORE_BASE64 secret is missing in GitHub repository settings. Release builds require production signing credentials."
             exit 1
-          else
-            echo "No production keystore secrets configured; continuing with standard development build."
           fi
+
+          if [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::CRITICAL: ANDROID_STORE_PASSWORD or ANDROID_KEY_PASSWORD secret is missing in GitHub repository settings."
+            exit 1
+          fi
+
+          echo "Decoding persistent production signing keystore from secrets..."
+          mkdir -p android/app
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/mahmas-release.keystore
+
+          cat <<EOF > android/key.properties
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS || secrets.KEY_ALIAS || 'mahmas-key' }}
+          keyPassword=${KEY_PASSWORD}
+          storeFile=app/mahmas-release.keystore
+          storePassword=${STORE_PASSWORD}
+          EOF
+
+          echo "Production keystore and key.properties configured successfully."
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 || secrets.KEYSTORE_BASE64 }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD || secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD || secrets.STORE_PASSWORD }}
 
       - name: Verify Production Signing Configuration
         run: |
-          if [ -f android/key.properties ] && [ -f android/app/mahmas-release.keystore ]; then
-            echo "Keystore size: $(wc -c < android/app/mahmas-release.keystore) bytes"
-            echo "Signing configuration verified."
-          elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            echo "::error::Missing production keystore files for release tag build."
+          if [ ! -f android/app/mahmas-release.keystore ]; then
+            echo "::error::Keystore file android/app/mahmas-release.keystore was not created."
             exit 1
           fi
+
+          KEYSTORE_SIZE=$(wc -c < android/app/mahmas-release.keystore)
+          if [ "$KEYSTORE_SIZE" -lt 100 ]; then
+            echo "::error::Keystore file is too small or invalid ($KEYSTORE_SIZE bytes)."
+            exit 1
+          fi
+
+          if [ ! -f android/key.properties ]; then
+            echo "::error::key.properties file was not created."
+            exit 1
+          fi
+
+          echo "Keystore verified: $KEYSTORE_SIZE bytes"
+          echo "key.properties verified."
 
       - name: Run Analysis
         run: flutter analyze
@@ -99,31 +117,27 @@ jobs:
             exit 1
           fi
 
-          chmod +x "$APKSIGNER_BIN" || true
           echo "Discovered apksigner at: $APKSIGNER_BIN"
           "$APKSIGNER_BIN" --version || true
 
-          # 3. Verify APK signature
+          # 3. Strict Verification of APK Signature
           echo "Verifying release APK signing certificate..."
           APKSIGNER_OUTPUT=$("$APKSIGNER_BIN" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk)
           echo "$APKSIGNER_OUTPUT"
 
-          if [ -f android/app/mahmas-release.keystore ]; then
-            if echo "$APKSIGNER_OUTPUT" | grep -qi "CN=Android Debug"; then
-              echo "::error::Release APK was signed with the Android Debug certificate! Expected Mahmas Studio production certificate."
-              exit 1
-            fi
+          if echo "$APKSIGNER_OUTPUT" | grep -qi "CN=Android Debug"; then
+            echo "::error::REJECTED: Release APK was signed with the Android Debug certificate! Production release requires the persistent Mahmas Studio certificate."
+            exit 1
+          fi
 
-            EXPECTED_SHA256="52208b88a16718acbab27c8326869b02ab1aad3f1179da48e5718b26eb405509"
-            CLEAN_OUTPUT=$(echo "$APKSIGNER_OUTPUT" | tr -d ': ' | tr '[:upper:]' '[:lower:]')
-            if [[ "$CLEAN_OUTPUT" == *"$EXPECTED_SHA256"* ]]; then
-              echo "SUCCESS: Release APK verified with Mahmas Studio production certificate."
-            else
-              echo "::error::Release APK certificate SHA-256 does not match expected production fingerprint ($EXPECTED_SHA256)."
-              exit 1
-            fi
+          EXPECTED_SHA256="52208b88a16718acbab27c8326869b02ab1aad3f1179da48e5718b26eb405509"
+          CLEAN_OUTPUT=$(echo "$APKSIGNER_OUTPUT" | tr -d ': ' | tr '[:upper:]' '[:lower:]')
+
+          if [[ "$CLEAN_OUTPUT" == *"$EXPECTED_SHA256"* ]]; then
+            echo "SUCCESS: Release APK strictly verified with official Mahmas Studio production certificate (SHA-256: $EXPECTED_SHA256)."
           else
-            echo "Notice: Build completed without production keystore (development mode)."
+            echo "::error::REJECTED: Release APK certificate SHA-256 does not match expected production fingerprint ($EXPECTED_SHA256)."
+            exit 1
           fi
 
       - name: Upload APK Artifact
