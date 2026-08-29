@@ -82,8 +82,30 @@ jobs:
 
       - name: Verify APK Signature & Production Fingerprint
         run: |
+          # 1. Resolve Android SDK Root
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "Android SDK location: $SDK_DIR"
+
+          # 2. Locate apksigner executable in build-tools dynamically
+          APKSIGNER_BIN=""
+          if command -v apksigner >/dev/null 2>&1; then
+            APKSIGNER_BIN=$(command -v apksigner)
+          elif [ -d "$SDK_DIR/build-tools" ]; then
+            APKSIGNER_BIN=$(find "$SDK_DIR/build-tools" -name "apksigner" -type f 2>/dev/null | sort -V | tail -n 1)
+          fi
+
+          if [ -z "$APKSIGNER_BIN" ] || [ ! -f "$APKSIGNER_BIN" ]; then
+            echo "::error::Could not find 'apksigner' executable in Android SDK ($SDK_DIR/build-tools)."
+            exit 1
+          fi
+
+          chmod +x "$APKSIGNER_BIN" || true
+          echo "Discovered apksigner at: $APKSIGNER_BIN"
+          "$APKSIGNER_BIN" --version || true
+
+          # 3. Verify APK signature
           echo "Verifying release APK signing certificate..."
-          APKSIGNER_OUTPUT=$(apksigner verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk)
+          APKSIGNER_OUTPUT=$("$APKSIGNER_BIN" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk)
           echo "$APKSIGNER_OUTPUT"
 
           if [ -f android/app/mahmas-release.keystore ]; then
