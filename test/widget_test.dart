@@ -28,7 +28,7 @@ void main() {
     await tester.pump();
 
     expect(find.text('Mahmas'), findsOneWidget);
-    expect(find.byIcon(Icons.movie_filter_rounded), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
   });
 
   testWidgets('ActionToolbar smoke test', (WidgetTester tester) async {

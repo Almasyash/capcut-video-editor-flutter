@@ -131,14 +131,35 @@ class _HomeScreenState extends State<HomeScreen> {
                       Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.all(8),
+                            width: 44,
+                            height: 44,
                             decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [AppColors.primary, AppColors.secondary],
-                              ),
+                              color: Colors.white,
                               borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppColors.primary.withOpacity(0.3), width: 1.0),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.3),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
-                            child: const Icon(Icons.movie_filter_rounded, color: Colors.white, size: 24),
+                            clipBehavior: Clip.antiAlias,
+                            child: Image.asset(
+                              'assets/images/app_logo.png',
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [AppColors.primary, AppColors.secondary],
+                                  ),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.movie_filter_rounded, color: Colors.white, size: 24),
+                              ),
+                            ),
                           ),
                           const SizedBox(width: 12),
                           const Column(

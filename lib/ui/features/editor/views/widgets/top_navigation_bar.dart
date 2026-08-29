@@ -85,12 +85,29 @@ class TopNavigationBar extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
         border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 1.0),
       ),
-      child: const Row(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.movie_filter_rounded, size: 13, color: AppColors.primary),
-          SizedBox(width: 3),
-          Text(
+          Container(
+            width: 14,
+            height: 14,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(2.5),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Image.asset(
+              'assets/images/app_logo.png',
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.movie_filter_rounded,
+                size: 12,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Text(
             'Mahmas',
             style: TextStyle(
               fontSize: 10.5,
