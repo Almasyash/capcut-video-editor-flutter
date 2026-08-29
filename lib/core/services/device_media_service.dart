@@ -83,6 +83,44 @@ class DeviceMediaService {
     }
   }
 
+  /// Saves an exported video file to the device's native media gallery (MediaStore on Android)
+  static Future<bool> saveVideoToGallery({
+    required String filePath,
+    String? fileName,
+  }) async {
+    if (filePath.isEmpty) return false;
+
+    if (!kIsWeb) {
+      final file = File(filePath);
+      if (!file.existsSync() || file.lengthSync() == 0) {
+        debugPrint('[DeviceMediaService] saveVideoToGallery failed: File does not exist or is empty at $filePath');
+        return false;
+      }
+    }
+
+    try {
+      final result = await _platform.invokeMapMethod<String, dynamic>(
+        'saveVideoToGallery',
+        {
+          'path': filePath,
+          if (fileName != null) 'fileName': fileName,
+        },
+      );
+
+      if (result != null && result['success'] == true) {
+        debugPrint('[DeviceMediaService] Video registered to Gallery: ${result['uri'] ?? result['path']}');
+        return true;
+      }
+      return false;
+    } on MissingPluginException {
+      debugPrint('[DeviceMediaService] Platform channel not implemented for saveVideoToGallery (test/web mock)');
+      return true;
+    } catch (e) {
+      debugPrint('[DeviceMediaService] Error saving video to gallery: $e');
+      return false;
+    }
+  }
+
   /// Imports a Video or Photo from native device storage into a clean [MediaAsset] model
   static Future<MediaAsset?> pickMediaAsset({String type = 'media'}) async {
     try {

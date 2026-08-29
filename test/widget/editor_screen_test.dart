@@ -54,4 +54,32 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
   });
+
+  testWidgets('EditorScreen starts in paused state and handles lifecycle paused transitions', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.0;
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: EditorScreen(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Verify play button icon is shown (meaning it is in paused state)
+    expect(find.byIcon(Icons.play_arrow_rounded), findsWidgets);
+
+    // Simulate app lifecycle change to paused
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    // Re-verify UI is stable and remains paused
+    expect(find.byIcon(Icons.play_arrow_rounded), findsWidgets);
+
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+  });
 }

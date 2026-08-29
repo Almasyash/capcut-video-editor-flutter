@@ -13,6 +13,7 @@ import 'package:capcut_video_editor/domain/models/sticker_item.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/core/services/project_storage_service.dart';
+import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
 void main() {
@@ -1161,14 +1162,15 @@ void main() {
         viewModel.seekTo(10.0);
         final trimmedLeft = viewModel.trimAudioLeftToPlayhead();
         expect(trimmedLeft, isTrue);
-        expect(viewModel.selectedAudioTrack!.startTimeInSeconds, equals(10.0));
+        expect(viewModel.selectedAudioTrack!.startTimeInSeconds, equals(0.0));
         expect(viewModel.selectedAudioTrack!.trimStart.inSeconds, equals(10));
         expect(viewModel.selectedAudioTrack!.durationInSeconds, equals(30.0));
 
-        // Move playhead to 30.0s and Trim Right
-        viewModel.seekTo(30.0);
+        // Move playhead to 20.0s and Trim Right
+        viewModel.seekTo(20.0);
         final trimmedRight = viewModel.trimAudioRightToPlayhead();
         expect(trimmedRight, isTrue);
+        expect(viewModel.selectedAudioTrack!.startTimeInSeconds, equals(0.0));
         expect(viewModel.selectedAudioTrack!.trimEnd!.inSeconds, equals(30));
         expect(viewModel.selectedAudioTrack!.durationInSeconds, equals(20.0));
       });
@@ -1360,7 +1362,7 @@ void main() {
         expect(viewModel.isTextSelected, isFalse);
       });
 
-      test('2. Text Layer Trim Left: Non-destructively moves startTime and advances trimStart', () {
+      test('2. Text Layer Trim Left: Non-destructively advances trimStart preserving timeline startTime', () {
         final viewModel = EditorViewModel();
         const text = TextOverlay(
           id: 'text_trim_left_test',
@@ -1378,7 +1380,8 @@ void main() {
         expect(trimmed, isTrue);
 
         final updated = viewModel.selectedTextOverlay!;
-        expect(updated.startTimeInSeconds, closeTo(4.0, 0.01));
+        // startTime MUST remain 2.0s (preserving timeline alignment)
+        expect(updated.startTimeInSeconds, closeTo(2.0, 0.01));
         expect(updated.trimStartInSeconds, closeTo(2.0, 0.01));
         expect(updated.durationInSeconds, closeTo(4.0, 0.01));
       });
@@ -1736,6 +1739,210 @@ void main() {
         expect(restored.trimStart.inSeconds, equals(2));
         expect(restored.trimEnd.inSeconds, equals(18));
         expect(restored.durationInSeconds, closeTo((18 - 2) / 1.5, 0.01));
+      });
+    });
+
+    group('MAHMAS Studio 4 Critical Bug Fix Regression Tests', () {
+      // BUG #1: PROJECT AUTO-PLAY PREVENTION TESTS
+      group('Bug #1: Project Opening / Initialization Playback State Tests', () {
+        test('Opening a project always initializes in PAUSED state', () {
+          final project = Project(
+            id: 'proj_test_paused',
+            name: 'Paused Test Project',
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+            playheadPosition: 5.0,
+            videoClips: MockMediaRepository.getInitialVideoClips(),
+            audioTracks: [MockMediaRepository.getInitialAudioTrack()],
+          );
+
+          final vm = EditorViewModel(initialProject: project);
+
+          // Playback must be strictly false upon opening
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(5.0));
+
+          // Explicit play starts playback
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+
+          // Explicit pause stops playback
+          vm.pause();
+          expect(vm.isPlaying, isFalse);
+
+          vm.dispose();
+        });
+
+        test('Reopening a project previously saved while playing opens in strictly PAUSED state', () {
+          final vm1 = EditorViewModel();
+          vm1.play();
+          expect(vm1.isPlaying, isTrue);
+
+          final projectState = vm1.currentProject;
+          vm1.dispose();
+
+          final vm2 = EditorViewModel(initialProject: projectState);
+          expect(vm2.isPlaying, isFalse);
+          vm2.dispose();
+        });
+      });
+
+      // BUG #2: BACKGROUND AUDIO & RESOURCE CLEANUP TESTS
+      group('Bug #2: Background Audio & Disposal Resource Cleanup Tests', () {
+        test('Disposing EditorViewModel stops active playback and cleans up timers and services', () {
+          final vm = EditorViewModel();
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+
+          vm.dispose();
+          expect(vm.isPlaying, isFalse);
+
+          // Calling dispose again is idempotent and does not crash
+          expect(() => vm.dispose(), returnsNormally);
+        });
+      });
+
+      // BUG #3: GALLERY EXPORT PIPELINE TESTS
+      group('Bug #3: Gallery Export Pipeline Tests', () {
+        test('exportVideoToGallery creates valid output file and invokes MediaStore gallery registration', () async {
+          final vm = EditorViewModel();
+          expect(vm.isExporting, isFalse);
+
+          bool callbackFired = false;
+          bool? exportSuccess;
+          String? outputPath;
+
+          await vm.exportVideoToGallery(
+            onFinished: (success, path) {
+              callbackFired = true;
+              exportSuccess = success;
+              outputPath = path;
+            },
+          );
+
+          // Wait briefly for the progress timer to complete
+          await Future.delayed(const Duration(milliseconds: 1500));
+
+          expect(callbackFired, isTrue);
+          expect(exportSuccess, isTrue);
+          expect(outputPath, isNotNull);
+          expect(outputPath!.endsWith('.mp4'), isTrue);
+
+          vm.dispose();
+        });
+      });
+
+      // BUG #4: TIMELINE TRIM ALIGNMENT TESTS
+      group('Bug #4: Audio Trim Alignment Tests', () {
+        test('Trim Left increases source in-point, reduces duration, and KEEPS timeline startTime unchanged', () {
+          final vm = EditorViewModel();
+
+          // Construct original audio track:
+          // timelineStart = 10s
+          // duration = 20s
+          // sourceStart = 0s
+          // sourceEnd = 20s
+          const originalTrack = AudioTrack(
+            id: 'audio_alignment_test_1',
+            assetId: 'asset_audio_align',
+            title: 'Alignment Track',
+            startTime: Duration(seconds: 10),
+            duration: Duration(seconds: 20),
+            trimStart: Duration.zero,
+            trimEnd: Duration(seconds: 20),
+            speed: 1.0,
+          );
+
+          vm.addAudioTrack(originalTrack);
+          vm.selectAudioTrack(originalTrack.id);
+
+          expect(vm.selectedAudioTrack!.startTimeInSeconds, equals(10.0));
+          expect(vm.selectedAudioTrack!.durationInSeconds, equals(20.0));
+          expect(vm.selectedAudioTrack!.trimStartInSeconds, equals(0.0));
+          expect(vm.selectedAudioTrack!.trimEndInSeconds, equals(20.0));
+
+          // Playhead placed at 15.0s (5s into the track starting at 10s)
+          vm.seekTo(15.0);
+          final trimLeftSuccess = vm.trimAudioLeftToPlayhead();
+          expect(trimLeftSuccess, isTrue);
+
+          final trimmedTrack = vm.selectedAudioTrack!;
+
+          // SEMANTIC ASSERTIONS:
+          // timelineStart MUST remain 10s
+          expect(trimmedTrack.startTimeInSeconds, equals(10.0));
+          // duration MUST become 15s
+          expect(trimmedTrack.durationInSeconds, closeTo(15.0, 0.01));
+          // sourceStart MUST become 5s
+          expect(trimmedTrack.trimStartInSeconds, closeTo(5.0, 0.01));
+          // sourceEnd MUST remain 20s
+          expect(trimmedTrack.trimEndInSeconds, equals(20.0));
+
+          vm.dispose();
+        });
+
+        test('Trim Right reduces source out-point, reduces duration, and KEEPS timeline startTime unchanged', () {
+          final vm = EditorViewModel();
+
+          // Construct original audio track:
+          // timelineStart = 10s
+          // duration = 20s
+          // sourceStart = 0s
+          // sourceEnd = 20s
+          const originalTrack = AudioTrack(
+            id: 'audio_alignment_test_2',
+            assetId: 'asset_audio_align_2',
+            title: 'Alignment Track 2',
+            startTime: Duration(seconds: 10),
+            duration: Duration(seconds: 20),
+            trimStart: Duration.zero,
+            trimEnd: Duration(seconds: 20),
+            speed: 1.0,
+          );
+
+          vm.addAudioTrack(originalTrack);
+          vm.selectAudioTrack(originalTrack.id);
+
+          // Playhead placed at 15.0s (5s into track -> trim remaining 15s down to 5s from track start)
+          vm.seekTo(15.0);
+          final trimRightSuccess = vm.trimAudioRightToPlayhead();
+          expect(trimRightSuccess, isTrue);
+
+          final trimmedTrack = vm.selectedAudioTrack!;
+
+          // SEMANTIC ASSERTIONS:
+          // timelineStart MUST remain 10s
+          expect(trimmedTrack.startTimeInSeconds, equals(10.0));
+          // duration MUST become 5s
+          expect(trimmedTrack.durationInSeconds, closeTo(5.0, 0.01));
+          // sourceStart MUST remain 0s
+          expect(trimmedTrack.trimStartInSeconds, equals(0.0));
+          // sourceEnd MUST become 5s
+          expect(trimmedTrack.trimEndInSeconds, closeTo(5.0, 0.01));
+
+          vm.dispose();
+        });
+
+        test('Persistence: Trimmed audio track serializes and restores exact startTime and trim boundaries', () {
+          const track = AudioTrack(
+            id: 'audio_persist_trim',
+            assetId: 'asset_persist_1',
+            title: 'Persisted Audio',
+            startTime: Duration(seconds: 10),
+            duration: Duration(seconds: 20),
+            trimStart: Duration(seconds: 5),
+            trimEnd: Duration(seconds: 20),
+            speed: 1.0,
+          );
+
+          final json = track.toJson();
+          final restored = AudioTrack.fromJson(json);
+
+          expect(restored.startTimeInSeconds, equals(10.0));
+          expect(restored.durationInSeconds, equals(15.0));
+          expect(restored.trimStartInSeconds, equals(5.0));
+          expect(restored.trimEndInSeconds, equals(20.0));
+        });
       });
     });
   });

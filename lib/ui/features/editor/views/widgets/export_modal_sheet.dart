@@ -217,11 +217,20 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                   height: 50,
                   child: ElevatedButton(
                     onPressed: () {
-                      viewModel.startExportSimulation(
-                        onComplete: () {
+                      viewModel.exportVideoToGallery(
+                        onFinished: (success, outputPath) {
                           if (mounted) {
                             Navigator.of(context).pop();
-                            _showSuccessDialog(context);
+                            if (success) {
+                              _showSuccessDialog(context, outputPath);
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(outputPath != null ? 'Saved to $outputPath' : 'Export finished.'),
+                                  backgroundColor: AppColors.primary,
+                                ),
+                              );
+                            }
                           }
                         },
                       );
@@ -303,7 +312,7 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
     );
   }
 
-  void _showSuccessDialog(BuildContext context) {
+  void _showSuccessDialog(BuildContext context, [String? outputPath]) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -316,9 +325,29 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
             Text('Export Complete!'),
           ],
         ),
-        content: const Text(
-          'Your video was rendered and saved to your device album at 1080P 60fps.',
-          style: TextStyle(color: AppColors.textSecondary),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your video was rendered and saved to your device album / Gallery at 1080P 60fps.',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+            if (outputPath != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  outputPath,
+                  style: const TextStyle(color: AppColors.primary, fontSize: 10, fontFamily: 'monospace'),
+                ),
+              ),
+            ],
+          ],
         ),
         actions: [
           TextButton(

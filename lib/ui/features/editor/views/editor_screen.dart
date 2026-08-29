@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
+import 'package:capcut_video_editor/core/services/audio_playback_service.dart';
+import 'package:capcut_video_editor/core/services/video_playback_service.dart';
 import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
@@ -46,7 +48,12 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
+      _viewModel.pause();
+      if (AudioPlaybackService.instance.isPlaying) {
+        AudioPlaybackService.instance.pause();
+      }
       _viewModel.saveCurrentProject();
     }
   }
@@ -54,6 +61,11 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _viewModel.pause();
+    if (AudioPlaybackService.instance.isInitialized) {
+      AudioPlaybackService.instance.dispose();
+    }
+    VideoPlaybackService.instance.disposeAll();
     _viewModel.saveCurrentProject();
     _viewModel.dispose();
     super.dispose();

@@ -2,24 +2,28 @@ package com.example.capcut_video_editor
 
 import android.Manifest
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.media.AudioAttributes
+import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.speech.tts.TextToSpeech
+import android.view.Surface
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import android.graphics.Bitmap
-import android.media.AudioAttributes
-import android.media.MediaMetadataRetriever
-import android.media.MediaPlayer
-import android.os.Bundle
-import android.speech.tts.TextToSpeech
-import android.view.Surface
 import io.flutter.view.TextureRegistry
 import java.io.File
 import java.io.FileOutputStream
@@ -55,6 +59,31 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 tts?.language = Locale.US
             } catch (e: Exception) {}
         }
+    }
+
+    override fun onPause() {
+        pauseAllPlayback()
+        super.onPause()
+    }
+
+    override fun onStop() {
+        pauseAllPlayback()
+        super.onStop()
+    }
+
+    private fun pauseAllPlayback() {
+        for ((_, playerTriple) in videoPlayers) {
+            try {
+                if (playerTriple.first.isPlaying) {
+                    playerTriple.first.pause()
+                }
+            } catch (e: Exception) {}
+        }
+        try {
+            if (audioPlayer?.isPlaying == true) {
+                audioPlayer?.pause()
+            }
+        } catch (e: Exception) {}
     }
 
     override fun onDestroy() {
@@ -395,6 +424,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 "getAppFilesDir" -> {
                     result.success(filesDir.absolutePath)
                 }
+                "saveVideoToGallery" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val customName = call.argument<String>("fileName")
+                    handleSaveVideoToGallery(path, customName, result)
+                }
                 else -> {
                     result.notImplemented()
                 }
@@ -575,6 +609,84 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 pendingResult?.success(null)
             }
             pendingResult = null
+        }
+    }
+
+    private fun handleSaveVideoToGallery(path: String, customName: String?, result: MethodChannel.Result) {
+        val sourceFile = File(path)
+        if (!sourceFile.exists() || sourceFile.length() == 0L) {
+            result.error("FILE_NOT_FOUND", "Exported video file does not exist or is empty at $path", null)
+            return
+        }
+
+        try {
+            val displayName = if (!customName.isNullOrBlank()) {
+                if (customName.endsWith(".mp4")) customName else "$customName.mp4"
+            } else {
+                "MAHMAS_${System.currentTimeMillis()}.mp4"
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
+                    put(MediaStore.Video.Media.TITLE, displayName.removeSuffix(".mp4"))
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MahmasStudio")
+                    put(MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+                    put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+
+                val resolver = contentResolver
+                val videoUri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, contentValues)
+                if (videoUri == null) {
+                    result.error("SAVE_FAILED", "Failed to create MediaStore entry", null)
+                    return
+                }
+
+                resolver.openOutputStream(videoUri)?.use { outputStream ->
+                    sourceFile.inputStream().use { inputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                }
+
+                contentValues.clear()
+                contentValues.put(MediaStore.Video.Media.IS_PENDING, 0)
+                resolver.update(videoUri, contentValues, null, null)
+
+                result.success(mapOf(
+                    "success" to true,
+                    "uri" to videoUri.toString(),
+                    "displayName" to displayName
+                ))
+            } else {
+                val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                val targetDir = File(moviesDir, "MahmasStudio").apply { if (!exists()) mkdirs() }
+                val targetFile = File(targetDir, displayName)
+
+                sourceFile.inputStream().use { input ->
+                    targetFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                MediaScannerConnection.scanFile(
+                    this,
+                    arrayOf(targetFile.absolutePath),
+                    arrayOf("video/mp4")
+                ) { scannedPath, uri ->
+                    runOnUiThread {
+                        result.success(mapOf(
+                            "success" to true,
+                            "path" to (scannedPath ?: targetFile.absolutePath),
+                            "uri" to (uri?.toString() ?: ""),
+                            "displayName" to displayName
+                        ))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            result.error("GALLERY_EXPORT_ERROR", "Failed saving video to media gallery: ${e.message}", null)
         }
     }
 }
