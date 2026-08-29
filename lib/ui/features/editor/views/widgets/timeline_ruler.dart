@@ -51,7 +51,7 @@ class _TimelineRulerPainter extends CustomPainter {
       ..strokeWidth = 1.0;
 
     final subTickPaint = Paint()
-      ..color = AppColors.timelineRulerTick.withOpacity(0.4)
+      ..color = AppColors.timelineRulerTick.withValues(alpha: 0.4)
       ..strokeWidth = 0.8;
 
     // Interval between major ticks (seconds)

@@ -50,13 +50,13 @@ class AudioTrackItem extends StatelessWidget {
             color: AppColors.audioTrackBg,
             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
             border: Border.all(
-              color: isSelected ? AppColors.selectionBorder : AppColors.primary.withOpacity(0.3),
+              color: isSelected ? AppColors.selectionBorder : AppColors.primary.withValues(alpha: 0.3),
               width: isSelected ? 2.0 : 1.0,
             ),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: AppColors.selectionBorder.withOpacity(0.3),
+                      color: AppColors.selectionBorder.withValues(alpha: 0.3),
                       blurRadius: 6,
                     ),
                   ]
@@ -72,8 +72,8 @@ class AudioTrackItem extends StatelessWidget {
                     painter: _WaveformPainter(
                       points: audioTrack.waveformPoints,
                       color: audioTrack.isMuted
-                          ? AppColors.textMuted.withOpacity(0.3)
-                          : AppColors.audioTrackWaveform.withOpacity(0.6),
+                          ? AppColors.textMuted.withValues(alpha: 0.3)
+                          : AppColors.audioTrackWaveform.withValues(alpha: 0.6),
                     ),
                   ),
                 ),
@@ -124,7 +124,7 @@ class AudioTrackItem extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
+                      color: Colors.black.withValues(alpha: 0.6),
                       borderRadius: BorderRadius.circular(2),
                     ),
                     child: const Row(

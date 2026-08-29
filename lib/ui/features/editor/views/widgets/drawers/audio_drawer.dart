@@ -331,9 +331,9 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: AppColors.secondary.withOpacity(0.12),
+                      color: AppColors.secondary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                      border: Border.all(color: AppColors.secondary.withOpacity(0.4)),
+                      border: Border.all(color: AppColors.secondary.withValues(alpha: 0.4)),
                     ),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -398,7 +398,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                             decoration: BoxDecoration(
                               color: AppColors.surfaceElevated,
                               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                              border: Border.all(color: AppColors.secondary.withOpacity(0.5), width: 1.2),
+                              border: Border.all(color: AppColors.secondary.withValues(alpha: 0.5), width: 1.2),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -409,7 +409,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                                     Container(
                                       padding: const EdgeInsets.all(4),
                                       decoration: BoxDecoration(
-                                        color: AppColors.secondary.withOpacity(0.2),
+                                        color: AppColors.secondary.withValues(alpha: 0.2),
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: const Icon(Icons.music_note_rounded, color: AppColors.secondary, size: 14),
@@ -472,7 +472,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                                   Container(
                                     padding: const EdgeInsets.all(4),
                                     decoration: BoxDecoration(
-                                      color: AppColors.secondary.withOpacity(0.2),
+                                      color: AppColors.secondary.withValues(alpha: 0.2),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: const Icon(Icons.music_note_rounded, color: AppColors.secondary, size: 14),
@@ -580,7 +580,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: (_isRecording ? AppColors.error : AppColors.secondary).withOpacity(0.4),
+                                    color: (_isRecording ? AppColors.error : AppColors.secondary).withValues(alpha: 0.4),
                                     blurRadius: 12,
                                     spreadRadius: 2,
                                   ),

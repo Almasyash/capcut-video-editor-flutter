@@ -363,7 +363,7 @@ class _TimelineSectionState extends State<TimelineSection> {
                   color: AppColors.surfaceElevated,
                   borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                   border: Border.all(
-                    color: isSelected ? AppColors.secondary : AppColors.secondary.withOpacity(0.4),
+                    color: isSelected ? AppColors.secondary : AppColors.secondary.withValues(alpha: 0.4),
                     width: isSelected ? 2.0 : 1.0,
                   ),
                 ),
@@ -472,7 +472,7 @@ class _TimelineSectionState extends State<TimelineSection> {
                   color: AppColors.surfaceLight,
                   borderRadius: BorderRadius.circular(4),
                   border: Border.all(
-                    color: isSelected ? Colors.amber : Colors.amber.withOpacity(0.5),
+                    color: isSelected ? Colors.amber : Colors.amber.withValues(alpha: 0.5),
                     width: isSelected ? 2.0 : 1.0,
                   ),
                 ),
@@ -584,7 +584,7 @@ class _TimelineSectionState extends State<TimelineSection> {
                   color: AppColors.textTrackBg,
                   borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                   border: Border.all(
-                    color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withOpacity(0.5),
+                    color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withValues(alpha: 0.5),
                     width: isSelected ? 2.0 : 1.0,
                   ),
                 ),

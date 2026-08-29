@@ -152,9 +152,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.12),
+                      color: AppColors.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                      border: Border.all(color: AppColors.primary.withOpacity(0.5), width: 1.2),
+                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.5), width: 1.2),
                     ),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -333,13 +333,13 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
               color: AppColors.surfaceElevated,
               borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
               border: Border.all(
-                color: isSelected ? AppColors.primary : AppColors.primary.withOpacity(0.4),
+                color: isSelected ? AppColors.primary : AppColors.primary.withValues(alpha: 0.4),
                 width: isSelected ? 2.5 : 1.0,
               ),
               boxShadow: isSelected
                   ? [
                       BoxShadow(
-                        color: AppColors.primary.withOpacity(0.4),
+                        color: AppColors.primary.withValues(alpha: 0.4),
                         blurRadius: 10,
                         spreadRadius: 1,
                       ),
@@ -370,7 +370,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                     child: Icon(
                       asset.isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
                       size: 36,
-                      color: AppColors.primary.withOpacity(0.8),
+                      color: AppColors.primary.withValues(alpha: 0.8),
                     ),
                   ),
                 Positioned(
@@ -379,7 +379,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
+                      color: Colors.black.withValues(alpha: 0.7),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -395,7 +395,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.65),
+                      color: Colors.black.withValues(alpha: 0.65),
                       borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                     ),
                     child: Row(

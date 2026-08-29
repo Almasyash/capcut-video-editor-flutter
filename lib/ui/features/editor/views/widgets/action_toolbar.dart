@@ -289,7 +289,7 @@ class ActionToolbar extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: viewModel.isPlaying ? AppColors.secondary.withOpacity(0.2) : AppColors.surfaceElevated,
+          color: viewModel.isPlaying ? AppColors.secondary.withValues(alpha: 0.2) : AppColors.surfaceElevated,
           shape: BoxShape.circle,
           border: Border.all(
             color: viewModel.isPlaying ? AppColors.secondary : AppColors.divider,
@@ -321,11 +321,11 @@ class ActionToolbar extends StatelessWidget {
     if (isPrimary && enabled) {
       iconColor = AppColors.primary;
       textColor = AppColors.primary;
-      bgColor = AppColors.primary.withOpacity(0.12);
+      bgColor = AppColors.primary.withValues(alpha: 0.12);
     } else if (isAccent && enabled) {
       iconColor = AppColors.secondary;
       textColor = AppColors.secondary;
-      bgColor = AppColors.secondary.withOpacity(0.12);
+      bgColor = AppColors.secondary.withValues(alpha: 0.12);
     }
 
     return Padding(
@@ -338,7 +338,7 @@ class ActionToolbar extends StatelessWidget {
           decoration: BoxDecoration(
             color: bgColor ?? Colors.transparent,
             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-            border: isPrimary && enabled ? Border.all(color: AppColors.primary.withOpacity(0.4)) : null,
+            border: isPrimary && enabled ? Border.all(color: AppColors.primary.withValues(alpha: 0.4)) : null,
           ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,

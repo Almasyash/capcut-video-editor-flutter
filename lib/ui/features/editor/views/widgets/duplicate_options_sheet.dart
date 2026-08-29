@@ -80,7 +80,7 @@ class DuplicateOptionsSheet extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.15),
+                      color: AppColors.primary.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(Icons.copy_all_rounded, color: AppColors.primary, size: 22),
@@ -132,14 +132,14 @@ class DuplicateOptionsSheet extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.surfaceLight,
                 borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                border: Border.all(color: AppColors.secondary.withOpacity(0.5)),
+                border: Border.all(color: AppColors.secondary.withValues(alpha: 0.5)),
               ),
               child: Row(
                 children: [
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: AppColors.secondary.withOpacity(0.15),
+                      color: AppColors.secondary.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: const Icon(Icons.layers_rounded, color: AppColors.secondary, size: 22),

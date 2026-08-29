@@ -95,7 +95,7 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
-                              color: isSel ? AppColors.primary.withOpacity(0.15) : AppColors.surfaceElevated,
+                              color: isSel ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceElevated,
                               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                               border: Border.all(
                                 color: isSel ? AppColors.primary : AppColors.divider,
@@ -146,7 +146,7 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             decoration: BoxDecoration(
-                              color: isSel ? AppColors.primary.withOpacity(0.15) : AppColors.surfaceElevated,
+                              color: isSel ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceElevated,
                               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                               border: Border.all(
                                 color: isSel ? AppColors.primary : AppColors.divider,
@@ -194,12 +194,12 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                           ),
                         ],
                       ),
-                      Column(
+                      const Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          const Text('Render Engine', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                          const SizedBox(height: 2),
-                          const Text(
+                          Text('Render Engine', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                          SizedBox(height: 2),
+                          Text(
                             'Mahmas Studio Engine (H.264)',
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                           ),

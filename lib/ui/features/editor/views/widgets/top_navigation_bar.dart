@@ -83,7 +83,7 @@ class TopNavigationBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
-        border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 1.0),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4), width: 1.0),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -232,7 +232,7 @@ class TopNavigationBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withOpacity(0.3),
+              color: AppColors.primary.withValues(alpha: 0.3),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),

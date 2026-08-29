@@ -247,21 +247,21 @@ class TextDrawer extends StatelessWidget {
 
   void _generateAutoCaptions(BuildContext context) {
     viewModel.addTextOverlay(
-      TextOverlay(
+      const TextOverlay(
         id: 'auto_cap_1',
         text: '🔥 Welcome to our CapCut video edit!',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 5),
+        duration: Duration(seconds: 5),
         color: AppColors.primary,
         fontSize: 16.0,
       ),
     );
     viewModel.addTextOverlay(
-      TextOverlay(
+      const TextOverlay(
         id: 'auto_cap_2',
         text: '✨ Creating amazing content with Flutter',
-        startTime: const Duration(seconds: 5),
-        duration: const Duration(seconds: 6),
+        startTime: Duration(seconds: 5),
+        duration: Duration(seconds: 6),
         color: Colors.white,
         fontSize: 16.0,
       ),
@@ -365,7 +365,7 @@ class TextDrawer extends StatelessWidget {
                             color: AppColors.surfaceLight,
                             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                             border: Border.all(
-                              color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withOpacity(0.5),
+                              color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withValues(alpha: 0.5),
                               width: isSelected ? 2.0 : 1.0,
                             ),
                           ),

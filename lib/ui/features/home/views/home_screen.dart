@@ -136,10 +136,10 @@ class _HomeScreenState extends State<HomeScreen> {
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: AppColors.primary.withOpacity(0.3), width: 1.0),
+                              border: Border.all(color: AppColors.primary.withValues(alpha: 0.3), width: 1.0),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(0.3),
+                                  color: Colors.black.withValues(alpha: 0.3),
                                   blurRadius: 6,
                                   offset: const Offset(0, 2),
                                 ),
@@ -213,7 +213,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(AppDimensions.radiusLg),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF00E5FF).withOpacity(0.3),
+                            color: const Color(0xFF00E5FF).withValues(alpha: 0.3),
                             blurRadius: 16,
                             offset: const Offset(0, 6),
                           ),
@@ -224,7 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
+                              color: Colors.white.withValues(alpha: 0.2),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(Icons.add_rounded, size: 32, color: Colors.white),
@@ -438,7 +438,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                           decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.15),
+                            color: AppColors.primary.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(3),
                           ),
                           child: Text(

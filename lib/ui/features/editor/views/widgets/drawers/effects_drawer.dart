@@ -69,7 +69,7 @@ class EffectsDrawer extends StatelessWidget {
                     margin: const EdgeInsets.symmetric(horizontal: 4),
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: isSelected ? effect.color.withOpacity(0.2) : AppColors.surfaceLight,
+                      color: isSelected ? effect.color.withValues(alpha: 0.2) : AppColors.surfaceLight,
                       borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                       border: Border.all(
                         color: isSelected ? effect.color : AppColors.divider,

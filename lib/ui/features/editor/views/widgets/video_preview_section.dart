@@ -168,7 +168,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                   border: Border.all(color: AppColors.surfaceHighlight, width: 1.5),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.5),
+                      color: Colors.black.withValues(alpha: 0.5),
                       blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
@@ -210,9 +210,9 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                             width: 56,
                             height: 56,
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.55),
+                              color: Colors.black.withValues(alpha: 0.55),
                               shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white.withOpacity(0.3)),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
                             ),
                             child: const Icon(
                               Icons.play_arrow_rounded,
@@ -236,7 +236,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.6),
+                              color: Colors.black.withValues(alpha: 0.6),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -249,7 +249,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: AppColors.secondary.withOpacity(0.8),
+                                color: AppColors.secondary.withValues(alpha: 0.8),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -271,7 +271,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.65),
+                            color: Colors.black.withValues(alpha: 0.65),
                             borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
                           ),
                           child: Row(
@@ -384,7 +384,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
+                    color: Colors.black.withValues(alpha: 0.7),
                     borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                     border: Border.all(color: AppColors.primary, width: 1),
                   ),
@@ -429,9 +429,11 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
         alignment: Alignment.center,
         transform: Matrix4.identity()
           ..rotateZ(activeClip.rotationDegrees * math.pi / 180)
-          ..scale(
+          ..scaleByDouble(
             activeClip.flipHorizontal ? -1.0 : 1.0,
             activeClip.flipVertical ? -1.0 : 1.0,
+            1.0,
+            1.0,
           ),
         child: canvasChild,
       ),
@@ -481,13 +483,13 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
             Icon(
               activeClip.previewIcon,
               size: 48,
-              color: Colors.white.withOpacity(0.85),
+              color: Colors.white.withValues(alpha: 0.85),
             ),
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.4),
+                color: Colors.black.withValues(alpha: 0.4),
                 borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
               ),
               child: Column(
@@ -524,7 +526,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 8,
-                        color: AppColors.primary.withOpacity(0.8),
+                        color: AppColors.primary.withValues(alpha: 0.8),
                         fontFamily: 'monospace',
                       ),
                     ),
@@ -560,8 +562,8 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
               height: 58,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: AppColors.primary.withOpacity(0.15),
-                border: Border.all(color: AppColors.primary.withOpacity(0.6), width: 1.5),
+                color: AppColors.primary.withValues(alpha: 0.15),
+                border: Border.all(color: AppColors.primary.withValues(alpha: 0.6), width: 1.5),
               ),
               child: Icon(
                 viewModel.isPlaying ? Icons.play_circle_filled_rounded : Icons.videocam_rounded,
@@ -585,7 +587,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(color: Colors.white12),
               ),
@@ -615,9 +617,9 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.75),
+          color: Colors.black.withValues(alpha: 0.75),
           borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-          border: Border.all(color: AppColors.primary.withOpacity(0.6), width: 0.8),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.6), width: 0.8),
         ),
         child: Row(
           children: [
@@ -637,7 +639,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
             ),
             Text(
               isPhoto ? 'LOCAL PHOTO' : 'PLAYING FROM STORAGE',
-              style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.primary.withOpacity(0.9)),
+              style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.primary.withValues(alpha: 0.9)),
             ),
           ],
         ),
@@ -662,7 +664,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
               end: Alignment.bottomRight,
             ),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 8, offset: const Offset(0, 2)),
+              BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 8, offset: const Offset(0, 2)),
             ],
           ),
           child: Stack(
@@ -676,7 +678,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.6),
+                    color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: const Text('PIP', style: TextStyle(fontSize: 8, color: AppColors.secondary, fontWeight: FontWeight.bold)),
@@ -704,10 +706,10 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
               : Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: (sticker.preset.color ?? AppColors.primary).withOpacity(0.85),
+                    color: (sticker.preset.color ?? AppColors.primary).withValues(alpha: 0.85),
                     borderRadius: BorderRadius.circular(6),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 4),
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 4),
                     ],
                   ),
                   child: Row(
@@ -737,8 +739,8 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
               gradient: LinearGradient(
                 colors: [
                   Colors.transparent,
-                  AppColors.primary.withOpacity(0.12),
-                  AppColors.secondary.withOpacity(0.12),
+                  AppColors.primary.withValues(alpha: 0.12),
+                  AppColors.secondary.withValues(alpha: 0.12),
                   Colors.transparent,
                 ],
                 stops: const [0.0, 0.45, 0.55, 1.0],
@@ -761,7 +763,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
         return IgnorePointer(
           child: Container(
             decoration: BoxDecoration(
-              border: Border.all(color: Colors.cyanAccent.withOpacity(0.3), width: 3),
+              border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3), width: 3),
             ),
           ),
         );
@@ -800,16 +802,16 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           margin: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: text.backgroundColor ?? Colors.black.withOpacity(0.65),
+            color: text.backgroundColor ?? Colors.black.withValues(alpha: 0.65),
             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
             border: Border.all(
-              color: isSelected ? AppColors.primary : text.color.withOpacity(0.6),
+              color: isSelected ? AppColors.primary : text.color.withValues(alpha: 0.6),
               width: isSelected ? 2.0 : 1.0,
             ),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: AppColors.primary.withOpacity(0.4),
+                      color: AppColors.primary.withValues(alpha: 0.4),
                       blurRadius: 8,
                       spreadRadius: 1,
                     )
@@ -867,7 +869,7 @@ class _VhsScanlinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.04)
+      ..color = Colors.white.withValues(alpha: 0.04)
       ..strokeWidth = 1.0;
 
     for (double y = 0; y < size.height; y += 4.0) {

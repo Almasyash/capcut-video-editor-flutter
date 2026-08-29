@@ -183,7 +183,7 @@ class _AdjustDrawerState extends State<AdjustDrawer> {
           width: 72,
           padding: const EdgeInsets.symmetric(vertical: 6),
           decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary.withOpacity(0.2) : AppColors.surfaceLight,
+            color: isSelected ? AppColors.primary.withValues(alpha: 0.2) : AppColors.surfaceLight,
             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
             border: Border.all(
               color: isSelected ? AppColors.primary : (hasAdjustment ? AppColors.secondary : AppColors.divider),

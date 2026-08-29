@@ -163,7 +163,7 @@ class EditDrawer extends StatelessWidget {
           width: 72,
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isActive ? AppColors.secondary.withOpacity(0.15) : AppColors.surfaceLight,
+            color: isActive ? AppColors.secondary.withValues(alpha: 0.15) : AppColors.surfaceLight,
             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
             border: Border.all(color: isActive ? AppColors.secondary : AppColors.divider),
           ),

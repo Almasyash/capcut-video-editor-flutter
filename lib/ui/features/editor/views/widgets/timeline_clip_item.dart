@@ -129,7 +129,7 @@ class TimelineClipItem extends StatelessWidget {
                                   margin: const EdgeInsets.only(left: 2),
                                   padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withOpacity(0.6),
+                                    color: Colors.black.withValues(alpha: 0.6),
                                     borderRadius: BorderRadius.circular(3),
                                   ),
                                   child: Text(
@@ -158,9 +158,9 @@ class TimelineClipItem extends StatelessWidget {
                             return Container(
                               padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.7),
+                                color: Colors.black.withValues(alpha: 0.7),
                                 borderRadius: BorderRadius.circular(2),
-                                border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 0.5),
+                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.4), width: 0.5),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -295,7 +295,7 @@ class _FilmstripPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     const frameWidth = 40.0;
     final paint = Paint()
-      ..color = Colors.white.withOpacity(0.12)
+      ..color = Colors.white.withValues(alpha: 0.12)
       ..strokeWidth = 0.8;
 
     for (double x = frameWidth; x < size.width; x += frameWidth) {
