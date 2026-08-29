@@ -9,8 +9,15 @@ plugins {
 
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+val appKeystorePropertiesFile = file("key.properties")
+val actualPropertiesFile = when {
+    keystorePropertiesFile.exists() -> keystorePropertiesFile
+    appKeystorePropertiesFile.exists() -> appKeystorePropertiesFile
+    else -> null
+}
+
+if (actualPropertiesFile != null) {
+    keystoreProperties.load(FileInputStream(actualPropertiesFile))
 }
 
 android {
@@ -42,17 +49,22 @@ android {
                 !keyPasswordProp.isNullOrBlank() &&
                 !storeFileProp.isNullOrBlank() &&
                 !storePasswordProp.isNullOrBlank()) {
-                val resolvedStoreFile = if (file(storeFileProp).isAbsolute) {
-                    file(storeFileProp)
-                } else {
-                    rootProject.file(storeFileProp)
+                val resolvedStoreFile = when {
+                    file(storeFileProp).isAbsolute && file(storeFileProp).exists() -> file(storeFileProp)
+                    file(storeFileProp).exists() -> file(storeFileProp)
+                    rootProject.file(storeFileProp).exists() -> rootProject.file(storeFileProp)
+                    rootProject.file("app/$storeFileProp").exists() -> rootProject.file("app/$storeFileProp")
+                    file("app/$storeFileProp").exists() -> file("app/$storeFileProp")
+                    else -> null
                 }
-                if (resolvedStoreFile.exists()) {
+                if (resolvedStoreFile != null && resolvedStoreFile.exists()) {
                     keyAlias = keyAliasProp
                     keyPassword = keyPasswordProp
                     storeFile = resolvedStoreFile
                     storePassword = storePasswordProp
+                    println("[SigningConfig] Using production release keystore: ${resolvedStoreFile.absolutePath}")
                 } else {
+                    println("[SigningConfig] WARNING: Keystore file '$storeFileProp' not found. Falling back to debug signing.")
                     val debugConfig = signingConfigs.getByName("debug")
                     keyAlias = debugConfig.keyAlias
                     keyPassword = debugConfig.keyPassword
