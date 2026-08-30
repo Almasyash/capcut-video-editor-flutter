@@ -200,7 +200,7 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                           Text('Render Engine', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
                           SizedBox(height: 2),
                           Text(
-                            'Mahmas Studio Engine (H.264)',
+                            'Editor FS Engine (H.264)',
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                           ),
                         ],

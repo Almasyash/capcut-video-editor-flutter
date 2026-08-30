@@ -16,7 +16,7 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/top_navigat
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_preview_section.dart';
 
 void main() {
-  testWidgets('TopNavigationBar renders Mahmas Studio branding', (WidgetTester tester) async {
+  testWidgets('TopNavigationBar renders Editor FS branding', (WidgetTester tester) async {
     final viewModel = EditorViewModel();
 
     await tester.pumpWidget(
@@ -28,7 +28,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Mahmas'), findsOneWidget);
+    expect(find.text('Editor FS'), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
   });
 

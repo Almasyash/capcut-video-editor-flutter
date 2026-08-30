@@ -36,7 +36,7 @@ void main() {
     });
   });
 
-  testWidgets('HomeScreen renders Mahmas Studio, New Project action, and Drafts header', (tester) async {
+  testWidgets('HomeScreen renders Editor FS, New Project action, and Drafts header', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.0;
 
@@ -45,7 +45,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byType(HomeScreen), findsOneWidget);
-    expect(find.text('Mahmas Studio'), findsOneWidget);
+    expect(find.text('Editor FS'), findsOneWidget);
     expect(find.text('New Project'), findsOneWidget);
     expect(find.text('Recent Drafts'), findsOneWidget);
 

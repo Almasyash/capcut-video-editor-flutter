@@ -108,7 +108,7 @@ class TopNavigationBar extends StatelessWidget {
           ),
           const SizedBox(width: 4),
           const Text(
-            'Mahmas',
+            'Editor FS',
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w900,
