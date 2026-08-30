@@ -268,8 +268,7 @@ class EditorViewModel extends ChangeNotifier {
       updatedAt: now,
     );
     _videoClips = MockMediaRepository.getInitialVideoClips();
-    final initialAudio = MockMediaRepository.getInitialAudioTrack();
-    _audioTracks = [initialAudio];
+    _audioTracks = [];
     _textOverlays = MockMediaRepository.getInitialTextOverlays();
     _overlayClips = [];
     _stickerOverlays = [];

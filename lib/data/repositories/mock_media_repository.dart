@@ -57,26 +57,6 @@ class MockMediaRepository {
     ];
   }
 
-  /// Generates sample background audio track
-  static AudioTrack getInitialAudioTrack() {
-    // Generate simulated audio waveform peaks
-    final points = [
-      0.3, 0.5, 0.7, 0.4, 0.9, 0.6, 0.8, 0.5, 0.4, 0.7, 0.9, 0.85, 0.6, 0.4,
-      0.5, 0.8, 0.75, 0.9, 0.65, 0.5, 0.35, 0.6, 0.8, 0.95, 0.7, 0.4, 0.6,
-      0.75, 0.85, 0.6, 0.45, 0.7, 0.9, 0.8, 0.5, 0.6, 0.8, 0.7, 0.9, 0.4,
-    ];
-
-    return AudioTrack(
-      id: 'audio_01',
-      assetId: 'preset_asset_audio_01',
-      name: 'Midnight Beats (Copyright Free)',
-      artist: 'SynthWave Studio',
-      startTime: Duration.zero,
-      duration: const Duration(seconds: 18),
-      volume: 0.75,
-      waveformPoints: points,
-    );
-  }
 
   /// Generates initial text captions / subtitles
   static List<TextOverlay> getInitialTextOverlays() {

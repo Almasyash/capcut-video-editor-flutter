@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:capcut_video_editor/domain/models/audio_track.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/action_toolbar.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/audio_track_item.dart';
@@ -66,12 +67,20 @@ void main() {
 
   testWidgets('AudioTrackItem renders waveform and handles selection', (WidgetTester tester) async {
     final viewModel = EditorViewModel();
+    const track = AudioTrack(
+      id: 'audio_test_widget',
+      assetId: 'asset_test_widget',
+      title: 'Custom Audio Beat',
+      artist: 'Studio Artist',
+      duration: Duration(seconds: 18),
+      waveformPoints: [0.3, 0.5, 0.8, 0.4, 0.9],
+    );
 
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: AudioTrackItem(
-            audioTrack: viewModel.audioTrack!,
+            audioTrack: track,
             pixelsPerSecond: viewModel.pixelsPerSecond,
             viewModel: viewModel,
           ),
@@ -80,7 +89,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.textContaining('Midnight Beats'), findsOneWidget);
+    expect(find.textContaining('Custom Audio Beat'), findsOneWidget);
+    viewModel.dispose();
   });
 
   testWidgets('All 7 Category Drawers render properly', (WidgetTester tester) async {

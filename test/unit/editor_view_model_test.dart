@@ -33,12 +33,13 @@ void main() {
       viewModel.dispose();
     });
 
-    test('Initial state loads mock clips, audio track, and text overlays', () {
+    test('Initial state loads mock clips, text overlays, and empty audio track', () {
       expect(viewModel.videoClips.isNotEmpty, isTrue);
       expect(viewModel.selectedClipIndex, equals(0));
       expect(viewModel.playheadPosition, equals(0.0));
       expect(viewModel.isPlaying, isFalse);
-      expect(viewModel.audioTrack, isNotNull);
+      expect(viewModel.audioTrack, isNull);
+      expect(viewModel.audioTracks, isEmpty);
       expect(viewModel.textOverlays.isNotEmpty, isTrue);
       expect(viewModel.totalDurationInSeconds, greaterThan(0));
     });
@@ -163,6 +164,13 @@ void main() {
 
     test('Universal Timeline Trimming and Dragging on Audio, PIP, Text, and Stickers', () {
       // 1. Audio Track Timing Update
+      const track = AudioTrack(
+        id: 'audio_trim_drag_test',
+        assetId: 'asset_trim_drag',
+        title: 'Audio Trim Test',
+        duration: Duration(seconds: 20),
+      );
+      viewModel.addAudioTrack(track);
       expect(viewModel.audioTrack, isNotNull);
       viewModel.updateAudioTrackTiming(const Duration(seconds: 2), const Duration(seconds: 14));
       expect(viewModel.audioTrack!.startTimeInSeconds, equals(2.0));
@@ -920,6 +928,13 @@ void main() {
       });
 
       test('3. Removing audio track clears state and disposes session cleanly', () {
+        const track = AudioTrack(
+          id: 'test_remove_audio',
+          assetId: 'asset_remove_audio',
+          title: 'Track to remove',
+          duration: Duration(seconds: 10),
+        );
+        viewModel.addAudioTrack(track);
         expect(viewModel.audioTrack, isNotNull);
         viewModel.removeAudioTrack();
         expect(viewModel.audioTrack, isNull);
@@ -1572,6 +1587,13 @@ void main() {
 
     group('Video Layer Controls, Speed, Volume, Add Clip & Canvases Removal Tests', () {
       test('1. Video selection isolation and properties', () {
+        const track = AudioTrack(
+          id: 'audio_test_iso',
+          assetId: 'asset_test_iso',
+          title: 'Isolation Track',
+          duration: Duration(seconds: 10),
+        );
+        viewModel.addAudioTrack(track);
         viewModel.selectAudio();
         expect(viewModel.isAudioSelected, isTrue);
 
@@ -1763,7 +1785,16 @@ void main() {
             updatedAt: DateTime.now(),
             playheadPosition: 4.25,
             videoClips: MockMediaRepository.getInitialVideoClips(),
-            audioTracks: [MockMediaRepository.getInitialAudioTrack()],
+            audioTracks: const [
+              AudioTrack(
+                id: 'audio_test_paused_2',
+                assetId: 'preset_asset_audio_01',
+                name: 'Test Audio Track',
+                artist: 'Test Artist',
+                startTime: Duration.zero,
+                duration: Duration(seconds: 18),
+              ),
+            ],
           );
 
           final vm = EditorViewModel(initialProject: project);
@@ -1804,7 +1835,16 @@ void main() {
             name: 'Audio Paused Test',
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
-            audioTracks: [MockMediaRepository.getInitialAudioTrack()],
+            audioTracks: const [
+              AudioTrack(
+                id: 'audio_test_paused_5',
+                assetId: 'preset_asset_audio_01',
+                name: 'Test Audio Track',
+                artist: 'Test Artist',
+                startTime: Duration.zero,
+                duration: Duration(seconds: 18),
+              ),
+            ],
           );
 
           final vm = EditorViewModel(initialProject: project);
@@ -2102,6 +2142,37 @@ void main() {
           expect(updated.trimStartInSeconds, equals(3.0));
           expect(updated.trimEndInSeconds, equals(17.0));
           expect(updated.durationInSeconds, equals(14.0));
+
+          vm.dispose();
+        });
+      });
+
+      // BUG #5: DEMO AUDIO REMOVAL TESTS
+      group('Bug #5: Demo Audio Removal Tests', () {
+        test('New project must not contain demo/sample audio', () {
+          final vm = EditorViewModel();
+          expect(vm.audioTracks, isEmpty);
+          expect(vm.audioTrack, isNull);
+          expect(vm.selectedAudioTrack, isNull);
+          expect(vm.isAudioSelected, isFalse);
+          vm.dispose();
+        });
+
+        test('User can still add and manage audio track normally', () {
+          final vm = EditorViewModel();
+          const userTrack = AudioTrack(
+            id: 'user_imported_audio_01',
+            assetId: 'asset_user_audio_01',
+            title: 'User My Song.mp3',
+            artist: 'User',
+            duration: Duration(seconds: 25),
+          );
+
+          vm.addAudioTrack(userTrack);
+          expect(vm.audioTracks.length, equals(1));
+          expect(vm.audioTrack?.title, equals('User My Song.mp3'));
+          expect(vm.selectedAudioTrackId, equals('user_imported_audio_01'));
+          expect(vm.isAudioSelected, isTrue);
 
           vm.dispose();
         });
