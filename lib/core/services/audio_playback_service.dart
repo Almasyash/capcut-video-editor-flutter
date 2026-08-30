@@ -50,6 +50,7 @@ class AudioPlaybackService {
   Future<void> play() async {
     if (!_isInitialized) return;
     try {
+      debugPrint('[AUTO_PLAY_TRACE] AUDIO START CALLED: AudioPlaybackService.play()');
       await _channel.invokeMethod('play');
       _isPlaying = true;
     } catch (e) {
@@ -61,6 +62,7 @@ class AudioPlaybackService {
   Future<void> pause() async {
     if (!_isInitialized) return;
     try {
+      debugPrint('[AUTO_PLAY_TRACE] AudioPlaybackService.pause()');
       await _channel.invokeMethod('pause');
       _isPlaying = false;
     } catch (e) {

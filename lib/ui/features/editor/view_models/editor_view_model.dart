@@ -251,11 +251,12 @@ class EditorViewModel extends ChangeNotifier {
   // --- Project & Draft Management ---
 
   void _initializeProject() {
+    debugPrint('[AUTO_PLAY_TRACE] PROJECT_LOAD (new project initialized in strictly PAUSED state)');
     _isPlaying = false;
     _playbackTimer?.cancel();
     _playbackTimer = null;
-    if (AudioPlaybackService.instance.isPlaying) {
-      AudioPlaybackService.instance.pause();
+    if (AudioPlaybackService.instance.isInitialized) {
+      AudioPlaybackService.instance.dispose();
     }
     VideoPlaybackService.instance.disposeAll();
 
@@ -281,11 +282,12 @@ class EditorViewModel extends ChangeNotifier {
 
   /// Loads an existing project into the editor session in a strictly paused state
   void loadProject(Project project) {
+    debugPrint('[AUTO_PLAY_TRACE] PROJECT_LOAD (existing project ${project.id} "${project.name}" loaded in strictly PAUSED state)');
     _isPlaying = false;
     _playbackTimer?.cancel();
     _playbackTimer = null;
-    if (AudioPlaybackService.instance.isPlaying) {
-      AudioPlaybackService.instance.pause();
+    if (AudioPlaybackService.instance.isInitialized) {
+      AudioPlaybackService.instance.dispose();
     }
     VideoPlaybackService.instance.disposeAll();
 
@@ -481,6 +483,7 @@ class EditorViewModel extends ChangeNotifier {
 
   void play() {
     if (_videoClips.isEmpty && _audioTracks.isEmpty) return;
+    debugPrint('[AUTO_PLAY_TRACE] VIEWMODEL_PLAY triggered');
     if (_playheadPosition >= totalDurationInSeconds) {
       _playheadPosition = 0.0;
     }
@@ -514,6 +517,7 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   void pause() {
+    debugPrint('[AUTO_PLAY_TRACE] VIEWMODEL_PAUSE triggered');
     _isPlaying = false;
     _playbackTimer?.cancel();
     _playbackTimer = null;

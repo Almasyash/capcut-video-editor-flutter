@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:capcut_video_editor/core/services/audio_playback_service.dart';
 import 'package:capcut_video_editor/core/services/device_media_service.dart';
+import 'package:capcut_video_editor/core/services/project_storage_service.dart';
+import 'package:capcut_video_editor/core/services/video_playback_service.dart';
+import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
 import 'package:capcut_video_editor/domain/enums/aspect_ratio_preset.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/domain/models/audio_track.dart';
@@ -12,8 +16,7 @@ import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/domain/models/sticker_item.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
-import 'package:capcut_video_editor/core/services/project_storage_service.dart';
-import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
+import 'package:capcut_video_editor/domain/models/video_effect.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
 void main() {
@@ -1745,45 +1748,103 @@ void main() {
     group('MAHMAS Studio 4 Critical Bug Fix Regression Tests', () {
       // BUG #1: PROJECT AUTO-PLAY PREVENTION TESTS
       group('Bug #1: Project Opening / Initialization Playback State Tests', () {
-        test('Opening a project always initializes in PAUSED state', () {
+        test('TEST 1: Opening a new project starts paused (isPlaying == false)', () {
+          final vm = EditorViewModel();
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(0.0));
+          vm.dispose();
+        });
+
+        test('TEST 2: Opening an existing project starts paused (isPlaying == false)', () {
           final project = Project(
-            id: 'proj_test_paused',
+            id: 'proj_test_paused_2',
             name: 'Paused Test Project',
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
-            playheadPosition: 5.0,
+            playheadPosition: 4.25,
             videoClips: MockMediaRepository.getInitialVideoClips(),
             audioTracks: [MockMediaRepository.getInitialAudioTrack()],
           );
 
           final vm = EditorViewModel(initialProject: project);
-
-          // Playback must be strictly false upon opening
           expect(vm.isPlaying, isFalse);
-          expect(vm.playheadPosition, equals(5.0));
-
-          // Explicit play starts playback
-          vm.play();
-          expect(vm.isPlaying, isTrue);
-
-          // Explicit pause stops playback
-          vm.pause();
-          expect(vm.isPlaying, isFalse);
-
+          expect(vm.playheadPosition, equals(4.25));
           vm.dispose();
         });
 
-        test('Reopening a project previously saved while playing opens in strictly PAUSED state', () {
+        test('TEST 3: A project previously saved while playing must reopen paused', () {
           final vm1 = EditorViewModel();
           vm1.play();
           expect(vm1.isPlaying, isTrue);
 
-          final projectState = vm1.currentProject;
+          final projectState = vm1.currentProject.copyWith(playheadPosition: 3.5);
           vm1.dispose();
 
           final vm2 = EditorViewModel(initialProject: projectState);
           expect(vm2.isPlaying, isFalse);
+          expect(vm2.playheadPosition, equals(3.5));
           vm2.dispose();
+        });
+
+        test('TEST 4: Opening a project must not start the playback timer', () async {
+          final vm = EditorViewModel();
+          final initialPos = vm.playheadPosition;
+
+          // Wait 100ms to verify periodic playback timer is not running
+          await Future.delayed(const Duration(milliseconds: 100));
+
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(initialPos));
+          vm.dispose();
+        });
+
+        test('TEST 5: Opening a project must not start audio playback', () {
+          final project = Project(
+            id: 'proj_test_audio_paused',
+            name: 'Audio Paused Test',
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+            audioTracks: [MockMediaRepository.getInitialAudioTrack()],
+          );
+
+          final vm = EditorViewModel(initialProject: project);
+          expect(vm.isPlaying, isFalse);
+          expect(AudioPlaybackService.instance.isPlaying, isFalse);
+          vm.dispose();
+        });
+
+        test('TEST 6: Opening a project must not start video playback', () {
+          final project = Project(
+            id: 'proj_test_video_paused',
+            name: 'Video Paused Test',
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+            videoClips: MockMediaRepository.getInitialVideoClips(),
+          );
+
+          final vm = EditorViewModel(initialProject: project);
+          expect(vm.isPlaying, isFalse);
+          expect(VideoPlaybackService.instance.activeSession?.isPlaying ?? false, isFalse);
+          vm.dispose();
+        });
+
+        test('TEST 7: Explicit Play action still starts playback', () {
+          final vm = EditorViewModel();
+          expect(vm.isPlaying, isFalse);
+
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          vm.dispose();
+        });
+
+        test('TEST 8: Explicit Pause action still pauses playback', () {
+          final vm = EditorViewModel();
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+
+          vm.pause();
+          expect(vm.isPlaying, isFalse);
+          vm.dispose();
         });
       });
 

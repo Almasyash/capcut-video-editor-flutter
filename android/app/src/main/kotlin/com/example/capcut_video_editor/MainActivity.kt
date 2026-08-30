@@ -164,6 +164,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         videoPlayers[textureId] = Triple(player, entry, surface)
 
                         player.setOnPreparedListener { mp ->
+                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] ON_PREPARED (video textureId=$textureId, duration=${mp.duration}ms)")
                             result.success(mapOf(
                                 "textureId" to textureId,
                                 "durationMs" to mp.duration,
@@ -190,6 +191,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     val playerTriple = videoPlayers[textureId]
                     if (playerTriple != null) {
                         try {
+                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] MEDIA_PLAYER_START (video textureId=$textureId)")
                             playerTriple.first.start()
                             result.success(true)
                         } catch (e: Exception) {
@@ -204,6 +206,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     val playerTriple = videoPlayers[textureId]
                     if (playerTriple != null) {
                         try {
+                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_PAUSED (video textureId=$textureId)")
                             if (playerTriple.first.isPlaying) {
                                 playerTriple.first.pause()
                             }
@@ -257,9 +260,18 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     if (playerTriple != null) {
                         try {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                val params = playerTriple.first.playbackParams
+                                val player = playerTriple.first
+                                val wasPlaying = player.isPlaying
+                                val params = player.playbackParams
                                 params.speed = speed.coerceIn(0.25f, 4.0f)
-                                playerTriple.first.playbackParams = params
+                                player.playbackParams = params
+                                android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] SET_SPEED (video textureId=$textureId, speed=$speed, wasPlaying=$wasPlaying)")
+                                // Android MediaPlayer.setPlaybackParams automatically starts playback if in paused state.
+                                // If player was NOT actively playing, ensure it remains strictly paused!
+                                if (!wasPlaying && player.isPlaying) {
+                                    player.pause()
+                                    android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PAUSED AFTER SET_SPEED (video textureId=$textureId)")
+                                }
                             }
                             result.success(true)
                         } catch (e: Exception) {
@@ -286,6 +298,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
                 "dispose" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
+                    android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_DISPOSED (video textureId=$textureId)")
                     val playerTriple = videoPlayers.remove(textureId)
                     if (playerTriple != null) {
                         try {
@@ -325,6 +338,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                             )
                             setDataSource(file.absolutePath)
                             setOnPreparedListener { mp ->
+                                android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] ON_PREPARED (audio duration=${mp.duration}ms)")
                                 result.success(mapOf(
                                     "durationMs" to mp.duration
                                 ))
@@ -342,6 +356,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
                 "play" -> {
                     try {
+                        android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] MEDIA_PLAYER_START (audio)")
                         audioPlayer?.start()
                         result.success(true)
                     } catch (e: Exception) {
@@ -350,6 +365,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
                 "pause" -> {
                     try {
+                        android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_PAUSED (audio)")
                         if (audioPlayer?.isPlaying == true) {
                             audioPlayer?.pause()
                         }
@@ -384,9 +400,16 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     val speed = (call.argument<Number>("speed"))?.toFloat() ?: 1.0f
                     try {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioPlayer != null) {
-                            val params = audioPlayer!!.playbackParams
+                            val player = audioPlayer!!
+                            val wasPlaying = player.isPlaying
+                            val params = player.playbackParams
                             params.speed = speed.coerceIn(0.25f, 4.0f)
-                            audioPlayer!!.playbackParams = params
+                            player.playbackParams = params
+                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] SET_SPEED (audio speed=$speed, wasPlaying=$wasPlaying)")
+                            if (!wasPlaying && player.isPlaying) {
+                                player.pause()
+                                android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PAUSED AFTER SET_SPEED (audio)")
+                            }
                         }
                         result.success(true)
                     } catch (e: Exception) {
@@ -395,6 +418,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
                 "dispose" -> {
                     try {
+                        android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_DISPOSED (audio)")
                         if (audioPlayer?.isPlaying == true) {
                             audioPlayer?.stop()
                         }

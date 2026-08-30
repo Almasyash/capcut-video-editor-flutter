@@ -78,6 +78,7 @@ class VideoPlaybackService {
   /// Starts playback of video frames and native audio track.
   Future<void> play(int textureId) async {
     try {
+      debugPrint('[AUTO_PLAY_TRACE] VIDEO START CALLED: VideoPlaybackService.play($textureId)');
       await _channel.invokeMethod('play', {'textureId': textureId});
       final session = _sessions[textureId];
       if (session != null) {
@@ -91,6 +92,7 @@ class VideoPlaybackService {
   /// Pauses playback of video frames and audio track.
   Future<void> pause(int textureId) async {
     try {
+      debugPrint('[AUTO_PLAY_TRACE] VideoPlaybackService.pause($textureId)');
       await _channel.invokeMethod('pause', {'textureId': textureId});
       final session = _sessions[textureId];
       if (session != null) {

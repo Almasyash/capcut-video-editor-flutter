@@ -82,7 +82,9 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
             });
             if (session != null && activeClip is VideoClip) {
               VideoPlaybackService.instance.setVolume(session.textureId, activeClip.volume);
-              VideoPlaybackService.instance.setSpeed(session.textureId, activeClip.speed);
+              if (activeClip.speed != 1.0) {
+                VideoPlaybackService.instance.setSpeed(session.textureId, activeClip.speed);
+              }
               final clipStart = widget.viewModel.selectedClipIndex != null
                   ? widget.viewModel.getClipStartTime(widget.viewModel.selectedClipIndex!)
                   : 0.0;
@@ -92,6 +94,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
             }
             // If viewModel is currently playing, start playing immediately
             if (widget.viewModel.isPlaying && session != null) {
+              debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection calling play because viewModel.isPlaying is TRUE');
               VideoPlaybackService.instance.play(session.textureId);
               _isPlaying = true;
             }
@@ -103,16 +106,20 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
     // 2. Sync dynamic volume & speed properties
     if (_session != null && _session!.isInitialized && activeClip is VideoClip) {
       VideoPlaybackService.instance.setVolume(_session!.textureId, activeClip.volume);
-      VideoPlaybackService.instance.setSpeed(_session!.textureId, activeClip.speed);
+      if (widget.viewModel.isPlaying && activeClip.speed != 1.0) {
+        VideoPlaybackService.instance.setSpeed(_session!.textureId, activeClip.speed);
+      }
     }
 
     // 3. Sync play/pause state
     if (_session != null && _session!.isInitialized) {
       if (widget.viewModel.isPlaying && !_isPlaying) {
         _isPlaying = true;
+        debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection syncing play state');
         VideoPlaybackService.instance.play(_session!.textureId);
       } else if (!widget.viewModel.isPlaying && _isPlaying) {
         _isPlaying = false;
+        debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection syncing pause state');
         VideoPlaybackService.instance.pause(_session!.textureId);
       }
 
