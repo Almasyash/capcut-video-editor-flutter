@@ -1,7 +1,7 @@
 name: capcut_video_editor
 description: Mahmas Studio - A sleek, modern video editing app built with Flutter.
 publish_to: 'none'
-version: 2.4.4+244
+version: 2.4.5+245
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
