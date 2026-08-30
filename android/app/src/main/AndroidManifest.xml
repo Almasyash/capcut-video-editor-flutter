@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <application
-        android:label="Mahmas Studio"
+        android:label="Editor FS"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
