@@ -1895,14 +1895,14 @@ void main() {
 
       // BUG #4: TIMELINE TRIM ALIGNMENT TESTS
       group('Bug #4: Audio Trim Alignment Tests', () {
-        test('Trim Left increases source in-point, reduces duration, and KEEPS timeline startTime unchanged', () {
+        test('TEST 1 & 3 & 5: Trim Left increases source in-point, reduces duration, and KEEPS timeline startTime unchanged', () {
           final vm = EditorViewModel();
 
           // Construct original audio track:
-          // timelineStart = 10s
-          // duration = 20s
-          // sourceStart = 0s
-          // sourceEnd = 20s
+          // timelineStart = 10.0s
+          // duration = 20.0s
+          // trimStart = 0.0s
+          // trimEnd = 20.0s
           const originalTrack = AudioTrack(
             id: 'audio_alignment_test_1',
             assetId: 'asset_audio_align',
@@ -1930,26 +1930,26 @@ void main() {
           final trimmedTrack = vm.selectedAudioTrack!;
 
           // SEMANTIC ASSERTIONS:
-          // timelineStart MUST remain 10s
+          // 1. timelineStart MUST remain 10.0s
           expect(trimmedTrack.startTimeInSeconds, equals(10.0));
-          // duration MUST become 15s
-          expect(trimmedTrack.durationInSeconds, closeTo(15.0, 0.01));
-          // sourceStart MUST become 5s
+          // 2. sourceStart MUST become 5.0s
           expect(trimmedTrack.trimStartInSeconds, closeTo(5.0, 0.01));
-          // sourceEnd MUST remain 20s
+          // 3. sourceEnd MUST remain 20.0s
           expect(trimmedTrack.trimEndInSeconds, equals(20.0));
+          // 4. effective duration MUST become 15.0s
+          expect(trimmedTrack.durationInSeconds, closeTo(15.0, 0.01));
 
           vm.dispose();
         });
 
-        test('Trim Right reduces source out-point, reduces duration, and KEEPS timeline startTime unchanged', () {
+        test('TEST 2 & 4 & 6: Trim Right reduces source out-point, reduces duration, and KEEPS timeline startTime unchanged', () {
           final vm = EditorViewModel();
 
           // Construct original audio track:
-          // timelineStart = 10s
-          // duration = 20s
-          // sourceStart = 0s
-          // sourceEnd = 20s
+          // timelineStart = 10.0s
+          // duration = 20.0s
+          // trimStart = 0.0s
+          // trimEnd = 20.0s
           const originalTrack = AudioTrack(
             id: 'audio_alignment_test_2',
             assetId: 'asset_audio_align_2',
@@ -1972,19 +1972,94 @@ void main() {
           final trimmedTrack = vm.selectedAudioTrack!;
 
           // SEMANTIC ASSERTIONS:
-          // timelineStart MUST remain 10s
+          // 1. timelineStart MUST remain 10.0s
           expect(trimmedTrack.startTimeInSeconds, equals(10.0));
-          // duration MUST become 5s
-          expect(trimmedTrack.durationInSeconds, closeTo(5.0, 0.01));
-          // sourceStart MUST remain 0s
+          // 2. sourceStart MUST remain 0.0s
           expect(trimmedTrack.trimStartInSeconds, equals(0.0));
-          // sourceEnd MUST become 5s
+          // 3. sourceEnd MUST become 5.0s
           expect(trimmedTrack.trimEndInSeconds, closeTo(5.0, 0.01));
+          // 4. effective duration MUST become 5.0s
+          expect(trimmedTrack.durationInSeconds, closeTo(5.0, 0.01));
 
           vm.dispose();
         });
 
-        test('Persistence: Trimmed audio track serializes and restores exact startTime and trim boundaries', () {
+        test('TEST 7: Multiple consecutive trims preserve timeline alignment', () {
+          final vm = EditorViewModel();
+          const track = AudioTrack(
+            id: 'audio_consecutive_trim',
+            assetId: 'asset_consecutive',
+            title: 'Consecutive Trim Track',
+            startTime: Duration(seconds: 10),
+            duration: Duration(seconds: 30),
+            trimStart: Duration.zero,
+            trimEnd: Duration(seconds: 30),
+          );
+
+          vm.addAudioTrack(track);
+          vm.selectAudioTrack(track.id);
+
+          // Trim Left at 14.0s (4s into track)
+          vm.seekTo(14.0);
+          expect(vm.trimAudioLeftToPlayhead(), isTrue);
+          expect(vm.selectedAudioTrack!.startTimeInSeconds, equals(10.0));
+          expect(vm.selectedAudioTrack!.trimStartInSeconds, closeTo(4.0, 0.01));
+          expect(vm.selectedAudioTrack!.durationInSeconds, closeTo(26.0, 0.01));
+
+          // Trim Left again at 18.0s (8s into track)
+          vm.seekTo(18.0);
+          expect(vm.trimAudioLeftToPlayhead(), isTrue);
+          expect(vm.selectedAudioTrack!.startTimeInSeconds, equals(10.0));
+          expect(vm.selectedAudioTrack!.trimStartInSeconds, closeTo(8.0, 0.01));
+          expect(vm.selectedAudioTrack!.durationInSeconds, closeTo(22.0, 0.01));
+
+          // Trim Right at 25.0s (15s from track startTime -> 7s effective duration remaining)
+          vm.seekTo(25.0);
+          expect(vm.trimAudioRightToPlayhead(), isTrue);
+          expect(vm.selectedAudioTrack!.startTimeInSeconds, equals(10.0));
+          expect(vm.selectedAudioTrack!.trimStartInSeconds, closeTo(8.0, 0.01));
+          expect(vm.selectedAudioTrack!.trimEndInSeconds, closeTo(23.0, 0.01));
+          expect(vm.selectedAudioTrack!.durationInSeconds, closeTo(15.0, 0.01));
+
+          vm.dispose();
+        });
+
+        test('TEST 8: Moving the audio clip first and then trimming preserves the moved position', () {
+          final vm = EditorViewModel();
+          const track = AudioTrack(
+            id: 'audio_move_then_trim',
+            assetId: 'asset_move_trim',
+            title: 'Move Then Trim Track',
+            startTime: Duration(seconds: 5),
+            duration: Duration(seconds: 20),
+            trimStart: Duration.zero,
+            trimEnd: Duration(seconds: 20),
+          );
+
+          vm.addAudioTrack(track);
+
+          // Move track from 5.0s to 12.0s
+          vm.moveAudioTrack(track.id, const Duration(seconds: 12));
+          final movedTrack = vm.audioTracks.firstWhere((t) => t.id == track.id);
+          expect(movedTrack.startTimeInSeconds, equals(12.0));
+          expect(movedTrack.trimStartInSeconds, equals(0.0));
+          expect(movedTrack.trimEndInSeconds, equals(20.0));
+
+          // Select and Trim Left at 16.0s (4s into track)
+          vm.selectAudioTrack(track.id);
+          vm.seekTo(16.0);
+          expect(vm.trimAudioLeftToPlayhead(), isTrue);
+
+          final resultTrack = vm.selectedAudioTrack!;
+          expect(resultTrack.startTimeInSeconds, equals(12.0));
+          expect(resultTrack.trimStartInSeconds, closeTo(4.0, 0.01));
+          expect(resultTrack.trimEndInSeconds, equals(20.0));
+          expect(resultTrack.durationInSeconds, closeTo(16.0, 0.01));
+
+          vm.dispose();
+        });
+
+        test('TEST 9: Persistence: Trimmed audio track serializes and restores exact startTime and trim boundaries', () {
           const track = AudioTrack(
             id: 'audio_persist_trim',
             assetId: 'asset_persist_1',
@@ -2003,6 +2078,32 @@ void main() {
           expect(restored.durationInSeconds, equals(15.0));
           expect(restored.trimStartInSeconds, equals(5.0));
           expect(restored.trimEndInSeconds, equals(20.0));
+        });
+
+        test('TEST 10: updateAudioTrim clamps boundaries without changing startTime', () {
+          final vm = EditorViewModel();
+          const track = AudioTrack(
+            id: 'audio_update_trim_test',
+            assetId: 'asset_update_trim',
+            title: 'Direct Trim Update',
+            startTime: Duration(seconds: 8),
+            duration: Duration(seconds: 20),
+          );
+
+          vm.addAudioTrack(track);
+          vm.updateAudioTrim(
+            track.id,
+            const Duration(seconds: 3),
+            const Duration(seconds: 17),
+          );
+
+          final updated = vm.audioTracks.firstWhere((t) => t.id == track.id);
+          expect(updated.startTimeInSeconds, equals(8.0));
+          expect(updated.trimStartInSeconds, equals(3.0));
+          expect(updated.trimEndInSeconds, equals(17.0));
+          expect(updated.durationInSeconds, equals(14.0));
+
+          vm.dispose();
         });
       });
     });

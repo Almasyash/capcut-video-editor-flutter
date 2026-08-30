@@ -1268,10 +1268,13 @@ class EditorViewModel extends ChangeNotifier {
     _saveSnapshot();
     final deltaSec = _playheadPosition - track.startTimeInSeconds;
     final sourceDeltaMs = (deltaSec * track.speed * 1000).round();
-    final newTrimStart = Duration(milliseconds: track.trimStart.inMilliseconds + sourceDeltaMs);
+    final newTrimStart = Duration(
+      milliseconds: sourceDeltaMs.clamp(0, track.effectiveTrimEnd.inMilliseconds - 200),
+    );
 
     final index = _audioTracks.indexWhere((t) => t.id == track.id);
     if (index != -1) {
+      debugPrint('[TIMELINE_TRIM_TRACE] TRIM LEFT: id=${track.id}, startTime=${track.startTimeInSeconds}s (PRESERVED), oldTrimStart=${track.trimStartInSeconds}s, newTrimStart=${newTrimStart.inMilliseconds / 1000.0}s, trimEnd=${track.trimEndInSeconds}s, effectiveDuration=${track.durationInSeconds}s -> ${(track.effectiveTrimEnd.inMilliseconds - newTrimStart.inMilliseconds) / 1000.0 / track.speed}s');
       _audioTracks[index] = track.copyWith(
         trimStart: newTrimStart,
       );
@@ -1294,11 +1297,17 @@ class EditorViewModel extends ChangeNotifier {
     _saveSnapshot();
     final offsetSec = _playheadPosition - track.startTimeInSeconds;
     final sourceOffsetMs = (offsetSec * track.speed * 1000).round();
-    final newTrimEnd = Duration(milliseconds: track.trimStart.inMilliseconds + sourceOffsetMs);
+    final newTrimEnd = Duration(
+      milliseconds: (track.trimStart.inMilliseconds + sourceOffsetMs)
+          .clamp(track.trimStart.inMilliseconds + 200, track.duration.inMilliseconds),
+    );
 
     final index = _audioTracks.indexWhere((t) => t.id == track.id);
     if (index != -1) {
-      _audioTracks[index] = track.copyWith(trimEnd: newTrimEnd);
+      debugPrint('[TIMELINE_TRIM_TRACE] TRIM RIGHT: id=${track.id}, startTime=${track.startTimeInSeconds}s (PRESERVED), trimStart=${track.trimStartInSeconds}s, oldTrimEnd=${track.trimEndInSeconds}s, newTrimEnd=${newTrimEnd.inMilliseconds / 1000.0}s, effectiveDuration=${track.durationInSeconds}s -> ${(newTrimEnd.inMilliseconds - track.trimStart.inMilliseconds) / 1000.0 / track.speed}s');
+      _audioTracks[index] = track.copyWith(
+        trimEnd: newTrimEnd,
+      );
       _syncAudioPlayback(forceSeek: true);
       notifyListeners();
       return true;
@@ -1309,12 +1318,35 @@ class EditorViewModel extends ChangeNotifier {
   void updateAudioTrim(String id, Duration newTrimStart, Duration newTrimEnd) {
     final index = _audioTracks.indexWhere((t) => t.id == id);
     if (index == -1) return;
-    if (newTrimEnd.inMilliseconds - newTrimStart.inMilliseconds < 300) return;
+    if (newTrimEnd.inMilliseconds - newTrimStart.inMilliseconds < 200) return;
 
     _saveSnapshot();
-    _audioTracks[index] = _audioTracks[index].copyWith(
-      trimStart: newTrimStart,
-      trimEnd: newTrimEnd,
+    final track = _audioTracks[index];
+    final clampedTrimStart = Duration(
+      milliseconds: newTrimStart.inMilliseconds.clamp(0, track.duration.inMilliseconds),
+    );
+    final clampedTrimEnd = Duration(
+      milliseconds: newTrimEnd.inMilliseconds.clamp(clampedTrimStart.inMilliseconds + 200, track.duration.inMilliseconds),
+    );
+
+    debugPrint('[TIMELINE_TRIM_TRACE] UPDATE AUDIO TRIM: id=$id, startTime=${track.startTimeInSeconds}s (PRESERVED), trimStart=${clampedTrimStart.inMilliseconds / 1000.0}s, trimEnd=${clampedTrimEnd.inMilliseconds / 1000.0}s');
+    _audioTracks[index] = track.copyWith(
+      trimStart: clampedTrimStart,
+      trimEnd: clampedTrimEnd,
+    );
+    _syncAudioPlayback(forceSeek: true);
+    notifyListeners();
+  }
+
+  void moveAudioTrack(String id, Duration newStartTime) {
+    final index = _audioTracks.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final track = _audioTracks[index];
+    debugPrint('[TIMELINE_TRIM_TRACE] MOVE AUDIO TRACK: id=$id, oldStart=${track.startTimeInSeconds}s -> newStart=${newStartTime.inMilliseconds / 1000.0}s, trimStart=${track.trimStartInSeconds}s, trimEnd=${track.trimEndInSeconds}s (PRESERVED)');
+    _audioTracks[index] = track.copyWith(
+      startTime: newStartTime,
     );
     _syncAudioPlayback(forceSeek: true);
     notifyListeners();
@@ -1328,8 +1360,10 @@ class EditorViewModel extends ChangeNotifier {
 
     _saveSnapshot();
     final track = _audioTracks[index];
+    final currentTrimStart = track.trimStart;
     final calculatedTrimEnd = Duration(
-      milliseconds: track.trimStart.inMilliseconds + (newDuration.inMilliseconds * track.speed).round(),
+      milliseconds: (currentTrimStart.inMilliseconds + (newDuration.inMilliseconds * track.speed).round())
+          .clamp(currentTrimStart.inMilliseconds + 200, track.duration.inMilliseconds),
     );
     _audioTracks[index] = track.copyWith(
       startTime: newStart,

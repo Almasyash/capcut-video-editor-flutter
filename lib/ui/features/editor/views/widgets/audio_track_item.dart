@@ -39,10 +39,9 @@ class AudioTrackItem extends StatelessWidget {
           // Middle drag: slide audio track position across timeline
           final deltaSeconds = details.primaryDelta! / pixelsPerSecond;
           final newStartSec = math.max(0.0, audioTrack.startTimeInSeconds + deltaSeconds);
-          viewModel.updateAudioTrackTiming(
+          viewModel.moveAudioTrack(
+            audioTrack.id,
             Duration(milliseconds: (newStartSec * 1000).round()),
-            audioTrack.duration,
-            id: audioTrack.id,
           );
         },
         child: Container(
@@ -138,7 +137,7 @@ class AudioTrackItem extends StatelessWidget {
                   ),
                 ),
 
-              // 3. Left & Right Interactive Amber Trim Handles when Selected
+              // 3. Left & Right Interactive Amber Trim Handles when Selected (preserving timeline startTime)
               if (isSelected) ...[
                 Positioned(
                   left: 0,
@@ -151,21 +150,13 @@ class AudioTrackItem extends StatelessWidget {
                       final deltaSec = dx / pixelsPerSecond;
                       final sourceDeltaMs = (deltaSec * audioTrack.speed * 1000).round();
                       final newTrimStartMs = (audioTrack.trimStart.inMilliseconds + sourceDeltaMs)
-                          .clamp(0, currentTrimEnd.inMilliseconds - 300)
+                          .clamp(0, currentTrimEnd.inMilliseconds - 200)
                           .toInt();
-                      final actualAppliedDeltaMs = newTrimStartMs - audioTrack.trimStart.inMilliseconds;
-                      final timelineDeltaSec = actualAppliedDeltaMs / 1000.0 / audioTrack.speed;
-                      final newStartSec = math.max(0.0, audioTrack.startTimeInSeconds + timelineDeltaSec);
 
                       viewModel.updateAudioTrim(
                         audioTrack.id,
                         Duration(milliseconds: newTrimStartMs),
                         currentTrimEnd,
-                      );
-                      viewModel.updateAudioTrackTiming(
-                        Duration(milliseconds: (newStartSec * 1000).round()),
-                        audioTrack.duration,
-                        id: audioTrack.id,
                       );
                     },
                   ),
@@ -181,7 +172,7 @@ class AudioTrackItem extends StatelessWidget {
                       final deltaSec = dx / pixelsPerSecond;
                       final sourceDeltaMs = (deltaSec * audioTrack.speed * 1000).round();
                       final newTrimEndMs = (currentTrimEnd.inMilliseconds + sourceDeltaMs)
-                          .clamp(audioTrack.trimStart.inMilliseconds + 300, audioTrack.duration.inMilliseconds)
+                          .clamp(audioTrack.trimStart.inMilliseconds + 200, audioTrack.duration.inMilliseconds)
                           .toInt();
 
                       viewModel.updateAudioTrim(
