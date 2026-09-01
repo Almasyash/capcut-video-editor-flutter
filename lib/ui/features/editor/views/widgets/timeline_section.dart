@@ -86,9 +86,12 @@ class _TimelineSectionState extends State<TimelineSection> {
                     physics: const BouncingScrollPhysics(),
                     child: Padding(
                       padding: EdgeInsets.symmetric(horizontal: halfScreenWidth),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.vertical,
+                        physics: const ClampingScrollPhysics(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                           // Ruler Track
                           TimelineRuler(
                             totalDurationSeconds: math.max(viewModel.totalDurationInSeconds, 1.0),
@@ -137,6 +140,7 @@ class _TimelineSectionState extends State<TimelineSection> {
                     ),
                   ),
                 ),
+              ),
 
                 // 3. Fixed Center Playhead Needle (White Line + Cyan Marker)
                 _buildPlayheadNeedle(screenWidth),

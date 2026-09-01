@@ -1,9 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:capcut_video_editor/core/services/asset_download_service.dart';
+import 'package:capcut_video_editor/core/services/asset_storage_service.dart';
 import 'package:capcut_video_editor/core/services/audio_playback_service.dart';
 import 'package:capcut_video_editor/core/services/device_media_service.dart';
 import 'package:capcut_video_editor/core/services/project_storage_service.dart';
 import 'package:capcut_video_editor/core/services/video_playback_service.dart';
+import 'package:capcut_video_editor/data/repositories/asset_repository.dart';
 import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
 import 'package:capcut_video_editor/domain/enums/aspect_ratio_preset.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
@@ -2173,6 +2177,156 @@ void main() {
           expect(vm.selectedAudioTrackId, equals('user_imported_audio_01'));
           expect(vm.isAudioSelected, isTrue);
 
+          vm.dispose();
+        });
+
+        test('Audio Library: Fresh project has 0 audio tracks and opening drawer creates no tracks', () {
+          final vm = EditorViewModel();
+          expect(vm.audioTracks, isEmpty);
+          expect(vm.mediaLibrary.where((a) => a.isAudio), isEmpty);
+          vm.openDrawer(EditorCategory.audio);
+          expect(vm.audioTracks, isEmpty);
+          vm.dispose();
+        });
+
+        test('Importing user audio adds exactly 1 track and remains playable and persistent', () {
+          final vm = EditorViewModel();
+          final userAsset = MediaAsset(
+            id: 'user_imported_audio_asset_99',
+            type: MediaAssetType.audio,
+            name: 'MyCustomTrack.mp3',
+            localPath: '/storage/emulated/0/Music/MyCustomTrack.mp3',
+            duration: const Duration(seconds: 30),
+            sizeBytes: 1024 * 1024 * 3,
+            createdAt: DateTime.now(),
+          );
+
+          vm.addMediaAsset(userAsset);
+          expect(vm.mediaLibrary.where((a) => a.isAudio).length, equals(1));
+
+          final userTrack = AudioTrack(
+            id: 'audio_track_99',
+            assetId: userAsset.id,
+            title: userAsset.name,
+            artist: 'Library Audio',
+            duration: userAsset.duration!,
+            startTime: Duration.zero,
+          );
+
+          vm.addAudioTrack(userTrack);
+          expect(vm.audioTracks.length, equals(1));
+          expect(vm.audioTracks.first.title, equals('MyCustomTrack.mp3'));
+
+          // Test save & restore
+          final project = Project(
+            id: 'test_project_1',
+            name: 'Test Project',
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+            audioTracks: [userTrack],
+          );
+          final projectJson = project.toJson();
+          final restored = Project.fromJson(projectJson);
+          expect(restored.audioTracks.length, equals(1));
+          expect(restored.audioTracks.first.title, equals('MyCustomTrack.mp3'));
+
+          vm.dispose();
+        });
+      });
+
+      // ONLINE SOUND EFFECTS & ASSET STORE TESTS
+      group('Online Sound Effects & Asset Store Tests', () {
+        late RemoteAssetRepository remoteRepo;
+        late AssetDownloadService downloadService;
+        late AssetStorageService storageService;
+
+        setUp(() async {
+          remoteRepo = RemoteAssetRepository();
+          downloadService = AssetDownloadService.instance;
+          storageService = AssetStorageService.instance;
+          await storageService.initialize();
+        });
+
+        test('TEST 1: Online Sound Effects library loads valid catalog definitions', () async {
+          final sfxList = await remoteRepo.getAssets();
+          expect(sfxList.isNotEmpty, isTrue);
+          expect(sfxList.every((a) => a.id.isNotEmpty && a.name.isNotEmpty), isTrue);
+        });
+
+        test('TEST 2: Downloaded SFX has a valid source mapping and file on disk', () async {
+          final asset = (await remoteRepo.getAssets()).first;
+          final localPath = await downloadService.downloadAsset(asset);
+          expect(File(localPath).existsSync(), isTrue);
+          expect(File(localPath).lengthSync(), greaterThan(1000));
+        });
+
+        test('TEST 3: Insert downloaded SFX creates a real audio track on the timeline', () async {
+          final vm = EditorViewModel();
+          final asset = (await remoteRepo.getAssets()).first;
+          final localPath = await downloadService.downloadAsset(asset);
+          final downloaded = asset.copyWith(isDownloaded: true, localPath: localPath);
+
+          final track = await vm.insertDownloadedAsset(downloaded);
+
+          expect(vm.audioTracks.length, equals(1));
+          expect(track.title, equals(asset.name));
+          expect(track.duration, equals(asset.duration));
+
+          final resolvedAsset = vm.getAssetById(track.assetId);
+          expect(resolvedAsset, isNotNull);
+          expect(File(resolvedAsset!.localPath!).existsSync(), isTrue);
+          vm.dispose();
+        });
+
+        test('TEST 4: Inserted downloaded SFX preserves timeline playhead start position', () async {
+          final vm = EditorViewModel();
+          vm.seekTo(3.5); // Move playhead to 3.5s
+
+          final asset = (await remoteRepo.getAssets()).first;
+          final localPath = await downloadService.downloadAsset(asset);
+          final downloaded = asset.copyWith(isDownloaded: true, localPath: localPath);
+
+          final track = await vm.insertDownloadedAsset(downloaded);
+
+          expect(track.startTimeInSeconds, equals(3.5));
+          expect(track.durationInSeconds, equals(asset.durationInSeconds));
+          expect(track.endTimeInSeconds, closeTo(3.5 + asset.durationInSeconds, 0.01));
+          vm.dispose();
+        });
+
+        test('TEST 5: Inserted SFX can be serialized and restored, resolving asset file seamlessly', () async {
+          final asset = (await remoteRepo.getAssets()).first;
+          final localPath = await downloadService.downloadAsset(asset);
+          expect(File(localPath).existsSync(), isTrue);
+
+          final track = AudioTrack(
+            id: 'audio_sfx_persisted_test',
+            assetId: asset.id,
+            title: asset.name,
+            artist: 'Asset Library',
+            startTime: const Duration(seconds: 2),
+            duration: asset.duration,
+          );
+
+          final json = track.toJson();
+          final restored = AudioTrack.fromJson(json);
+
+          expect(restored.id, equals('audio_sfx_persisted_test'));
+          expect(restored.assetId, equals(asset.id));
+          expect(restored.startTimeInSeconds, equals(2.0));
+
+          // Ensure view model resolves asset even on a fresh instance
+          final freshVm = EditorViewModel();
+          final resolvedAsset = freshVm.getAssetById(restored.assetId);
+          expect(resolvedAsset, isNotNull);
+          expect(File(resolvedAsset!.localPath!).existsSync(), isTrue);
+          freshVm.dispose();
+        });
+
+        test('TEST 6: No default Music Tracks are reintroduced and user import still works', () {
+          final vm = EditorViewModel();
+          expect(vm.audioTracks, isEmpty);
+          expect(vm.mediaLibrary.where((a) => a.isAudio), isEmpty);
           vm.dispose();
         });
       });

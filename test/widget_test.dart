@@ -149,4 +149,29 @@ void main() {
     expect(find.text('Canvases'), findsNothing);
     expect(find.text('Upload File from Device Storage'), findsOneWidget);
   });
+
+  testWidgets('AudioDrawer renders empty state initially and does not contain demo music tracks', (WidgetTester tester) async {
+    final viewModel = EditorViewModel();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AudioDrawer(viewModel: viewModel),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // Verify empty state is displayed
+    expect(find.text('No music tracks yet'), findsOneWidget);
+    expect(find.text('Import an audio file from your device to get started.'), findsOneWidget);
+    expect(find.text('Import Audio File from Device Storage'), findsOneWidget);
+
+    // Verify demo track names do NOT exist anywhere in the UI
+    expect(find.text('Lofi Chill Vibes'), findsNothing);
+    expect(find.text('Trending Hyper Pop'), findsNothing);
+    expect(find.text('Epic Cinematic Intro'), findsNothing);
+    expect(find.text('Deep House Sunset'), findsNothing);
+    expect(find.text('Midnight Beats (Copyright Free)'), findsNothing);
+  });
 }

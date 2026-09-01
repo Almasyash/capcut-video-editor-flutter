@@ -3,8 +3,10 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
+import 'package:capcut_video_editor/core/services/asset_storage_service.dart';
 import 'package:capcut_video_editor/core/services/audio_playback_service.dart';
 import 'package:capcut_video_editor/core/services/video_playback_service.dart';
+import 'package:capcut_video_editor/domain/models/asset.dart';
 import 'package:capcut_video_editor/core/services/tts_service.dart';
 import 'package:capcut_video_editor/domain/enums/aspect_ratio_preset.dart';
 import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
@@ -984,6 +986,22 @@ class EditorViewModel extends ChangeNotifier {
     try {
       return _mediaLibrary.firstWhere((asset) => asset.id == assetId);
     } catch (_) {
+      final downloaded = AssetStorageService.instance.getDownloadedAssetSync(assetId);
+      if (downloaded != null && downloaded.localPath != null) {
+        final mediaAsset = MediaAsset(
+          id: downloaded.id,
+          type: downloaded.type == AssetType.transition ? MediaAssetType.video : MediaAssetType.audio,
+          name: downloaded.name,
+          localPath: downloaded.localPath,
+          duration: downloaded.duration,
+          sizeBytes: downloaded.fileSizeBytes,
+          createdAt: downloaded.downloadedAt ?? DateTime.now(),
+        );
+        if (!containsMediaAsset(mediaAsset)) {
+          _mediaLibrary.add(mediaAsset);
+        }
+        return mediaAsset;
+      }
       return null;
     }
   }
@@ -1232,6 +1250,48 @@ class EditorViewModel extends ChangeNotifier {
       speed: 1.0,
     );
     addAudioTrack(track);
+  }
+
+  /// Inserts a downloaded sound effect or audio asset into the timeline at the current playhead
+  Future<AudioTrack> insertDownloadedAsset(Asset asset) async {
+    final localPath = asset.localPath ?? await AssetStorageService.instance.getLocalPath(asset.id);
+    if (localPath == null || !File(localPath).existsSync()) {
+      throw Exception('Asset file is not downloaded or missing from disk');
+    }
+
+    final mediaAsset = MediaAsset(
+      id: asset.id,
+      type: MediaAssetType.audio,
+      name: asset.name,
+      localPath: localPath,
+      duration: asset.duration,
+      sizeBytes: asset.fileSizeBytes,
+      createdAt: asset.downloadedAt ?? DateTime.now(),
+    );
+
+    if (!containsMediaAsset(mediaAsset)) {
+      _mediaLibrary.add(mediaAsset);
+      notifyListeners();
+    }
+
+    final random = math.Random(asset.id.hashCode);
+    final waveform = List.generate(40, (_) => 0.2 + random.nextDouble() * 0.8);
+
+    final track = AudioTrack(
+      id: 'audio_asset_${DateTime.now().millisecondsSinceEpoch}',
+      assetId: asset.id,
+      title: asset.name,
+      artist: 'Asset Library',
+      duration: asset.duration,
+      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
+      waveformPoints: waveform,
+      volume: 0.9,
+      speed: 1.0,
+    );
+
+    addAudioTrack(track);
+    debugPrint('[AssetLibrary] Inserted audio track ${track.title} at ${track.startTimeInSeconds}s (path: $localPath)');
+    return track;
   }
 
   void removeAudioTrack([String? id]) {
