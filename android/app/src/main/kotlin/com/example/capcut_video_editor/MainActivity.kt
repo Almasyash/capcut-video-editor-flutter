@@ -41,8 +41,27 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
     private var pendingResult: MethodChannel.Result? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var tts: TextToSpeech? = null
-    private val videoPlayers = mutableMapOf<Long, Triple<MediaPlayer, TextureRegistry.SurfaceTextureEntry, Surface>>()
-    private var audioPlayer: MediaPlayer? = null
+
+    class VideoPlayerHolder(
+        val player: MediaPlayer,
+        val entry: TextureRegistry.SurfaceTextureEntry,
+        val surface: Surface,
+        var isSeeking: Boolean = false,
+        var pendingSeekMs: Long? = null,
+        var pendingPlay: Boolean = false,
+        var pendingSeekResult: MethodChannel.Result? = null
+    )
+
+    class AudioPlayerHolder(
+        var player: MediaPlayer? = null,
+        var isSeeking: Boolean = false,
+        var pendingSeekMs: Long? = null,
+        var pendingPlay: Boolean = false,
+        var pendingSeekResult: MethodChannel.Result? = null
+    )
+
+    private val videoPlayers = mutableMapOf<Long, VideoPlayerHolder>()
+    private val audioHolder = AudioPlayerHolder()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,39 +91,51 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun pauseAllPlayback() {
-        for ((_, playerTriple) in videoPlayers) {
+        for ((_, holder) in videoPlayers) {
             try {
-                if (playerTriple.first.isPlaying) {
-                    playerTriple.first.pause()
+                holder.pendingPlay = false
+                if (holder.player.isPlaying) {
+                    holder.player.pause()
                 }
             } catch (e: Exception) {}
         }
         try {
-            if (audioPlayer?.isPlaying == true) {
-                audioPlayer?.pause()
+            audioHolder.pendingPlay = false
+            if (audioHolder.player?.isPlaying == true) {
+                audioHolder.player?.pause()
             }
         } catch (e: Exception) {}
     }
 
     override fun onDestroy() {
-        for ((_, playerTriple) in videoPlayers) {
+        for ((_, holder) in videoPlayers) {
             try {
-                if (playerTriple.first.isPlaying) {
-                    playerTriple.first.stop()
+                holder.pendingPlay = false
+                holder.isSeeking = false
+                holder.pendingSeekMs = null
+                holder.pendingSeekResult?.success(true)
+                holder.pendingSeekResult = null
+                if (holder.player.isPlaying) {
+                    holder.player.stop()
                 }
-                playerTriple.first.release()
-                playerTriple.third.release()
-                playerTriple.second.release()
+                holder.player.release()
+                holder.surface.release()
+                holder.entry.release()
             } catch (e: Exception) {}
         }
         videoPlayers.clear()
 
         try {
-            if (audioPlayer?.isPlaying == true) {
-                audioPlayer?.stop()
+            audioHolder.pendingPlay = false
+            audioHolder.isSeeking = false
+            audioHolder.pendingSeekMs = null
+            audioHolder.pendingSeekResult?.success(true)
+            audioHolder.pendingSeekResult = null
+            if (audioHolder.player?.isPlaying == true) {
+                audioHolder.player?.stop()
             }
-            audioPlayer?.release()
-            audioPlayer = null
+            audioHolder.player?.release()
+            audioHolder.player = null
         } catch (e: Exception) {}
 
         try {
@@ -161,7 +192,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         )
                         player.setDataSource(file.absolutePath)
                         val textureId = entry.id()
-                        videoPlayers[textureId] = Triple(player, entry, surface)
+                        val holder = VideoPlayerHolder(player, entry, surface)
+                        videoPlayers[textureId] = holder
 
                         player.setOnPreparedListener { mp ->
                             android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] ON_PREPARED (video textureId=$textureId, duration=${mp.duration}ms)")
@@ -172,8 +204,48 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                                 "height" to mp.videoHeight
                             ))
                         }
+
+                        player.setOnSeekCompleteListener { mp ->
+                            android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video seek complete at ${mp.currentPosition}ms (pendingSeek=${holder.pendingSeekMs}, pendingPlay=${holder.pendingPlay})")
+                            val nextSeek = holder.pendingSeekMs
+                            if (nextSeek != null) {
+                                holder.pendingSeekMs = null
+                                try {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        mp.seekTo(nextSeek, MediaPlayer.SEEK_CLOSEST)
+                                    } else {
+                                        mp.seekTo(nextSeek.toInt())
+                                    }
+                                } catch (e: Exception) {
+                                    holder.isSeeking = false
+                                    holder.pendingSeekResult?.success(true)
+                                    holder.pendingSeekResult = null
+                                }
+                            } else {
+                                holder.isSeeking = false
+                                if (holder.pendingPlay) {
+                                    holder.pendingPlay = false
+                                    try {
+                                        mp.start()
+                                        android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video started after seek at ${mp.currentPosition}ms")
+                                    } catch (e: Exception) {}
+                                }
+                                holder.pendingSeekResult?.success(true)
+                                holder.pendingSeekResult = null
+                            }
+                        }
+
+                        player.setOnCompletionListener { mp ->
+                            android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video MediaPlayer onCompletion (textureId=$textureId, isLooping=${mp.isLooping})")
+                            holder.pendingPlay = false
+                            holder.isSeeking = false
+                            holder.pendingSeekMs = null
+                        }
+
                         player.setOnErrorListener { _, what, extra ->
                             try {
+                                holder.pendingSeekResult?.error("SEEK_ERROR", "Seek error $what $extra", null)
+                                holder.pendingSeekResult = null
                                 player.release()
                                 surface.release()
                                 entry.release()
@@ -181,6 +253,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                             } catch (e: Exception) {}
                             false
                         }
+                        player.isLooping = false
                         player.prepareAsync()
                     } catch (e: Exception) {
                         result.error("PLAYER_INIT_ERROR", e.message, null)
@@ -188,11 +261,36 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
                 "play" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
-                    val playerTriple = videoPlayers[textureId]
-                    if (playerTriple != null) {
+                    val positionMs = (call.argument<Number>("positionMs"))?.toLong()
+                    val holder = videoPlayers[textureId]
+                    if (holder != null) {
                         try {
-                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] MEDIA_PLAYER_START (video textureId=$textureId)")
-                            playerTriple.first.start()
+                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] MEDIA_PLAYER_START (video textureId=$textureId, pos=$positionMs, isSeeking=${holder.isSeeking})")
+                            if (positionMs != null) {
+                                val current = try { holder.player.currentPosition.toLong() } catch (e: Exception) { 0L }
+                                if (holder.isSeeking) {
+                                    holder.pendingSeekMs = positionMs
+                                    holder.pendingPlay = true
+                                } else if (Math.abs(current - positionMs) > 80L) {
+                                    holder.isSeeking = true
+                                    holder.pendingPlay = true
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        holder.player.seekTo(positionMs, MediaPlayer.SEEK_CLOSEST)
+                                    } else {
+                                        holder.player.seekTo(positionMs.toInt())
+                                    }
+                                } else {
+                                    holder.pendingPlay = false
+                                    holder.player.start()
+                                }
+                            } else {
+                                if (holder.isSeeking) {
+                                    holder.pendingPlay = true
+                                } else {
+                                    holder.pendingPlay = false
+                                    holder.player.start()
+                                }
+                            }
                             result.success(true)
                         } catch (e: Exception) {
                             result.error("PLAY_ERROR", e.message, null)
@@ -203,12 +301,13 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
                 "pause" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
-                    val playerTriple = videoPlayers[textureId]
-                    if (playerTriple != null) {
+                    val holder = videoPlayers[textureId]
+                    if (holder != null) {
                         try {
                             android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_PAUSED (video textureId=$textureId)")
-                            if (playerTriple.first.isPlaying) {
-                                playerTriple.first.pause()
+                            holder.pendingPlay = false
+                            if (holder.player.isPlaying) {
+                                holder.player.pause()
                             }
                             result.success(true)
                         } catch (e: Exception) {
@@ -220,17 +319,25 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
                 "seekTo" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
-                    val positionMs = (call.argument<Number>("positionMs"))?.toInt() ?: 0
-                    val playerTriple = videoPlayers[textureId]
-                    if (playerTriple != null) {
+                    val positionMs = (call.argument<Number>("positionMs"))?.toLong() ?: 0L
+                    val holder = videoPlayers[textureId]
+                    if (holder != null) {
                         try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                playerTriple.first.seekTo(positionMs.toLong(), MediaPlayer.SEEK_CLOSEST)
+                            if (holder.isSeeking) {
+                                holder.pendingSeekMs = positionMs
+                                holder.pendingSeekResult?.success(true)
+                                holder.pendingSeekResult = result
                             } else {
-                                playerTriple.first.seekTo(positionMs)
+                                holder.isSeeking = true
+                                holder.pendingSeekResult = result
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    holder.player.seekTo(positionMs, MediaPlayer.SEEK_CLOSEST)
+                                } else {
+                                    holder.player.seekTo(positionMs.toInt())
+                                }
                             }
-                            result.success(true)
                         } catch (e: Exception) {
+                            holder.isSeeking = false
                             result.error("SEEK_ERROR", e.message, null)
                         }
                     } else {
@@ -240,11 +347,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 "setVolume" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
                     val volume = (call.argument<Number>("volume"))?.toFloat() ?: 1.0f
-                    val playerTriple = videoPlayers[textureId]
-                    if (playerTriple != null) {
+                    val holder = videoPlayers[textureId]
+                    if (holder != null) {
                         try {
                             val clampedVol = volume.coerceIn(0.0f, 1.0f)
-                            playerTriple.first.setVolume(clampedVol, clampedVol)
+                            holder.player.setVolume(clampedVol, clampedVol)
                             result.success(true)
                         } catch (e: Exception) {
                             result.error("VOLUME_ERROR", e.message, null)
@@ -256,18 +363,16 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 "setSpeed" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
                     val speed = (call.argument<Number>("speed"))?.toFloat() ?: 1.0f
-                    val playerTriple = videoPlayers[textureId]
-                    if (playerTriple != null) {
+                    val holder = videoPlayers[textureId]
+                    if (holder != null) {
                         try {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                val player = playerTriple.first
+                                val player = holder.player
                                 val wasPlaying = player.isPlaying
                                 val params = player.playbackParams
                                 params.speed = speed.coerceIn(0.25f, 4.0f)
                                 player.playbackParams = params
                                 android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] SET_SPEED (video textureId=$textureId, speed=$speed, wasPlaying=$wasPlaying)")
-                                // Android MediaPlayer.setPlaybackParams automatically starts playback if in paused state.
-                                // If player was NOT actively playing, ensure it remains strictly paused!
                                 if (!wasPlaying && player.isPlaying) {
                                     player.pause()
                                     android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PAUSED AFTER SET_SPEED (video textureId=$textureId)")
@@ -284,10 +389,10 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 "setLooping" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
                     val looping = call.argument<Boolean>("looping") ?: false
-                    val playerTriple = videoPlayers[textureId]
-                    if (playerTriple != null) {
+                    val holder = videoPlayers[textureId]
+                    if (holder != null) {
                         try {
-                            playerTriple.first.isLooping = looping
+                            holder.player.isLooping = looping
                             result.success(true)
                         } catch (e: Exception) {
                             result.error("LOOP_ERROR", e.message, null)
@@ -299,15 +404,20 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 "dispose" -> {
                     val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
                     android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_DISPOSED (video textureId=$textureId)")
-                    val playerTriple = videoPlayers.remove(textureId)
-                    if (playerTriple != null) {
+                    val holder = videoPlayers.remove(textureId)
+                    if (holder != null) {
                         try {
-                            if (playerTriple.first.isPlaying) {
-                                playerTriple.first.stop()
+                            holder.pendingPlay = false
+                            holder.isSeeking = false
+                            holder.pendingSeekMs = null
+                            holder.pendingSeekResult?.success(true)
+                            holder.pendingSeekResult = null
+                            if (holder.player.isPlaying) {
+                                holder.player.stop()
                             }
-                            playerTriple.first.release()
-                            playerTriple.third.release()
-                            playerTriple.second.release()
+                            holder.player.release()
+                            holder.surface.release()
+                            holder.entry.release()
                         } catch (e: Exception) {}
                     }
                     result.success(true)
@@ -328,8 +438,14 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         return@setMethodCallHandler
                     }
                     try {
-                        audioPlayer?.release()
-                        audioPlayer = MediaPlayer().apply {
+                        audioHolder.pendingPlay = false
+                        audioHolder.isSeeking = false
+                        audioHolder.pendingSeekMs = null
+                        audioHolder.pendingSeekResult?.success(true)
+                        audioHolder.pendingSeekResult = null
+                        audioHolder.player?.release()
+
+                        val player = MediaPlayer().apply {
                             setAudioAttributes(
                                 AudioAttributes.Builder()
                                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -343,31 +459,101 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                                     "durationMs" to mp.duration
                                 ))
                             }
+                            setOnSeekCompleteListener { mp ->
+                                android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Audio seek complete at ${mp.currentPosition}ms (pendingSeek=${audioHolder.pendingSeekMs}, pendingPlay=${audioHolder.pendingPlay})")
+                                val nextSeek = audioHolder.pendingSeekMs
+                                if (nextSeek != null) {
+                                    audioHolder.pendingSeekMs = null
+                                    try {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                            mp.seekTo(nextSeek, MediaPlayer.SEEK_CLOSEST)
+                                        } else {
+                                            mp.seekTo(nextSeek.toInt())
+                                        }
+                                    } catch (e: Exception) {
+                                        audioHolder.isSeeking = false
+                                        audioHolder.pendingSeekResult?.success(true)
+                                        audioHolder.pendingSeekResult = null
+                                    }
+                                } else {
+                                    audioHolder.isSeeking = false
+                                    if (audioHolder.pendingPlay) {
+                                        audioHolder.pendingPlay = false
+                                        try {
+                                            mp.start()
+                                            android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Audio started after seek at ${mp.currentPosition}ms")
+                                        } catch (e: Exception) {}
+                                    }
+                                    audioHolder.pendingSeekResult?.success(true)
+                                    audioHolder.pendingSeekResult = null
+                                }
+                            }
+                            setOnCompletionListener { mp ->
+                                android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Audio MediaPlayer onCompletion (isLooping=${mp.isLooping})")
+                                audioHolder.pendingPlay = false
+                                audioHolder.isSeeking = false
+                                audioHolder.pendingSeekMs = null
+                            }
                             setOnErrorListener { _, _, _ ->
-                                audioPlayer?.release()
-                                audioPlayer = null
+                                audioHolder.pendingSeekResult?.error("SEEK_ERROR", "Audio error", null)
+                                audioHolder.pendingSeekResult = null
+                                audioHolder.player?.release()
+                                audioHolder.player = null
                                 false
                             }
+                            isLooping = false
                             prepareAsync()
                         }
+                        audioHolder.player = player
                     } catch (e: Exception) {
                         result.error("AUDIO_INIT_ERROR", e.message, null)
                     }
                 }
                 "play" -> {
-                    try {
-                        android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] MEDIA_PLAYER_START (audio)")
-                        audioPlayer?.start()
-                        result.success(true)
-                    } catch (e: Exception) {
-                        result.error("PLAY_ERROR", e.message, null)
+                    val positionMs = (call.argument<Number>("positionMs"))?.toLong()
+                    val player = audioHolder.player
+                    if (player != null) {
+                        try {
+                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] MEDIA_PLAYER_START (audio, pos=$positionMs, isSeeking=${audioHolder.isSeeking})")
+                            if (positionMs != null) {
+                                val current = try { player.currentPosition.toLong() } catch (e: Exception) { 0L }
+                                if (audioHolder.isSeeking) {
+                                    audioHolder.pendingSeekMs = positionMs
+                                    audioHolder.pendingPlay = true
+                                } else if (Math.abs(current - positionMs) > 80L) {
+                                    audioHolder.isSeeking = true
+                                    audioHolder.pendingPlay = true
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        player.seekTo(positionMs, MediaPlayer.SEEK_CLOSEST)
+                                    } else {
+                                        player.seekTo(positionMs.toInt())
+                                    }
+                                } else {
+                                    audioHolder.pendingPlay = false
+                                    player.start()
+                                }
+                            } else {
+                                if (audioHolder.isSeeking) {
+                                    audioHolder.pendingPlay = true
+                                } else {
+                                    audioHolder.pendingPlay = false
+                                    player.start()
+                                }
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("PLAY_ERROR", e.message, null)
+                        }
+                    } else {
+                        result.error("NOT_FOUND", "Audio player not initialized", null)
                     }
                 }
                 "pause" -> {
                     try {
                         android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_PAUSED (audio)")
-                        if (audioPlayer?.isPlaying == true) {
-                            audioPlayer?.pause()
+                        audioHolder.pendingPlay = false
+                        if (audioHolder.player?.isPlaying == true) {
+                            audioHolder.player?.pause()
                         }
                         result.success(true)
                     } catch (e: Exception) {
@@ -375,22 +561,35 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     }
                 }
                 "seekTo" -> {
-                    val positionMs = (call.argument<Number>("positionMs"))?.toInt() ?: 0
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            audioPlayer?.seekTo(positionMs.toLong(), MediaPlayer.SEEK_CLOSEST)
-                        } else {
-                            audioPlayer?.seekTo(positionMs)
+                    val positionMs = (call.argument<Number>("positionMs"))?.toLong() ?: 0L
+                    val player = audioHolder.player
+                    if (player != null) {
+                        try {
+                            if (audioHolder.isSeeking) {
+                                audioHolder.pendingSeekMs = positionMs
+                                audioHolder.pendingSeekResult?.success(true)
+                                audioHolder.pendingSeekResult = result
+                            } else {
+                                audioHolder.isSeeking = true
+                                audioHolder.pendingSeekResult = result
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    player.seekTo(positionMs, MediaPlayer.SEEK_CLOSEST)
+                                } else {
+                                    player.seekTo(positionMs.toInt())
+                                }
+                            }
+                        } catch (e: Exception) {
+                            audioHolder.isSeeking = false
+                            result.error("SEEK_ERROR", e.message, null)
                         }
-                        result.success(true)
-                    } catch (e: Exception) {
-                        result.error("SEEK_ERROR", e.message, null)
+                    } else {
+                        result.error("NOT_FOUND", "Audio player not initialized", null)
                     }
                 }
                 "setVolume" -> {
                     val volume = (call.argument<Number>("volume"))?.toFloat() ?: 1.0f
                     try {
-                        audioPlayer?.setVolume(volume, volume)
+                        audioHolder.player?.setVolume(volume, volume)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("VOLUME_ERROR", e.message, null)
@@ -399,8 +598,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 "setSpeed" -> {
                     val speed = (call.argument<Number>("speed"))?.toFloat() ?: 1.0f
                     try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && audioPlayer != null) {
-                            val player = audioPlayer!!
+                        val player = audioHolder.player
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && player != null) {
                             val wasPlaying = player.isPlaying
                             val params = player.playbackParams
                             params.speed = speed.coerceIn(0.25f, 4.0f)
@@ -419,11 +618,16 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 "dispose" -> {
                     try {
                         android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_DISPOSED (audio)")
-                        if (audioPlayer?.isPlaying == true) {
-                            audioPlayer?.stop()
+                        audioHolder.pendingPlay = false
+                        audioHolder.isSeeking = false
+                        audioHolder.pendingSeekMs = null
+                        audioHolder.pendingSeekResult?.success(true)
+                        audioHolder.pendingSeekResult = null
+                        if (audioHolder.player?.isPlaying == true) {
+                            audioHolder.player?.stop()
                         }
-                        audioPlayer?.release()
-                        audioPlayer = null
+                        audioHolder.player?.release()
+                        audioHolder.player = null
                     } catch (e: Exception) {}
                     result.success(true)
                 }

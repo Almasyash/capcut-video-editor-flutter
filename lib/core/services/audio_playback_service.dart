@@ -46,12 +46,14 @@ class AudioPlaybackService {
     return false;
   }
 
-  /// Starts playback of the separate audio track.
-  Future<void> play() async {
+  /// Starts playback of the separate audio track at optional [position].
+  Future<void> play({Duration? position}) async {
     if (!_isInitialized) return;
     try {
-      debugPrint('[AUTO_PLAY_TRACE] AUDIO START CALLED: AudioPlaybackService.play()');
-      await _channel.invokeMethod('play');
+      debugPrint('[AUTO_PLAY_TRACE] AUDIO START CALLED: AudioPlaybackService.play(pos=${position?.inMilliseconds}ms)');
+      await _channel.invokeMethod('play', {
+        if (position != null) 'positionMs': position.inMilliseconds,
+      });
       _isPlaying = true;
     } catch (e) {
       debugPrint('[AudioPlaybackService] play failed: $e');

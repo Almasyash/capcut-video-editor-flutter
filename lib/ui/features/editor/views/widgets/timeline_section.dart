@@ -3,14 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/core/utils/time_formatter.dart';
+import 'package:capcut_video_editor/domain/models/video_effect.dart';
+import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'audio_track_item.dart';
 import 'media_picker_sheet.dart';
 import 'timeline_clip_item.dart';
 import 'timeline_ruler.dart';
 
-/// CapCut-style Multi-Track Interactive Timeline with universal trimming and dragging
-/// for Video clips, Audio tracks, PIP Overlays, Text layers, and Stickers.
+/// CapCut-style Multi-Layer Interactive Timeline with universal vertical layer scrolling,
+/// pinned horizontal ruler, dynamic multi-layer rows, auto-scroll to newly created layers,
+/// and complete elimination of RenderFlex pixel overflows.
 class TimelineSection extends StatefulWidget {
   final EditorViewModel viewModel;
 
@@ -21,29 +24,136 @@ class TimelineSection extends StatefulWidget {
 }
 
 class _TimelineSectionState extends State<TimelineSection> {
-  late final ScrollController _scrollController;
-  bool _isUserScrolling = false;
+  late final ScrollController _horizontalScrollController;
+  late final ScrollController _rulerScrollController;
+  late final ScrollController _verticalScrollController;
+
+  bool _isUserScrollingHorizontal = false;
+
+  // Track counts to detect newly added layers for auto-scroll
+  int _prevAudioTrackCount = 0;
+  int _prevOverlayClipCount = 0;
+  int _prevTextOverlayCount = 0;
+  int _prevStickerOverlayCount = 0;
+  VideoEffectType _prevEffectType = VideoEffectType.none;
 
   @override
   void initState() {
     super.initState();
-    _scrollController = ScrollController();
+    _horizontalScrollController = ScrollController();
+    _rulerScrollController = ScrollController();
+    _verticalScrollController = ScrollController();
+
+    _prevAudioTrackCount = widget.viewModel.audioTracks.length;
+    _prevOverlayClipCount = widget.viewModel.overlayClips.length;
+    _prevTextOverlayCount = widget.viewModel.textOverlays.length;
+    _prevStickerOverlayCount = widget.viewModel.stickerOverlays.length;
+    _prevEffectType = widget.viewModel.activeEffect.type;
+
+    _horizontalScrollController.addListener(_syncRulerScroll);
     widget.viewModel.addListener(_onViewModelChanged);
   }
 
   @override
   void dispose() {
     widget.viewModel.removeListener(_onViewModelChanged);
-    _scrollController.dispose();
+    _horizontalScrollController.removeListener(_syncRulerScroll);
+
+    _horizontalScrollController.dispose();
+    _rulerScrollController.dispose();
+    _verticalScrollController.dispose();
     super.dispose();
+  }
+
+  void _syncRulerScroll() {
+    if (_rulerScrollController.hasClients && _horizontalScrollController.hasClients) {
+      if (_rulerScrollController.offset != _horizontalScrollController.offset) {
+        _rulerScrollController.jumpTo(
+          _horizontalScrollController.offset.clamp(0.0, _rulerScrollController.position.maxScrollExtent),
+        );
+      }
+    }
   }
 
   void _onViewModelChanged() {
     if (!mounted) return;
 
-    if (widget.viewModel.isPlaying && !_isUserScrolling && _scrollController.hasClients) {
-      final targetScroll = widget.viewModel.playheadPosition * widget.viewModel.pixelsPerSecond;
-      _scrollController.jumpTo(targetScroll.clamp(0.0, _scrollController.position.maxScrollExtent));
+    final vm = widget.viewModel;
+
+    // 1. Synchronize horizontal playhead scrolling during playback
+    if (vm.isPlaying && !_isUserScrollingHorizontal && _horizontalScrollController.hasClients) {
+      final targetScroll = vm.playheadPosition * vm.pixelsPerSecond;
+      _horizontalScrollController.jumpTo(
+        targetScroll.clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+      );
+    }
+
+    // 2. Auto-scroll vertically when a new layer is created
+    _checkAndAutoScrollToNewLayer(vm);
+
+    setState(() {});
+  }
+
+  void _checkAndAutoScrollToNewLayer(EditorViewModel vm) {
+    if (!_verticalScrollController.hasClients) return;
+
+    final hasNewAudio = vm.audioTracks.length > _prevAudioTrackCount;
+    final hasNewOverlay = vm.overlayClips.length > _prevOverlayClipCount;
+    final hasNewText = vm.textOverlays.length > _prevTextOverlayCount;
+    final hasNewSticker = vm.stickerOverlays.length > _prevStickerOverlayCount;
+    final hasNewEffect = vm.activeEffect.type != VideoEffectType.none && _prevEffectType == VideoEffectType.none;
+
+    _prevAudioTrackCount = vm.audioTracks.length;
+    _prevOverlayClipCount = vm.overlayClips.length;
+    _prevTextOverlayCount = vm.textOverlays.length;
+    _prevStickerOverlayCount = vm.stickerOverlays.length;
+    _prevEffectType = vm.activeEffect.type;
+
+    if (hasNewAudio || hasNewOverlay || hasNewText || hasNewSticker || hasNewEffect) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_verticalScrollController.hasClients) return;
+
+        // Calculate approximate vertical target offset
+        double targetY = 0.0;
+        targetY += AppDimensions.videoTrackHeight + 6; // Video track
+
+        if (hasNewOverlay) {
+          targetY += (vm.overlayClips.length - 1) * 42.0;
+        } else {
+          targetY += vm.overlayClips.length * 42.0;
+        }
+
+        if (hasNewEffect) {
+          targetY += 38.0;
+        } else if (vm.activeEffect.type != VideoEffectType.none) {
+          targetY += 38.0;
+        }
+
+        if (hasNewText) {
+          targetY += (vm.textOverlays.length - 1) * 40.0;
+        } else {
+          targetY += vm.textOverlays.length * 40.0;
+        }
+
+        if (hasNewSticker) {
+          targetY += (vm.stickerOverlays.length - 1) * 36.0;
+        } else {
+          targetY += vm.stickerOverlays.length * 36.0;
+        }
+
+        if (hasNewAudio) {
+          targetY += (vm.audioTracks.length - 1) * 48.0;
+        }
+
+        final maxScroll = _verticalScrollController.position.maxScrollExtent;
+        final clampedTarget = targetY.clamp(0.0, maxScroll);
+
+        _verticalScrollController.animateTo(
+          clampedTarget,
+          duration: const Duration(milliseconds: 320),
+          curve: Curves.easeOutCubic,
+        );
+      });
     }
   }
 
@@ -52,6 +162,8 @@ class _TimelineSectionState extends State<TimelineSection> {
     final viewModel = widget.viewModel;
     final screenWidth = MediaQuery.of(context).size.width;
     final halfScreenWidth = screenWidth / 2;
+    final totalDuration = math.max(viewModel.totalDurationInSeconds, 1.0);
+    final totalTrackWidth = (totalDuration + 5.0) * viewModel.pixelsPerSecond;
 
     return Container(
       width: double.infinity,
@@ -61,88 +173,110 @@ class _TimelineSectionState extends State<TimelineSection> {
           // 1. Timeline Top Control Bar (Zoom slider, Duration badge, Clear Selection)
           _buildTimelineControlBar(viewModel),
 
-          // 2. Multi-Track Scrollable Timeline Canvas
+          // 2. Pinned Timeline Ruler (Fixed at top of track canvas, scrolls horizontally with tracks)
+          Container(
+            height: AppDimensions.timelineRulerHeight,
+            width: double.infinity,
+            color: AppColors.timelineRulerBg,
+            child: SingleChildScrollView(
+              controller: _rulerScrollController,
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: halfScreenWidth),
+                child: TimelineRuler(
+                  totalDurationSeconds: totalDuration,
+                  pixelsPerSecond: viewModel.pixelsPerSecond,
+                ),
+              ),
+            ),
+          ),
+
+          // 3. Multi-Track Vertically & Horizontally Scrollable Timeline Canvas
           Expanded(
             child: Stack(
               children: [
+                // Two-Axis Coordinated Canvas
                 NotificationListener<ScrollNotification>(
                   onNotification: (notification) {
-                    if (notification is ScrollStartNotification && notification.dragDetails != null) {
-                      _isUserScrolling = true;
-                      if (viewModel.isPlaying) {
-                        viewModel.pause();
+                    // Strictly isolate horizontal scrubbing from vertical layer navigation
+                    if (notification.metrics.axis == Axis.horizontal) {
+                      if (notification is ScrollStartNotification && notification.dragDetails != null) {
+                        _isUserScrollingHorizontal = true;
+                        if (viewModel.isPlaying) {
+                          viewModel.pause();
+                        }
+                      } else if (notification is ScrollUpdateNotification && _isUserScrollingHorizontal) {
+                        final newPlayhead = _horizontalScrollController.offset / viewModel.pixelsPerSecond;
+                        viewModel.seekTo(newPlayhead);
+                      } else if (notification is ScrollEndNotification) {
+                        _isUserScrollingHorizontal = false;
                       }
-                    } else if (notification is ScrollUpdateNotification && _isUserScrolling) {
-                      final newPlayhead = _scrollController.offset / viewModel.pixelsPerSecond;
-                      viewModel.seekTo(newPlayhead);
-                    } else if (notification is ScrollEndNotification) {
-                      _isUserScrolling = false;
                     }
                     return false;
                   },
                   child: SingleChildScrollView(
-                    controller: _scrollController,
+                    controller: _horizontalScrollController,
                     scrollDirection: Axis.horizontal,
                     physics: const BouncingScrollPhysics(),
                     child: Padding(
                       padding: EdgeInsets.symmetric(horizontal: halfScreenWidth),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.vertical,
-                        physics: const ClampingScrollPhysics(),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                          // Ruler Track
-                          TimelineRuler(
-                            totalDurationSeconds: math.max(viewModel.totalDurationInSeconds, 1.0),
-                            pixelsPerSecond: viewModel.pixelsPerSecond,
+                      child: SizedBox(
+                        width: math.max(totalTrackWidth, screenWidth),
+                        child: SingleChildScrollView(
+                          controller: _verticalScrollController,
+                          scrollDirection: Axis.vertical,
+                          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(height: 6),
+
+                              // Track 1: Main Video Clips Track
+                              _buildVideoTrack(viewModel),
+
+                              // Track 2+: Secondary Overlay (PIP) Tracks
+                              if (viewModel.overlayClips.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                _buildOverlayTrackRows(viewModel, totalTrackWidth),
+                              ],
+
+                              // Track 3: Video Effects Track
+                              if (viewModel.activeEffect.type != VideoEffectType.none) ...[
+                                const SizedBox(height: 4),
+                                _buildEffectsTrack(viewModel, totalTrackWidth),
+                              ],
+
+                              // Track 4+: Text / Subtitle Tracks
+                              if (viewModel.textOverlays.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                _buildTextTrackRows(viewModel, totalTrackWidth),
+                              ],
+
+                              // Track 5+: Stickers Tracks
+                              if (viewModel.stickerOverlays.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                _buildStickerTrackRows(viewModel, totalTrackWidth),
+                              ],
+
+                              // Track 6+: Background Audio & Sound Effect Tracks
+                              if (viewModel.audioTracks.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                _buildAudioTrackRows(viewModel),
+                              ],
+
+                              // Bottom padding to ensure comfortable scrolling of bottom layers
+                              const SizedBox(height: 56),
+                            ],
                           ),
-
-                          const SizedBox(height: 6),
-
-                          // Main Video Clip Track
-                          _buildVideoTrack(viewModel),
-
-                          // Secondary Overlay (PIP) Track
-                          if (viewModel.overlayClips.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            _buildOverlayTrack(viewModel),
-                          ],
-
-                          const SizedBox(height: 4),
-
-                          // Background Audio Track(s)
-                          if (viewModel.audioTracks.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            ...viewModel.audioTracks.map((track) {
-                              return AudioTrackItem(
-                                key: ValueKey(track.id),
-                                audioTrack: track,
-                                pixelsPerSecond: viewModel.pixelsPerSecond,
-                                viewModel: viewModel,
-                              );
-                            }),
-                          ],
-
-                          // Stickers Track
-                          if (viewModel.stickerOverlays.isNotEmpty) ...[
-                            const SizedBox(height: 4),
-                            _buildStickerTrack(viewModel),
-                          ],
-
-                          const SizedBox(height: 4),
-
-                          // Text / Subtitle Track
-                          if (viewModel.textOverlays.isNotEmpty)
-                            _buildTextTrack(viewModel),
-                        ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
 
-                // 3. Fixed Center Playhead Needle (White Line + Cyan Marker)
+                // 4. Fixed Center Playhead Needle (White Line + Cyan Marker spanning the canvas)
                 _buildPlayheadNeedle(screenWidth),
               ],
             ),
@@ -331,340 +465,439 @@ class _TimelineSectionState extends State<TimelineSection> {
     );
   }
 
-  Widget _buildOverlayTrack(EditorViewModel viewModel) {
-    final totalTrackWidth = (viewModel.totalDurationInSeconds + 5.0) * viewModel.pixelsPerSecond;
+  Widget _buildOverlayTrackRows(EditorViewModel viewModel, double totalTrackWidth) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: viewModel.overlayClips.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final overlay = entry.value;
+        final isSelected = viewModel.selectedOverlayIndex == idx;
+        final width = math.max(overlay.durationInSeconds * viewModel.pixelsPerSecond, 40.0);
+        final startOffset = overlay.startTimeInSeconds * viewModel.pixelsPerSecond;
 
-    return SizedBox(
-      width: totalTrackWidth,
-      height: 38,
-      child: Stack(
-        children: viewModel.overlayClips.asMap().entries.map((entry) {
-          final idx = entry.key;
-          final overlay = entry.value;
-          final isSelected = viewModel.selectedOverlayIndex == idx;
-          final width = math.max(overlay.durationInSeconds * viewModel.pixelsPerSecond, 40.0);
-          final startOffset = overlay.startTimeInSeconds * viewModel.pixelsPerSecond;
-
-          return Positioned(
-            left: startOffset,
-            top: 2,
-            bottom: 2,
-            width: width,
-            child: GestureDetector(
-              onTap: () => viewModel.selectOverlay(idx),
-              onHorizontalDragUpdate: (details) {
-                // Middle drag: slide position across timeline
-                final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
-                final newStartSec = math.max(0.0, overlay.startTimeInSeconds + deltaSec);
-                viewModel.updateOverlayClipTiming(
-                  overlay.id,
-                  Duration(milliseconds: (newStartSec * 1000).round()),
-                  overlay.duration,
-                );
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                  border: Border.all(
-                    color: isSelected ? AppColors.secondary : AppColors.secondary.withValues(alpha: 0.4),
-                    width: isSelected ? 2.0 : 1.0,
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.layers_rounded, size: 12, color: AppColors.secondary),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              overlay.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-                            ),
-                          ),
-                        ],
+        return Container(
+          width: totalTrackWidth,
+          height: 38,
+          margin: const EdgeInsets.symmetric(vertical: 2.0),
+          child: Stack(
+            children: [
+              Positioned(
+                left: startOffset,
+                top: 2,
+                bottom: 2,
+                width: width,
+                child: GestureDetector(
+                  onTap: () => viewModel.selectOverlay(idx),
+                  onHorizontalDragUpdate: (details) {
+                    final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
+                    final newStartSec = math.max(0.0, overlay.startTimeInSeconds + deltaSec);
+                    viewModel.updateOverlayClipTiming(
+                      overlay.id,
+                      Duration(milliseconds: (newStartSec * 1000).round()),
+                      overlay.duration,
+                    );
+                  },
+                  child: Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceElevated,
+                      borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                      border: Border.all(
+                        color: isSelected ? AppColors.secondary : AppColors.secondary.withValues(alpha: 0.4),
+                        width: isSelected ? 2.0 : 1.0,
                       ),
                     ),
-                    if (isSelected) ...[
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _buildHandle(
-                          isLeft: true,
-                          color: AppColors.secondary,
-                          onDrag: (dx) {
-                            final deltaSec = dx / viewModel.pixelsPerSecond;
-                            final curStart = overlay.startTimeInSeconds;
-                            final curDur = overlay.durationInSeconds;
-                            final newStart = math.max(0.0, curStart + deltaSec);
-                            final newDur = curDur - (newStart - curStart);
-                            if (newDur >= 0.4) {
-                              viewModel.updateOverlayClipTiming(
-                                overlay.id,
-                                Duration(milliseconds: (newStart * 1000).round()),
-                                Duration(milliseconds: (newDur * 1000).round()),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _buildHandle(
-                          isLeft: false,
-                          color: AppColors.secondary,
-                          onDrag: (dx) {
-                            final deltaSec = dx / viewModel.pixelsPerSecond;
-                            final newDur = math.max(0.4, overlay.durationInSeconds + deltaSec);
-                            viewModel.updateOverlayClipTiming(
-                              overlay.id,
-                              overlay.startTime,
-                              Duration(milliseconds: (newDur * 1000).round()),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildStickerTrack(EditorViewModel viewModel) {
-    final totalTrackWidth = (viewModel.totalDurationInSeconds + 5.0) * viewModel.pixelsPerSecond;
-
-    return SizedBox(
-      width: totalTrackWidth,
-      height: 32,
-      child: Stack(
-        children: viewModel.stickerOverlays.map((sticker) {
-          final isSelected = viewModel.selectedStickerId == sticker.id;
-          final width = math.max(sticker.durationInSeconds * viewModel.pixelsPerSecond, 36.0);
-          final startOffset = sticker.startTimeInSeconds * viewModel.pixelsPerSecond;
-
-          return Positioned(
-            left: startOffset,
-            top: 2,
-            bottom: 2,
-            width: width,
-            child: GestureDetector(
-              onTap: () => viewModel.selectSticker(sticker.id),
-              onHorizontalDragUpdate: (details) {
-                final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
-                final newStartSec = math.max(0.0, sticker.startTimeInSeconds + deltaSec);
-                viewModel.updateStickerTiming(
-                  sticker.id,
-                  Duration(milliseconds: (newStartSec * 1000).round()),
-                  sticker.duration,
-                );
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceLight,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color: isSelected ? Colors.amber : Colors.amber.withValues(alpha: 0.5),
-                    width: isSelected ? 2.0 : 1.0,
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (sticker.preset.isEmoji)
-                            Text(sticker.preset.content, style: const TextStyle(fontSize: 12))
-                          else
-                            Icon(sticker.preset.icon ?? Icons.star, size: 12, color: Colors.amber),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              sticker.preset.label,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 9, color: Colors.white70),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (isSelected) ...[
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _buildHandle(
-                          isLeft: true,
-                          color: Colors.amber,
-                          onDrag: (dx) {
-                            final deltaSec = dx / viewModel.pixelsPerSecond;
-                            final curStart = sticker.startTimeInSeconds;
-                            final curDur = sticker.durationInSeconds;
-                            final newStart = math.max(0.0, curStart + deltaSec);
-                            final newDur = curDur - (newStart - curStart);
-                            if (newDur >= 0.3) {
-                              viewModel.updateStickerTiming(
-                                sticker.id,
-                                Duration(milliseconds: (newStart * 1000).round()),
-                                Duration(milliseconds: (newDur * 1000).round()),
-                              );
-                            }
-                          },
-                        ),
-                      ),
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _buildHandle(
-                          isLeft: false,
-                          color: Colors.amber,
-                          onDrag: (dx) {
-                            final deltaSec = dx / viewModel.pixelsPerSecond;
-                            final newDur = math.max(0.3, sticker.durationInSeconds + deltaSec);
-                            viewModel.updateStickerTiming(
-                              sticker.id,
-                              sticker.startTime,
-                              Duration(milliseconds: (newDur * 1000).round()),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildTextTrack(EditorViewModel viewModel) {
-    final totalTrackWidth = (viewModel.totalDurationInSeconds + 5.0) * viewModel.pixelsPerSecond;
-
-    return SizedBox(
-      width: totalTrackWidth,
-      height: AppDimensions.textTrackHeight,
-      child: Stack(
-        children: viewModel.textOverlays.map((text) {
-          final isSelected = viewModel.selectedTextId == text.id;
-          final width = math.max(text.durationInSeconds * viewModel.pixelsPerSecond, 36.0);
-          final startOffset = text.startTimeInSeconds * viewModel.pixelsPerSecond;
-
-          return Positioned(
-            left: startOffset,
-            top: 2,
-            bottom: 2,
-            width: width,
-            child: GestureDetector(
-              onTap: () => viewModel.selectText(text.id),
-              onHorizontalDragUpdate: (details) {
-                final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
-                final newStartSec = math.max(0.0, text.startTimeInSeconds + deltaSec);
-                viewModel.updateTextOverlayTiming(
-                  text.id,
-                  Duration(milliseconds: (newStartSec * 1000).round()),
-                  text.duration,
-                );
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  color: AppColors.textTrackBg,
-                  borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                  border: Border.all(
-                    color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withValues(alpha: 0.5),
-                    width: isSelected ? 2.0 : 1.0,
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    Center(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.title_rounded, size: 12, color: AppColors.textTrackAccent),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(
-                              text.text,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: text.color,
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.layers_rounded, size: 12, color: AppColors.secondary),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  overlay.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
                               ),
+                            ],
+                          ),
+                        ),
+                        if (isSelected) ...[
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _buildHandle(
+                              isLeft: true,
+                              color: AppColors.secondary,
+                              onDrag: (dx) {
+                                final deltaSec = dx / viewModel.pixelsPerSecond;
+                                final curStart = overlay.startTimeInSeconds;
+                                final curDur = overlay.durationInSeconds;
+                                final newStart = math.max(0.0, curStart + deltaSec);
+                                final newDur = curDur - (newStart - curStart);
+                                if (newDur >= 0.4) {
+                                  viewModel.updateOverlayClipTiming(
+                                    overlay.id,
+                                    Duration(milliseconds: (newStart * 1000).round()),
+                                    Duration(milliseconds: (newDur * 1000).round()),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _buildHandle(
+                              isLeft: false,
+                              color: AppColors.secondary,
+                              onDrag: (dx) {
+                                final deltaSec = dx / viewModel.pixelsPerSecond;
+                                final newDur = math.max(0.4, overlay.durationInSeconds + deltaSec);
+                                viewModel.updateOverlayClipTiming(
+                                  overlay.id,
+                                  overlay.startTime,
+                                  Duration(milliseconds: (newDur * 1000).round()),
+                                );
+                              },
                             ),
                           ),
                         ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildEffectsTrack(EditorViewModel viewModel, double totalTrackWidth) {
+    final effect = viewModel.activeEffect;
+    final totalDuration = math.max(viewModel.totalDurationInSeconds, 5.0);
+    final width = math.max(totalDuration * viewModel.pixelsPerSecond, 160.0);
+
+    return Container(
+      width: totalTrackWidth,
+      height: 34,
+      margin: const EdgeInsets.symmetric(vertical: 2.0),
+      child: Stack(
+        children: [
+          Positioned(
+            left: 0,
+            top: 2,
+            bottom: 2,
+            width: width,
+            child: GestureDetector(
+              onTap: () {
+                viewModel.openDrawer(EditorCategory.effects);
+              },
+              child: Container(
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: effect.color.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                  border: Border.all(color: effect.color, width: 1.5),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(effect.icon, size: 14, color: effect.color),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'Effect: ${effect.name}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: effect.color,
+                        ),
                       ),
                     ),
-                    if (isSelected) ...[
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _buildHandle(
-                          isLeft: true,
-                          color: AppColors.accentPurple,
-                          onDrag: (dx) {
-                            final deltaSec = dx / viewModel.pixelsPerSecond;
-                            final curStart = text.startTimeInSeconds;
-                            final curDur = text.durationInSeconds;
-                            final newStart = math.max(0.0, curStart + deltaSec);
-                            final newDur = curDur - (newStart - curStart);
-                            if (newDur >= 0.3) {
-                              viewModel.updateTextOverlayTiming(
-                                text.id,
-                                Duration(milliseconds: (newStart * 1000).round()),
-                                Duration(milliseconds: (newDur * 1000).round()),
-                              );
-                            }
-                          },
-                        ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: effect.color.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(4),
                       ),
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        child: _buildHandle(
-                          isLeft: false,
-                          color: AppColors.accentPurple,
-                          onDrag: (dx) {
-                            final deltaSec = dx / viewModel.pixelsPerSecond;
-                            final newDur = math.max(0.3, text.durationInSeconds + deltaSec);
-                            viewModel.updateTextOverlayTiming(
-                              text.id,
-                              text.startTime,
-                              Duration(milliseconds: (newDur * 1000).round()),
-                            );
-                          },
-                        ),
+                      child: const Text(
+                        'ACTIVE',
+                        style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
-                    ],
+                    ),
                   ],
                 ),
               ),
             ),
-          );
-        }).toList(),
+          ),
+        ],
       ),
+    );
+  }
+
+  Widget _buildTextTrackRows(EditorViewModel viewModel, double totalTrackWidth) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: viewModel.textOverlays.map((text) {
+        final isSelected = viewModel.selectedTextId == text.id;
+        final width = math.max(text.durationInSeconds * viewModel.pixelsPerSecond, 36.0);
+        final startOffset = text.startTimeInSeconds * viewModel.pixelsPerSecond;
+
+        return Container(
+          width: totalTrackWidth,
+          height: AppDimensions.textTrackHeight,
+          margin: const EdgeInsets.symmetric(vertical: 2.0),
+          child: Stack(
+            children: [
+              Positioned(
+                left: startOffset,
+                top: 2,
+                bottom: 2,
+                width: width,
+                child: GestureDetector(
+                  onTap: () => viewModel.selectText(text.id),
+                  onHorizontalDragUpdate: (details) {
+                    final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
+                    final newStartSec = math.max(0.0, text.startTimeInSeconds + deltaSec);
+                    viewModel.updateTextOverlayTiming(
+                      text.id,
+                      Duration(milliseconds: (newStartSec * 1000).round()),
+                      text.duration,
+                    );
+                  },
+                  child: Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: AppColors.textTrackBg,
+                      borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                      border: Border.all(
+                        color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withValues(alpha: 0.5),
+                        width: isSelected ? 2.0 : 1.0,
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.title_rounded, size: 12, color: AppColors.textTrackAccent),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  text.text,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: text.color,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isSelected) ...[
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _buildHandle(
+                              isLeft: true,
+                              color: AppColors.accentPurple,
+                              onDrag: (dx) {
+                                final deltaSec = dx / viewModel.pixelsPerSecond;
+                                final curStart = text.startTimeInSeconds;
+                                final curDur = text.durationInSeconds;
+                                final newStart = math.max(0.0, curStart + deltaSec);
+                                final newDur = curDur - (newStart - curStart);
+                                if (newDur >= 0.3) {
+                                  viewModel.updateTextOverlayTiming(
+                                    text.id,
+                                    Duration(milliseconds: (newStart * 1000).round()),
+                                    Duration(milliseconds: (newDur * 1000).round()),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _buildHandle(
+                              isLeft: false,
+                              color: AppColors.accentPurple,
+                              onDrag: (dx) {
+                                final deltaSec = dx / viewModel.pixelsPerSecond;
+                                final newDur = math.max(0.3, text.durationInSeconds + deltaSec);
+                                viewModel.updateTextOverlayTiming(
+                                  text.id,
+                                  text.startTime,
+                                  Duration(milliseconds: (newDur * 1000).round()),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildStickerTrackRows(EditorViewModel viewModel, double totalTrackWidth) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: viewModel.stickerOverlays.map((sticker) {
+        final isSelected = viewModel.selectedStickerId == sticker.id;
+        final width = math.max(sticker.durationInSeconds * viewModel.pixelsPerSecond, 36.0);
+        final startOffset = sticker.startTimeInSeconds * viewModel.pixelsPerSecond;
+
+        return Container(
+          width: totalTrackWidth,
+          height: 32,
+          margin: const EdgeInsets.symmetric(vertical: 2.0),
+          child: Stack(
+            children: [
+              Positioned(
+                left: startOffset,
+                top: 2,
+                bottom: 2,
+                width: width,
+                child: GestureDetector(
+                  onTap: () => viewModel.selectSticker(sticker.id),
+                  onHorizontalDragUpdate: (details) {
+                    final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
+                    final newStartSec = math.max(0.0, sticker.startTimeInSeconds + deltaSec);
+                    viewModel.updateStickerTiming(
+                      sticker.id,
+                      Duration(milliseconds: (newStartSec * 1000).round()),
+                      sticker.duration,
+                    );
+                  },
+                  child: Container(
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceLight,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: isSelected ? Colors.amber : Colors.amber.withValues(alpha: 0.5),
+                        width: isSelected ? 2.0 : 1.0,
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              if (sticker.preset.isEmoji)
+                                Text(sticker.preset.content, style: const TextStyle(fontSize: 12))
+                              else
+                                Icon(sticker.preset.icon ?? Icons.star, size: 12, color: Colors.amber),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  sticker.preset.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 9, color: Colors.white70),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isSelected) ...[
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _buildHandle(
+                              isLeft: true,
+                              color: Colors.amber,
+                              onDrag: (dx) {
+                                final deltaSec = dx / viewModel.pixelsPerSecond;
+                                final curStart = sticker.startTimeInSeconds;
+                                final curDur = sticker.durationInSeconds;
+                                final newStart = math.max(0.0, curStart + deltaSec);
+                                final newDur = curDur - (newStart - curStart);
+                                if (newDur >= 0.3) {
+                                  viewModel.updateStickerTiming(
+                                    sticker.id,
+                                    Duration(milliseconds: (newStart * 1000).round()),
+                                    Duration(milliseconds: (newDur * 1000).round()),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _buildHandle(
+                              isLeft: false,
+                              color: Colors.amber,
+                              onDrag: (dx) {
+                                final deltaSec = dx / viewModel.pixelsPerSecond;
+                                final newDur = math.max(0.3, sticker.durationInSeconds + deltaSec);
+                                viewModel.updateStickerTiming(
+                                  sticker.id,
+                                  sticker.startTime,
+                                  Duration(milliseconds: (newDur * 1000).round()),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildAudioTrackRows(EditorViewModel viewModel) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: viewModel.audioTracks.map((track) {
+        return AudioTrackItem(
+          key: ValueKey(track.id),
+          audioTrack: track,
+          pixelsPerSecond: viewModel.pixelsPerSecond,
+          viewModel: viewModel,
+        );
+      }).toList(),
     );
   }
 

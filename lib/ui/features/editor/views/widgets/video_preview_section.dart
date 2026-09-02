@@ -32,6 +32,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
 
   VideoPlayerSession? _session;
   String? _loadedPath;
+  String? _lastActiveClipId;
   bool _isPlaying = false;
   double _lastPlayheadPosition = -1.0;
 
@@ -58,6 +59,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
 
   void _syncPlayerWithModel() {
     final activeClip = widget.viewModel.currentActiveClipAtPlayhead;
+    final activeClipStart = widget.viewModel.activeClipStartTimeAtPlayhead;
     String? localPath;
     if (activeClip is VideoClip) {
       final asset = widget.viewModel.getAssetById(activeClip.assetId);
@@ -66,9 +68,20 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
       }
     }
 
+    // Calculate source offset in seconds for current active clip
+    final deltaInClipSec = (widget.viewModel.playheadPosition - activeClipStart).clamp(
+      0.0,
+      activeClip is VideoClip ? activeClip.durationInSeconds : 1000.0,
+    );
+    final sourceOffsetSec = (activeClip is VideoClip)
+        ? (activeClip.trimStart.inMilliseconds / 1000.0) + (deltaInClipSec * activeClip.speed)
+        : deltaInClipSec;
+    final sourceOffsetMs = (sourceOffsetSec * 1000).round();
+
     // 1. If path changed, initialize new native player session
     if (localPath != _loadedPath) {
       _loadedPath = localPath;
+      _lastActiveClipId = activeClip?.id;
       if (_session != null) {
         VideoPlaybackService.instance.disposeSession(_session!.textureId);
         _session = null;
@@ -85,61 +98,60 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
               if (activeClip.speed != 1.0) {
                 VideoPlaybackService.instance.setSpeed(session.textureId, activeClip.speed);
               }
-              final clipStart = widget.viewModel.selectedClipIndex != null
-                  ? widget.viewModel.getClipStartTime(widget.viewModel.selectedClipIndex!)
-                  : 0.0;
-              final delta = (widget.viewModel.playheadPosition - clipStart).clamp(0.0, activeClip.durationInSeconds);
-              final srcSec = (activeClip.trimStart.inMilliseconds / 1000.0) + (delta * activeClip.speed);
-              VideoPlaybackService.instance.seekTo(session.textureId, Duration(milliseconds: (srcSec * 1000).round()));
-            }
-            // If viewModel is currently playing, start playing immediately
-            if (widget.viewModel.isPlaying && session != null) {
-              debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection calling play because viewModel.isPlaying is TRUE');
-              VideoPlaybackService.instance.play(session.textureId);
-              _isPlaying = true;
+              if (widget.viewModel.isPlaying) {
+                debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection calling play because viewModel.isPlaying is TRUE (pos=${sourceOffsetMs}ms)');
+                VideoPlaybackService.instance.play(session.textureId, position: Duration(milliseconds: sourceOffsetMs));
+                _isPlaying = true;
+              } else {
+                VideoPlaybackService.instance.seekTo(session.textureId, Duration(milliseconds: sourceOffsetMs));
+                _isPlaying = false;
+              }
             }
           }
         });
       }
+      return;
     }
 
     // 2. Sync dynamic volume & speed properties
     if (_session != null && _session!.isInitialized && activeClip is VideoClip) {
       VideoPlaybackService.instance.setVolume(_session!.textureId, activeClip.volume);
-      if (widget.viewModel.isPlaying && activeClip.speed != 1.0) {
+      if (activeClip.speed != 1.0) {
         VideoPlaybackService.instance.setSpeed(_session!.textureId, activeClip.speed);
       }
     }
 
-    // 3. Sync play/pause state
+    // 3. Handle clip boundary switches on the same media file (e.g. split clips)
+    if (_session != null && _session!.isInitialized && activeClip != null && activeClip.id != _lastActiveClipId) {
+      _lastActiveClipId = activeClip.id;
+      if (!widget.viewModel.isPlaying) {
+        VideoPlaybackService.instance.seekTo(_session!.textureId, Duration(milliseconds: sourceOffsetMs));
+      }
+    }
+
+    // 4. Sync play/pause state with authoritative start position
     if (_session != null && _session!.isInitialized) {
       if (widget.viewModel.isPlaying && !_isPlaying) {
         _isPlaying = true;
-        debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection syncing play state');
-        VideoPlaybackService.instance.play(_session!.textureId);
+        debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection syncing play state at target pos=${sourceOffsetMs}ms');
+        VideoPlaybackService.instance.play(_session!.textureId, position: Duration(milliseconds: sourceOffsetMs));
       } else if (!widget.viewModel.isPlaying && _isPlaying) {
         _isPlaying = false;
-        debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection syncing pause state');
+        debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection syncing pause state (pos=${sourceOffsetMs}ms)');
         VideoPlaybackService.instance.pause(_session!.textureId);
-      }
-
-      // 4. Sync seek position if changed while paused or scrubbed
-      if (!widget.viewModel.isPlaying && (_lastPlayheadPosition - widget.viewModel.playheadPosition).abs() > 0.05) {
         _lastPlayheadPosition = widget.viewModel.playheadPosition;
-        double clipStart = 0.0;
-        if (activeClip is VideoClip && widget.viewModel.selectedClipIndex != null) {
-          clipStart = widget.viewModel.getClipStartTime(widget.viewModel.selectedClipIndex!);
-        }
-        final deltaInClipSec = (widget.viewModel.playheadPosition - clipStart).clamp(
-          0.0,
-          activeClip is VideoClip ? activeClip.durationInSeconds : 1000.0,
-        );
-        final sourceOffsetSec = (activeClip is VideoClip)
-            ? (activeClip.trimStart.inMilliseconds / 1000.0) + (deltaInClipSec * activeClip.speed)
-            : deltaInClipSec;
         VideoPlaybackService.instance.seekTo(
           _session!.textureId,
-          Duration(milliseconds: (sourceOffsetSec * 1000).round()),
+          Duration(milliseconds: sourceOffsetMs),
+        );
+      }
+
+      // 5. Sync seek position if changed while paused or scrubbed
+      if (!widget.viewModel.isPlaying && (_lastPlayheadPosition - widget.viewModel.playheadPosition).abs() > 0.02) {
+        _lastPlayheadPosition = widget.viewModel.playheadPosition;
+        VideoPlaybackService.instance.seekTo(
+          _session!.textureId,
+          Duration(milliseconds: sourceOffsetMs),
         );
       }
     }
@@ -345,16 +357,10 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
     if (hasLocalFile) {
       if (isPhoto) {
         // Still photo rendering
-        canvasChild = Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.file(
-              File(localPath),
-              fit: BoxFit.contain,
-              errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(activeClip),
-            ),
-            _buildLocalSourceBadge(activeClip, localPath, isPhoto: true),
-          ],
+        canvasChild = Image.file(
+          File(localPath),
+          fit: BoxFit.contain,
+          errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(activeClip),
         );
       } else {
         // Real Video rendering: Uses native hardware decoded Flutter Texture when session is active,
@@ -420,9 +426,6 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                   ),
                 ),
               ),
-
-            // Storage badge
-            _buildLocalSourceBadge(activeClip, localPath, isPhoto: false),
           ],
         );
       }
@@ -468,12 +471,6 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
   }
 
   Widget _buildPlaceholderGraphic(dynamic activeClip) {
-    String? localPath;
-    if (activeClip is VideoClip) {
-      final asset = viewModel.getAssetById(activeClip.assetId);
-      localPath = asset?.localPath;
-    }
-
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
       decoration: BoxDecoration(
@@ -525,19 +522,6 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                         ),
                     ],
                   ),
-                  if (localPath != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      localPath,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 8,
-                        color: AppColors.primary.withValues(alpha: 0.8),
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -609,44 +593,6 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                   fontFamily: 'monospace',
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLocalSourceBadge(dynamic activeClip, String localPath, {required bool isPhoto}) {
-    return Positioned(
-      bottom: 8,
-      left: 8,
-      right: 8,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.75),
-          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-          border: Border.all(color: AppColors.primary.withValues(alpha: 0.6), width: 0.8),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              isPhoto ? Icons.photo_library_rounded : Icons.check_circle_rounded,
-              size: 12,
-              color: AppColors.primary,
-            ),
-            const SizedBox(width: 4),
-            Expanded(
-              child: Text(
-                activeClip.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ),
-            Text(
-              isPhoto ? 'LOCAL PHOTO' : 'PLAYING FROM STORAGE',
-              style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: AppColors.primary.withValues(alpha: 0.9)),
             ),
           ],
         ),

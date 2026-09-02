@@ -36,11 +36,6 @@ class TimelineClipItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final clipWidth = clip.durationInSeconds * pixelsPerSecond;
-    final hasLocalFile = localPath != null &&
-        !localPath!.startsWith('content://') &&
-        !kIsWeb &&
-        File(localPath!).existsSync();
-
     final displayImagePath = isPhoto ? localPath : thumbnailPath;
     final hasDisplayImage = displayImagePath != null &&
         !displayImagePath.startsWith('content://') &&
@@ -146,34 +141,6 @@ class TimelineClipItem extends StatelessWidget {
                         },
                       ),
                     ),
-
-                    // Bottom-Left: Real File Source Badge if local file
-                    if (hasLocalFile)
-                      Positioned(
-                        bottom: 3,
-                        left: isSelected ? AppDimensions.trimHandleWidth + 4 : 6,
-                        child: LayoutBuilder(
-                          builder: (context, constraints) {
-                            if (clipWidth < 60) return const SizedBox.shrink();
-                            return Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.7),
-                                borderRadius: BorderRadius.circular(2),
-                                border: Border.all(color: AppColors.primary.withValues(alpha: 0.4), width: 0.5),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.folder_open_rounded, size: 8, color: AppColors.primary),
-                                  SizedBox(width: 2),
-                                  Text('LOCAL FILE', style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: AppColors.primary)),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                      ),
 
                     // Bottom-Right: Speed Badge if != 1.0
                     if ((clip.speed - 1.0).abs() > 0.05)

@@ -2330,6 +2330,480 @@ void main() {
           vm.dispose();
         });
       });
+
+      group('Audio Seek & Synchronized Playback Tests', () {
+        late File tempAudioFile;
+        late MediaAsset testAudioAsset;
+
+        setUp(() {
+          final tempDir = Directory.systemTemp;
+          tempAudioFile = File('${tempDir.path}/test_audio_sync_${DateTime.now().millisecondsSinceEpoch}.wav');
+          tempAudioFile.writeAsBytesSync(List.filled(1024, 0));
+
+          testAudioAsset = MediaAsset(
+            id: 'test_asset_audio_sync',
+            name: 'Sync Audio Test.wav',
+            type: MediaAssetType.audio,
+            duration: const Duration(seconds: 30),
+            localPath: tempAudioFile.path,
+            createdAt: DateTime.now(),
+          );
+        });
+
+        tearDown(() {
+          if (tempAudioFile.existsSync()) {
+            try { tempAudioFile.deleteSync(); } catch (_) {}
+          }
+        });
+
+        test('TEST 1: Play from 00:00 -> audio and playhead start at 00:00', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_1',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          vm.seekTo(0.0);
+          expect(vm.playheadPosition, equals(0.0));
+
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(0.0));
+          expect(vm.audioTracks.first.startTimeInSeconds, equals(0.0));
+          vm.dispose();
+        });
+
+        test('TEST 2: Pause at 00:05 -> resume -> audio resumes around 00:05', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_2',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          vm.seekTo(5.0);
+          vm.pause();
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(5.0));
+
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(5.0));
+          vm.dispose();
+        });
+
+        test('TEST 3: Pause at 00:05 -> seek to 00:00 -> play -> audio starts at 00:00', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_3',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          vm.seekTo(5.0);
+          vm.pause();
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(5.0));
+
+          vm.seekTo(0.0);
+          expect(vm.playheadPosition, equals(0.0));
+
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(0.0));
+          vm.dispose();
+        });
+
+        test('TEST 4: Pause -> seek to 00:10 -> play -> audio starts at 00:10', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_4',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          vm.seekTo(2.0);
+          vm.pause();
+
+          vm.seekTo(10.0);
+          expect(vm.playheadPosition, equals(10.0));
+
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(10.0));
+          vm.dispose();
+        });
+
+        test('TEST 5: Repeated pause/resume does not accumulate an audio offset', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_5',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          for (double pos in [1.0, 3.5, 7.2, 2.0, 0.0]) {
+            vm.seekTo(pos);
+            vm.pause();
+            expect(vm.playheadPosition, equals(pos));
+            vm.play();
+            expect(vm.isPlaying, isTrue);
+            expect(vm.playheadPosition, equals(pos));
+            vm.pause();
+          }
+          vm.dispose();
+        });
+
+        test('TEST 6: Repeated seek/restart does not create audio drift', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_6',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          for (int i = 0; i < 10; i++) {
+            vm.seekTo(0.0);
+            expect(vm.playheadPosition, equals(0.0));
+            vm.play();
+            expect(vm.isPlaying, isTrue);
+            vm.pause();
+          }
+          expect(vm.playheadPosition, equals(0.0));
+          vm.dispose();
+        });
+
+        test('TEST 7: Multiple audio tracks respect individual timeline offsets', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+
+          // Track 1: starts at 0s, duration 10s
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_multi_1',
+            assetId: testAudioAsset.id,
+            title: 'Track 1',
+            startTime: Duration.zero,
+            duration: const Duration(seconds: 10),
+          ));
+
+          // Track 2: starts at 12s, duration 8s
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_multi_2',
+            assetId: testAudioAsset.id,
+            title: 'Track 2',
+            startTime: const Duration(seconds: 12),
+            duration: const Duration(seconds: 8),
+          ));
+
+          expect(vm.audioTracks.length, equals(2));
+          expect(vm.audioTracks[0].startTimeInSeconds, equals(0.0));
+          expect(vm.audioTracks[1].startTimeInSeconds, equals(12.0));
+
+          // At 5.0s, track 0 is active
+          vm.seekTo(5.0);
+          expect(vm.playheadPosition, equals(5.0));
+
+          // At 14.0s, track 1 is active (offset 2s into track 1)
+          vm.seekTo(14.0);
+          expect(vm.playheadPosition, equals(14.0));
+          final activeOffset = vm.playheadPosition - vm.audioTracks[1].startTimeInSeconds;
+          expect(activeOffset, equals(2.0));
+          vm.dispose();
+        });
+
+        test('TEST 8: SFX inserted later in the timeline starts at its correct timeline position', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+
+          // Seek playhead to 8.0s before inserting SFX
+          vm.seekTo(8.0);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sfx_later_test',
+            assetId: testAudioAsset.id,
+            title: 'SFX Track',
+            startTime: const Duration(seconds: 8),
+            duration: const Duration(seconds: 4),
+          ));
+
+          expect(vm.audioTracks.last.startTimeInSeconds, equals(8.0));
+
+          // Seeking before 8.0s (e.g. 3.0s) is outside SFX range
+          vm.seekTo(3.0);
+          expect(vm.playheadPosition < vm.audioTracks.last.startTimeInSeconds, isTrue);
+
+          // Seeking to 9.5s is 1.5s into SFX track
+          vm.seekTo(9.5);
+          expect(vm.playheadPosition - vm.audioTracks.last.startTimeInSeconds, equals(1.5));
+          vm.dispose();
+        });
+
+        test('TEST 9: Video and audio use the same authoritative timeline position', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_9',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          vm.seekTo(4.0);
+          expect(vm.playheadPosition, equals(4.0));
+          expect(vm.activeClipStartTimeAtPlayhead, equals(0.0));
+
+          final activeVideoClip = vm.currentActiveClipAtPlayhead;
+          expect(activeVideoClip, isNotNull);
+
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(4.0));
+          vm.dispose();
+        });
+
+        test('TEST 10: No stale MediaPlayer position is reused after a new seek', () {
+          final vm = EditorViewModel();
+          vm.addMediaAsset(testAudioAsset);
+          vm.addAudioTrack(AudioTrack(
+            id: 'audio_sync_test_10',
+            assetId: testAudioAsset.id,
+            title: testAudioAsset.name,
+            duration: testAudioAsset.duration ?? const Duration(seconds: 30),
+            startTime: Duration.zero,
+          ));
+
+          // Simulate pause at 7.0s
+          vm.seekTo(7.0);
+          vm.pause();
+          expect(vm.playheadPosition, equals(7.0));
+
+          // Move playhead back to 0.0s
+          vm.seekTo(0.0);
+          expect(vm.playheadPosition, equals(0.0));
+
+          // Start play again - playhead MUST be 0.0s, not 7.0s
+          vm.play();
+          expect(vm.playheadPosition, equals(0.0));
+          vm.dispose();
+        });
+      });
+
+      group('End of Playback Lifecycle & Timeline Synchronization Tests', () {
+        late EditorViewModel vm;
+
+        setUp(() {
+          vm = EditorViewModel();
+          // Ensure test starts with default non-looping configuration
+          expect(vm.isLooping, isFalse);
+        });
+
+        tearDown(() {
+          vm.dispose();
+        });
+
+        test('TEST 1: Video reaches natural end -> isPlaying == false', () async {
+          final totalSec = vm.totalDurationInSeconds;
+          expect(totalSec, greaterThan(0.0));
+
+          // Position playhead 50ms before the end and start play
+          vm.seekTo(totalSec - 0.05);
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+
+          // Allow the playback timer loop to hit the end boundary
+          await Future.delayed(const Duration(milliseconds: 120));
+
+          expect(vm.isPlaying, isFalse);
+        });
+
+        test('TEST 2: Timeline ticker stops at video end', () async {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.05);
+          vm.play();
+
+          // Wait for completion
+          await Future.delayed(const Duration(milliseconds: 120));
+          expect(vm.isPlaying, isFalse);
+          final positionAtCompletion = vm.playheadPosition;
+
+          // Wait additional time and verify no timer is ticking
+          await Future.delayed(const Duration(milliseconds: 100));
+          expect(vm.playheadPosition, equals(positionAtCompletion));
+          expect(vm.isPlaying, isFalse);
+        });
+
+        test('TEST 3: Audio stops at video end', () async {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.05);
+          vm.play();
+
+          await Future.delayed(const Duration(milliseconds: 120));
+          expect(vm.isPlaying, isFalse);
+        });
+
+        test('TEST 4: Video does not automatically restart', () async {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.04);
+          vm.play();
+
+          await Future.delayed(const Duration(milliseconds: 120));
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(totalSec));
+          expect(vm.playheadPosition, isNot(equals(0.0)));
+        });
+
+        test('TEST 5: Playhead remains at final timeline position', () async {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.03);
+          vm.play();
+
+          await Future.delayed(const Duration(milliseconds: 120));
+          expect(vm.playheadPosition, equals(totalSec));
+        });
+
+        test('TEST 6: No additional position updates occur after completion', () async {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.04);
+          vm.play();
+
+          await Future.delayed(const Duration(milliseconds: 120));
+          final endPosition = vm.playheadPosition;
+
+          int notifyCount = 0;
+          void listener() {
+            notifyCount++;
+          }
+          vm.addListener(listener);
+
+          await Future.delayed(const Duration(milliseconds: 150));
+          vm.removeListener(listener);
+
+          expect(notifyCount, equals(0));
+          expect(vm.playheadPosition, equals(endPosition));
+        });
+
+        test('TEST 7: Completion cannot trigger duplicate playback or loop', () async {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.04);
+          vm.play();
+
+          await Future.delayed(const Duration(milliseconds: 120));
+          expect(vm.isPlaying, isFalse);
+
+          // Calling pause again at end is idempotent and does not corrupt state
+          vm.pause();
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(totalSec));
+        });
+
+        test('TEST 8: Pressing Play after completion intentionally starts a new session', () {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec);
+          vm.pause();
+          expect(vm.playheadPosition, equals(totalSec));
+          expect(vm.isPlaying, isFalse);
+
+          // User explicitly taps play button
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(0.0));
+        });
+
+        test('TEST 9: Restart from end begins at 00:00', () {
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec);
+          expect(vm.playheadPosition, equals(totalSec));
+
+          vm.play();
+          expect(vm.playheadPosition, equals(0.0));
+          expect(vm.activeClipIndexAtPlayhead, equals(0));
+          expect(vm.activeClipStartTimeAtPlayhead, equals(0.0));
+        });
+
+        test('TEST 10: Multiple audio tracks stop correctly at project end', () async {
+          // Add secondary audio track that ends earlier
+          vm.addAudioTrack(const AudioTrack(
+            id: 'multi_audio_end_1',
+            assetId: 'audio_end_asset_1',
+            title: 'End Audio 1',
+            duration: Duration(seconds: 4),
+            startTime: Duration(seconds: 2),
+          ));
+
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.05);
+          vm.play();
+
+          await Future.delayed(const Duration(milliseconds: 120));
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(totalSec));
+        });
+
+        test('TEST 11: Downloaded SFX does not continue playing after video completion', () async {
+          // Add SFX track starting near end
+          vm.addAudioTrack(const AudioTrack(
+            id: 'sfx_end_track_1',
+            assetId: 'sfx_end_asset_1',
+            title: 'End SFX',
+            duration: Duration(seconds: 1),
+            startTime: Duration(seconds: 5),
+          ));
+
+          final totalSec = vm.totalDurationInSeconds;
+          vm.seekTo(totalSec - 0.05);
+          vm.play();
+
+          await Future.delayed(const Duration(milliseconds: 120));
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(totalSec));
+        });
+
+        test('TEST 12: Existing pause -> seek -> play synchronization remains intact', () {
+          // Pause at 3.0s
+          vm.seekTo(3.0);
+          vm.pause();
+          expect(vm.playheadPosition, equals(3.0));
+
+          // Seek to 0.0s
+          vm.seekTo(0.0);
+          expect(vm.playheadPosition, equals(0.0));
+
+          // Start play -> playhead is exactly 0.0s
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(0.0));
+
+          // Pause at 2.0s
+          vm.seekTo(2.0);
+          vm.pause();
+          expect(vm.isPlaying, isFalse);
+          expect(vm.playheadPosition, equals(2.0));
+
+          // Play resumes from 2.0s without resetting to 0
+          vm.play();
+          expect(vm.isPlaying, isTrue);
+          expect(vm.playheadPosition, equals(2.0));
+        });
+      });
     });
   });
 }

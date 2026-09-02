@@ -75,11 +75,14 @@ class VideoPlaybackService {
     return null;
   }
 
-  /// Starts playback of video frames and native audio track.
-  Future<void> play(int textureId) async {
+  /// Starts playback of video frames and native audio track at optional [position].
+  Future<void> play(int textureId, {Duration? position}) async {
     try {
-      debugPrint('[AUTO_PLAY_TRACE] VIDEO START CALLED: VideoPlaybackService.play($textureId)');
-      await _channel.invokeMethod('play', {'textureId': textureId});
+      debugPrint('[AUTO_PLAY_TRACE] VIDEO START CALLED: VideoPlaybackService.play($textureId, pos=${position?.inMilliseconds}ms)');
+      await _channel.invokeMethod('play', {
+        'textureId': textureId,
+        if (position != null) 'positionMs': position.inMilliseconds,
+      });
       final session = _sessions[textureId];
       if (session != null) {
         session.isPlaying = true;

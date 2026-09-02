@@ -91,7 +91,7 @@ class EditorViewModel extends ChangeNotifier {
 
   double _playheadPosition = 0.0; // In seconds
   bool _isPlaying = false;
-  bool _isLooping = true; // Auto-loop playback for video editors
+  bool _isLooping = false; // Default non-looping playback for video editor
   Timer? _playbackTimer;
 
   double _pixelsPerSecond = AppDimensions.defaultPixelsPerSecond;
@@ -218,6 +218,33 @@ class EditorViewModel extends ChangeNotifier {
       accumulated = clipEnd;
     }
     return _videoClips.isNotEmpty ? _videoClips.first : null;
+  }
+
+  /// Returns the global timeline start time (in seconds) of the video clip visible at the playhead
+  double get activeClipStartTimeAtPlayhead {
+    double accumulated = 0.0;
+    for (final clip in _videoClips) {
+      final clipEnd = accumulated + clip.durationInSeconds;
+      if (_playheadPosition >= accumulated && _playheadPosition <= clipEnd) {
+        return accumulated;
+      }
+      accumulated = clipEnd;
+    }
+    return 0.0;
+  }
+
+  /// Returns index of the video clip visible at current playhead
+  int get activeClipIndexAtPlayhead {
+    double accumulated = 0.0;
+    for (int i = 0; i < _videoClips.length; i++) {
+      final clip = _videoClips[i];
+      final clipEnd = accumulated + clip.durationInSeconds;
+      if (_playheadPosition >= accumulated && _playheadPosition <= clipEnd) {
+        return i;
+      }
+      accumulated = clipEnd;
+    }
+    return 0;
   }
 
   /// Returns active overlay clips visible at current playhead
@@ -484,14 +511,16 @@ class EditorViewModel extends ChangeNotifier {
 
   void play() {
     if (_videoClips.isEmpty && _audioTracks.isEmpty) return;
-    debugPrint('[AUTO_PLAY_TRACE] VIEWMODEL_PLAY triggered');
+    debugPrint('[AUTO_PLAY_TRACE] VIEWMODEL_PLAY triggered at playhead=$_playheadPosition (totalDuration=$totalDurationInSeconds)');
+    // If playhead is at or past the end, intentionally restart from beginning
     if (_playheadPosition >= totalDurationInSeconds) {
       _playheadPosition = 0.0;
+      _autoSelectActiveClip();
     }
 
     _isPlaying = true;
     _playbackTimer?.cancel();
-    _syncAudioPlayback();
+    _syncAudioPlayback(forceSeek: true, isStartingPlay: true);
 
     // 33ms interval (~30 FPS smooth playback loop)
     const intervalMs = 33;
@@ -501,10 +530,12 @@ class EditorViewModel extends ChangeNotifier {
         if (_isLooping && totalDurationInSeconds > 0.0) {
           _playheadPosition = 0.0;
           _autoSelectActiveClip();
-          _syncAudioPlayback();
+          _syncAudioPlayback(forceSeek: true, isStartingPlay: true);
           notifyListeners();
         } else {
+          // Reached natural end of project: stop cleanly at final timeline position
           _playheadPosition = totalDurationInSeconds;
+          _autoSelectActiveClip();
           pause();
         }
       } else {
@@ -518,7 +549,7 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   void pause() {
-    debugPrint('[AUTO_PLAY_TRACE] VIEWMODEL_PAUSE triggered');
+    debugPrint('[AUTO_PLAY_TRACE] VIEWMODEL_PAUSE triggered at playhead=$_playheadPosition');
     _isPlaying = false;
     _playbackTimer?.cancel();
     _playbackTimer = null;
@@ -536,7 +567,7 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   /// Synchronizes audio playback with master playhead, respecting track trims, speed, and volume
-  void _syncAudioPlayback({bool forceSeek = false}) {
+  void _syncAudioPlayback({bool forceSeek = false, bool isStartingPlay = false}) {
     if (_audioTracks.isEmpty) {
       if (AudioPlaybackService.instance.isInitialized) {
         AudioPlaybackService.instance.dispose();
@@ -544,12 +575,18 @@ class EditorViewModel extends ChangeNotifier {
       return;
     }
 
-    // Find active audio track at current playhead position
+    // Prioritize selectedAudioTrack if active at playhead, otherwise first matching track
     AudioTrack? activeTrack;
-    for (final track in _audioTracks) {
-      if (_playheadPosition >= track.startTimeInSeconds && _playheadPosition < track.endTimeInSeconds) {
-        activeTrack = track;
-        break;
+    if (selectedAudioTrack != null &&
+        _playheadPosition >= selectedAudioTrack!.startTimeInSeconds &&
+        _playheadPosition < selectedAudioTrack!.endTimeInSeconds) {
+      activeTrack = selectedAudioTrack;
+    } else {
+      for (final track in _audioTracks) {
+        if (_playheadPosition >= track.startTimeInSeconds && _playheadPosition < track.endTimeInSeconds) {
+          activeTrack = track;
+          break;
+        }
       }
     }
 
@@ -578,10 +615,10 @@ class EditorViewModel extends ChangeNotifier {
       AudioPlaybackService.instance.initialize(localPath).then((_) {
         AudioPlaybackService.instance.setVolume(effectiveVolume);
         AudioPlaybackService.instance.setSpeed(activeTrack!.speed);
-        AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
         if (_isPlaying) {
-          AudioPlaybackService.instance.play();
+          AudioPlaybackService.instance.play(position: Duration(milliseconds: sourceOffsetMs));
         } else {
+          AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
           AudioPlaybackService.instance.pause();
         }
       });
@@ -592,14 +629,13 @@ class EditorViewModel extends ChangeNotifier {
     AudioPlaybackService.instance.setVolume(effectiveVolume);
     AudioPlaybackService.instance.setSpeed(activeTrack.speed);
 
-    if (forceSeek) {
+    if (forceSeek && !_isPlaying) {
       AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
     }
 
     if (_isPlaying) {
-      if (!AudioPlaybackService.instance.isPlaying) {
-        AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
-        AudioPlaybackService.instance.play();
+      if (isStartingPlay || !AudioPlaybackService.instance.isPlaying) {
+        AudioPlaybackService.instance.play(position: Duration(milliseconds: sourceOffsetMs));
       }
     } else {
       if (AudioPlaybackService.instance.isPlaying) {

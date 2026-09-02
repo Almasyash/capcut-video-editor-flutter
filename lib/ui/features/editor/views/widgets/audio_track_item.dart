@@ -25,9 +25,6 @@ class AudioTrackItem extends StatelessWidget {
     final startOffset = audioTrack.startTimeInSeconds * pixelsPerSecond;
     final isSelected = (viewModel.selectedAudioTrackId == audioTrack.id) ||
         (viewModel.isAudioSelected && viewModel.audioTracks.length == 1);
-    final audioAsset = viewModel.getAssetById(audioTrack.assetId);
-    final hasLocalAudio = audioAsset?.localPath != null &&
-        !audioAsset!.localPath!.startsWith('content://');
 
     return Container(
       margin: EdgeInsets.only(left: startOffset, top: 4.0, bottom: 4.0),
@@ -114,28 +111,6 @@ class AudioTrackItem extends StatelessWidget {
                   ],
                 ),
               ),
-
-              // Real Local Audio indicator
-              if (hasLocalAudio)
-                Positioned(
-                  bottom: 2,
-                  left: 14,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.sd_storage_rounded, size: 8, color: AppColors.secondary),
-                        SizedBox(width: 2),
-                        Text('LOCAL AUDIO', style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: AppColors.secondary)),
-                      ],
-                    ),
-                  ),
-                ),
 
               // 3. Left & Right Interactive Amber Trim Handles when Selected (preserving timeline startTime)
               if (isSelected) ...[
