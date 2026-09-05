@@ -52,9 +52,17 @@ class ActionToolbar extends StatelessWidget {
                 _buildActionButton(
                   context: context,
                   icon: Icons.call_split_rounded,
-                  label: hasSelectedText ? 'Split Text' : (hasSelectedAudio ? 'Split Audio' : 'Split'),
+                  label: hasSelectedText
+                      ? 'Split Text'
+                      : (hasSelectedAudio
+                          ? 'Split Audio'
+                          : (hasSelectedOverlay ? 'Split Overlay' : 'Split')),
                   isPrimary: true,
-                  enabled: (hasSelectedClip && viewModel.videoClips.isNotEmpty) || hasSelectedAudio || hasSelectedText,
+                  enabled: (hasSelectedClip && viewModel.videoClips.isNotEmpty) ||
+                      hasSelectedAudio ||
+                      hasSelectedText ||
+                      hasSelectedOverlay ||
+                      viewModel.videoClips.isNotEmpty,
                   onTap: () {
                     if (hasSelectedText) {
                       final success = viewModel.splitTextAtPlayhead();
@@ -69,6 +77,13 @@ class ActionToolbar extends StatelessWidget {
                         _showFeedback(context, '✂️ Audio track split at playhead');
                       } else {
                         _showFeedback(context, 'Position playhead inside audio track to split');
+                      }
+                    } else if (hasSelectedOverlay) {
+                      final success = viewModel.splitOverlayAtPlayhead();
+                      if (success) {
+                        _showFeedback(context, '✂️ Overlay split at playhead');
+                      } else {
+                        _showFeedback(context, 'Position playhead inside overlay to split');
                       }
                     } else {
                       final success = viewModel.splitClipAtPlayhead();

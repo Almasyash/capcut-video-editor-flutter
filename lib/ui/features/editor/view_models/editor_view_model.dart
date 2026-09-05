@@ -72,7 +72,26 @@ class EditorViewModel extends ChangeNotifier {
   late Project _currentProject;
   Timer? _autoSaveDebounceTimer;
 
-  Project get currentProject => _currentProject;
+  Project get currentProject => _currentProject.copyWith(
+        aspectRatio: _aspectRatio,
+        videoClips: _videoClips,
+        overlayClips: _overlayClips,
+        stickerOverlays: _stickerOverlays,
+        textOverlays: _textOverlays,
+        audioTracks: _audioTracks,
+        audioTrack: audioTrack,
+        clearAudioTrack: _audioTracks.isEmpty,
+        mediaLibrary: _mediaLibrary,
+        activeFilter: _activeFilter,
+        colorAdjustments: _colorAdjustments,
+        activeEffect: _activeEffect,
+        canvasBackgroundColor: _canvasBackgroundColor,
+        canvasBlurSigma: _canvasBlurSigma,
+        playheadPosition: _playheadPosition,
+        thumbnailPath: _videoClips.isNotEmpty
+            ? getAssetById(_videoClips.first.assetId)?.thumbnailPath
+            : null,
+      );
 
   // --- State Variables ---
 
@@ -192,7 +211,7 @@ class EditorViewModel extends ChangeNotifier {
       ? (_textOverlays.firstWhere((t) => t.id == _selectedTextId, orElse: () => _textOverlays.first))
       : null;
 
-  /// Total timeline duration in seconds based on active video clips, audio tracks, and text overlays
+  /// Total timeline duration in seconds based on active video clips, audio tracks, text overlays, and PIP overlays
   double get totalDurationInSeconds {
     double videoTotal = _videoClips.fold(0.0, (sum, clip) => sum + clip.durationInSeconds);
     double audioEnd = 0.0;
@@ -205,7 +224,12 @@ class EditorViewModel extends ChangeNotifier {
       final tEnd = text.startTimeInSeconds + text.durationInSeconds;
       if (tEnd > textEnd) textEnd = tEnd;
     }
-    return math.max(videoTotal, math.max(audioEnd, textEnd));
+    double overlayEnd = 0.0;
+    for (final overlay in _overlayClips) {
+      final oEnd = overlay.startTimeInSeconds + overlay.durationInSeconds;
+      if (oEnd > overlayEnd) overlayEnd = oEnd;
+    }
+    return math.max(videoTotal, math.max(audioEnd, math.max(textEnd, overlayEnd)));
   }
 
   /// Formatted duration object
@@ -746,6 +770,8 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectTextOverlay(String? id) => selectText(id);
+
   void deselectText() {
     _selectedTextId = null;
     notifyListeners();
@@ -819,26 +845,30 @@ class EditorViewModel extends ChangeNotifier {
     int targetIndex = -1;
     double clipGlobalStart = 0.0;
 
-    double accumulated = 0.0;
-    for (int i = 0; i < _videoClips.length; i++) {
-      final clip = _videoClips[i];
-      final clipEnd = accumulated + clip.durationInSeconds;
-      if (_playheadPosition > accumulated + 0.1 && _playheadPosition < clipEnd - 0.1) {
-        targetIndex = i;
-        clipGlobalStart = accumulated;
-        break;
-      }
-      accumulated = clipEnd;
-    }
-
-    if (targetIndex == -1 && _selectedClipIndex != null) {
+    // 1. Prioritize selected clip if playhead is within its active range
+    if (_selectedClipIndex != null && _selectedClipIndex! >= 0 && _selectedClipIndex! < _videoClips.length) {
       final selectedStart = getClipStartTime(_selectedClipIndex!);
       final selectedClip = _videoClips[_selectedClipIndex!];
       final selectedEnd = selectedStart + selectedClip.durationInSeconds;
 
-      if (_playheadPosition > selectedStart + 0.1 && _playheadPosition < selectedEnd - 0.1) {
+      if (_playheadPosition > selectedStart + 0.05 && _playheadPosition < selectedEnd - 0.05) {
         targetIndex = _selectedClipIndex!;
         clipGlobalStart = selectedStart;
+      }
+    }
+
+    // 2. If no selected clip contains playhead, find the clip spanning playhead
+    if (targetIndex == -1) {
+      double accumulated = 0.0;
+      for (int i = 0; i < _videoClips.length; i++) {
+        final clip = _videoClips[i];
+        final clipEnd = accumulated + clip.durationInSeconds;
+        if (_playheadPosition > accumulated + 0.05 && _playheadPosition < clipEnd - 0.05) {
+          targetIndex = i;
+          clipGlobalStart = accumulated;
+          break;
+        }
+        accumulated = clipEnd;
       }
     }
 
@@ -847,23 +877,28 @@ class EditorViewModel extends ChangeNotifier {
     final originalClip = _videoClips[targetIndex];
     final offsetInClipSeconds = _playheadPosition - clipGlobalStart;
 
-    if (offsetInClipSeconds < 0.2 || (originalClip.durationInSeconds - offsetInClipSeconds) < 0.2) {
+    if (offsetInClipSeconds < 0.05 || (originalClip.durationInSeconds - offsetInClipSeconds) < 0.05) {
       return false;
     }
 
     _saveSnapshot();
 
     final splitOffsetMs = (offsetInClipSeconds * originalClip.speed * 1000).round();
-    final newSplitPoint = Duration(milliseconds: originalClip.trimStart.inMilliseconds + splitOffsetMs);
+    final newSplitMs = (originalClip.trimStart.inMilliseconds + splitOffsetMs).clamp(
+      originalClip.trimStart.inMilliseconds + 1,
+      originalClip.trimEnd.inMilliseconds - 1,
+    );
+    final newSplitPoint = Duration(milliseconds: newSplitMs);
 
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
     final clipPartA = originalClip.copyWith(
-      id: '${originalClip.id}_a_${DateTime.now().millisecondsSinceEpoch}',
+      id: '${originalClip.id}_a_$timestamp',
       title: '${originalClip.title} (Part 1)',
       trimEnd: newSplitPoint,
     );
 
     final clipPartB = originalClip.copyWith(
-      id: '${originalClip.id}_b_${DateTime.now().millisecondsSinceEpoch}',
+      id: '${originalClip.id}_b_$timestamp',
       title: '${originalClip.title} (Part 2)',
       trimStart: newSplitPoint,
     );
@@ -873,6 +908,7 @@ class EditorViewModel extends ChangeNotifier {
     _videoClips.insert(targetIndex + 1, clipPartB);
 
     _selectedClipIndex = targetIndex + 1;
+    scheduleAutoSave();
     notifyListeners();
     return true;
   }
@@ -1110,6 +1146,21 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void addVideoClip(VideoClip clip) {
+    _saveSnapshot();
+    _videoClips.add(clip);
+    _selectedClipIndex = _videoClips.length - 1;
+    notifyListeners();
+  }
+
+  void clearVideoClips() {
+    _saveSnapshot();
+    _videoClips.clear();
+    _selectedClipIndex = null;
+    _playheadPosition = 0.0;
+    notifyListeners();
+  }
+
   void reorderClips(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _videoClips.length) return;
     if (newIndex < 0 || newIndex > _videoClips.length) return;
@@ -1150,6 +1201,45 @@ class EditorViewModel extends ChangeNotifier {
     if (index < 0 || index >= _overlayClips.length) return;
     _overlayClips[index] = _overlayClips[index].copyWith(scale: scale);
     notifyListeners();
+  }
+
+  bool splitOverlayAtPlayhead() {
+    final overlay = selectedOverlay;
+    if (overlay == null || _selectedOverlayIndex == null) return false;
+
+    if (_playheadPosition <= overlay.startTimeInSeconds + 0.05 ||
+        _playheadPosition >= (overlay.startTimeInSeconds + overlay.durationInSeconds) - 0.05) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final index = _selectedOverlayIndex!;
+    final offsetSec = _playheadPosition - overlay.startTimeInSeconds;
+    final durationPartAMs = (offsetSec * 1000).round();
+    final durationPartBMs = overlay.duration.inMilliseconds - durationPartAMs;
+
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final partA = overlay.copyWith(
+      id: '${overlay.id}_a_$timestamp',
+      title: '${overlay.title} (Part 1)',
+      duration: Duration(milliseconds: durationPartAMs),
+    );
+
+    final partB = overlay.copyWith(
+      id: '${overlay.id}_b_$timestamp',
+      title: '${overlay.title} (Part 2)',
+      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
+      duration: Duration(milliseconds: durationPartBMs),
+    );
+
+    _overlayClips.removeAt(index);
+    _overlayClips.insert(index, partA);
+    _overlayClips.insert(index + 1, partB);
+
+    _selectedOverlayIndex = index + 1;
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
   }
 
   // --- Edit Panel Transformations ---
@@ -1578,42 +1668,74 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   bool splitAudioAtPlayhead() {
-    final track = selectedAudioTrack;
-    if (track == null) return false;
+    AudioTrack? targetTrack;
+    int targetIndex = -1;
 
-    if (_playheadPosition <= track.startTimeInSeconds + 0.2 ||
-        _playheadPosition >= track.endTimeInSeconds - 0.2) {
+    // 1. Prioritize selected audio track if playhead is within its active range
+    if (_selectedAudioTrackId != null) {
+      final idx = _audioTracks.indexWhere((t) => t.id == _selectedAudioTrackId);
+      if (idx != -1) {
+        final track = _audioTracks[idx];
+        if (_playheadPosition > track.startTimeInSeconds + 0.05 &&
+            _playheadPosition < track.endTimeInSeconds - 0.05) {
+          targetTrack = track;
+          targetIndex = idx;
+        }
+      }
+    }
+
+    // 2. If no selected track matches, find any audio track covering playhead
+    if (targetTrack == null) {
+      for (int i = 0; i < _audioTracks.length; i++) {
+        final track = _audioTracks[i];
+        if (_playheadPosition > track.startTimeInSeconds + 0.05 &&
+            _playheadPosition < track.endTimeInSeconds - 0.05) {
+          targetTrack = track;
+          targetIndex = i;
+          break;
+        }
+      }
+    }
+
+    if (targetTrack == null || targetIndex == -1) return false;
+
+    final offsetSec = _playheadPosition - targetTrack.startTimeInSeconds;
+    if (offsetSec < 0.05 || (targetTrack.durationInSeconds - offsetSec) < 0.05) {
       return false;
     }
 
     _saveSnapshot();
-    final offsetSec = _playheadPosition - track.startTimeInSeconds;
-    final splitSourceMs = (offsetSec * track.speed * 1000).round();
-    final splitPoint = Duration(milliseconds: track.trimStart.inMilliseconds + splitSourceMs);
+    final splitSourceMs = (offsetSec * targetTrack.speed * 1000).round();
+    final effectiveTrimEndMs = targetTrack.effectiveTrimEnd.inMilliseconds;
+    final newSplitMs = (targetTrack.trimStart.inMilliseconds + splitSourceMs).clamp(
+      targetTrack.trimStart.inMilliseconds + 1,
+      effectiveTrimEndMs - 1,
+    );
+    final splitPoint = Duration(milliseconds: newSplitMs);
 
-    final index = _audioTracks.indexWhere((t) => t.id == track.id);
-    if (index == -1) return false;
-
-    final partA = track.copyWith(
-      id: '${track.id}_a_${DateTime.now().millisecondsSinceEpoch}',
-      title: '${track.title} (Part 1)',
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final partA = targetTrack.copyWith(
+      id: '${targetTrack.id}_a_$timestamp',
+      title: '${targetTrack.title} (Part 1)',
       trimEnd: splitPoint,
     );
 
-    final partB = track.copyWith(
-      id: '${track.id}_b_${DateTime.now().millisecondsSinceEpoch}',
-      title: '${track.title} (Part 2)',
+    final partB = targetTrack.copyWith(
+      id: '${targetTrack.id}_b_$timestamp',
+      title: '${targetTrack.title} (Part 2)',
       startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
       trimStart: splitPoint,
+      trimEnd: targetTrack.effectiveTrimEnd,
     );
 
-    _audioTracks.removeAt(index);
-    _audioTracks.insert(index, partA);
-    _audioTracks.insert(index + 1, partB);
+    _audioTracks.removeAt(targetIndex);
+    _audioTracks.insert(targetIndex, partA);
+    _audioTracks.insert(targetIndex + 1, partB);
 
     _selectedAudioTrackId = partB.id;
     _isAudioSelected = true;
     _syncAudioPlayback(forceSeek: true);
+    scheduleAutoSave();
     notifyListeners();
     return true;
   }
@@ -1720,6 +1842,14 @@ class EditorViewModel extends ChangeNotifier {
     if (_selectedTextId != null) {
       removeTextOverlay(_selectedTextId!);
     }
+  }
+
+  void clearTextOverlays() {
+    _saveSnapshot();
+    _textOverlays.clear();
+    _selectedTextId = null;
+    scheduleAutoSave();
+    notifyListeners();
   }
 
   void updateTextOverlay(TextOverlay overlay) {
@@ -1856,8 +1986,8 @@ class EditorViewModel extends ChangeNotifier {
     final text = selectedTextOverlay;
     if (text == null) return false;
 
-    if (_playheadPosition <= text.startTimeInSeconds + 0.2 ||
-        _playheadPosition >= text.endTimeInSeconds - 0.2) {
+    if (_playheadPosition <= text.startTimeInSeconds + 0.05 ||
+        _playheadPosition >= text.endTimeInSeconds - 0.05) {
       return false;
     }
 
@@ -1869,13 +1999,14 @@ class EditorViewModel extends ChangeNotifier {
     final splitMs = (offsetSec * text.speed * 1000).round();
     final newSplitPoint = Duration(milliseconds: text.trimStart.inMilliseconds + splitMs);
 
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
     final textPartA = text.copyWith(
-      id: '${text.id}_part1_${DateTime.now().millisecondsSinceEpoch}',
+      id: '${text.id}_part1_$timestamp',
       trimEnd: newSplitPoint,
     );
 
     final textPartB = text.copyWith(
-      id: '${text.id}_part2_${DateTime.now().millisecondsSinceEpoch}',
+      id: '${text.id}_part2_$timestamp',
       startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
       trimStart: newSplitPoint,
     );
