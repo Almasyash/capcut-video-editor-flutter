@@ -2358,7 +2358,7 @@ class EditorViewModel extends ChangeNotifier {
 
   // --- Export Workflow & MediaStore Gallery Registration ---
 
-  /// Exports the current project to a high-quality video and registers it into the native device gallery
+  /// Exports the current project to a high-quality video with real transition rendering and registers it into the native device gallery
   Future<bool> exportVideoToGallery({
     required void Function(bool success, String? outputPath) onFinished,
   }) async {
@@ -2369,84 +2369,46 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
 
     _exportTimer?.cancel();
+    _exportTimer = null;
 
-    // 1. Simulate render progress smoothly up to 90%
-    _exportTimer = Timer.periodic(const Duration(milliseconds: 35), (timer) async {
-      if (_exportProgress < 0.90) {
-        _exportProgress += 0.04;
-        notifyListeners();
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final exportFileName = 'MAHMAS_$timestamp.mp4';
+
+      final exportResult = await DeviceMediaService.renderAndExportVideo(
+        project: _currentProject,
+        settings: _exportSettings,
+        assets: _mediaLibrary,
+        outputFileName: exportFileName,
+        onProgress: (progress) {
+          _exportProgress = progress.clamp(0.0, 1.0);
+          notifyListeners();
+        },
+      );
+
+      final success = exportResult['success'] == true;
+      final outputPath = exportResult['path'] as String?;
+
+      _exportProgress = success ? 1.0 : 0.0;
+      _isExporting = false;
+      notifyListeners();
+
+      if (success) {
+        TtsService.announce('Video export complete and saved to gallery');
+        onFinished(true, outputPath);
+        return true;
       } else {
-        _exportTimer?.cancel();
-        _exportTimer = null;
-
-        // 2. Perform actual file output creation and Gallery MediaStore saving
-        try {
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final exportFileName = 'MAHMAS_$timestamp.mp4';
-          final tempDir = Directory.systemTemp;
-          final exportFile = File('${tempDir.path}/$exportFileName');
-
-          // Look for source video clip file or synthesize standard MP4 container bytes
-          String? sourceVideoPath;
-          for (final clip in _videoClips) {
-            final asset = getAssetById(clip.assetId);
-            if (asset != null && asset.localPath != null && File(asset.localPath!).existsSync()) {
-              sourceVideoPath = asset.localPath;
-              break;
-            }
-          }
-
-          if (sourceVideoPath != null && File(sourceVideoPath).existsSync()) {
-            final sourceBytes = await File(sourceVideoPath).readAsBytes();
-            await exportFile.writeAsBytes(sourceBytes, flush: true);
-          } else {
-            // Write standard valid ISO base media file / MP4 header bytes
-            final headerBytes = <int>[
-              0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, // ftyp
-              0x69, 0x73, 0x6F, 0x6D, 0x00, 0x00, 0x02, 0x00, // isom
-              0x69, 0x73, 0x6F, 0x6D, 0x69, 0x73, 0x6F, 0x32, // isom iso2
-              0x61, 0x76, 0x63, 0x31, 0x6D, 0x70, 0x34, 0x31, // avc1 mp41
-              0x00, 0x00, 0x00, 0x08, 0x66, 0x72, 0x65, 0x65, // free
-            ];
-            final padding = List<int>.filled(1024 * 64, 0); // 64KB video container buffer
-            await exportFile.writeAsBytes([...headerBytes, ...padding], flush: true);
-          }
-
-          // Verify non-empty output file
-          if (!await exportFile.exists() || (await exportFile.length()) == 0) {
-            _isExporting = false;
-            _exportProgress = 0.0;
-            notifyListeners();
-            onFinished(false, null);
-            return;
-          }
-
-          // 3. Register to device media gallery via MediaStore platform channel
-          final gallerySaved = await DeviceMediaService.saveVideoToGallery(
-            filePath: exportFile.path,
-            fileName: exportFileName,
-          );
-
-          _exportProgress = 1.0;
-          _isExporting = false;
-          notifyListeners();
-
-          if (gallerySaved) {
-            TtsService.announce('Video export complete and saved to gallery');
-            onFinished(true, exportFile.path);
-          } else {
-            onFinished(false, exportFile.path);
-          }
-        } catch (e) {
-          _isExporting = false;
-          _exportProgress = 0.0;
-          notifyListeners();
-          onFinished(false, null);
-        }
+        onFinished(false, outputPath);
+        return false;
       }
-    });
-
-    return true;
+    } catch (e) {
+      debugPrint('[EditorViewModel] exportVideoToGallery failed: $e');
+      _isExporting = false;
+      _exportProgress = 0.0;
+      notifyListeners();
+      onFinished(false, null);
+      return false;
+    }
   }
 
   void startExportSimulation({required VoidCallback onComplete}) {

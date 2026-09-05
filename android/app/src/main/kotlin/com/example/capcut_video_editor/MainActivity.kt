@@ -46,6 +46,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
     private var pendingResult: MethodChannel.Result? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var tts: TextToSpeech? = null
+    private var filePickerChannel: MethodChannel? = null
 
     class VideoPlayerHolder(
         val player: MediaPlayer,
@@ -644,7 +645,9 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+        val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        filePickerChannel = channel
+        channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "requestPermissions" -> {
                     handleRequestPermissions(result)
@@ -668,6 +671,9 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     val path = call.argument<String>("path") ?: ""
                     val customName = call.argument<String>("outputName")
                     handleExtractAudioFromVideo(path, customName, result)
+                }
+                "renderAndExportVideo" -> {
+                    handleRenderAndExportVideo(call, result)
                 }
                 else -> {
                     result.notImplemented()
@@ -1052,6 +1058,93 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 } catch (_: Exception) {}
                 runOnUiThread {
                     result.error("EXTRACTION_ERROR", "Failed extracting audio: ${e.message}", null)
+                }
+            }
+        }.start()
+    }
+
+    private fun handleRenderAndExportVideo(call: MethodCall, result: MethodChannel.Result) {
+        val width = call.argument<Int>("width") ?: 1280
+        val height = call.argument<Int>("height") ?: 720
+        val fps = call.argument<Int>("fps") ?: 30
+        val bitrate = call.argument<Int>("bitrate") ?: 4_000_000
+        val customName = call.argument<String>("fileName")
+
+        val rawClips = call.argument<List<Map<String, Any>>>("clips") ?: emptyList()
+        val rawTransitions = call.argument<List<Map<String, Any>>>("transitions") ?: emptyList()
+        val rawAudio = call.argument<List<Map<String, Any>>>("audioTracks") ?: emptyList()
+
+        if (rawClips.isEmpty()) {
+            result.error("INVALID_ARGUMENTS", "No clips provided for export", null)
+            return
+        }
+
+        val clips = rawClips.map { map ->
+            ExportClip(
+                id = map["id"] as? String ?: "",
+                path = map["path"] as? String,
+                isPhoto = map["isPhoto"] as? Boolean ?: false,
+                color = (map["color"] as? Number)?.toInt() ?: 0xFF00C9FF.toInt(),
+                title = map["title"] as? String ?: "Clip",
+                originalDurationMs = (map["originalDurationMs"] as? Number)?.toLong() ?: 5000L,
+                trimStartMs = (map["trimStartMs"] as? Number)?.toLong() ?: 0L,
+                trimEndMs = (map["trimEndMs"] as? Number)?.toLong() ?: ((map["originalDurationMs"] as? Number)?.toLong() ?: 5000L),
+                speed = (map["speed"] as? Number)?.toDouble() ?: 1.0,
+                volume = (map["volume"] as? Number)?.toDouble() ?: 1.0,
+                rotationDegrees = (map["rotationDegrees"] as? Number)?.toInt() ?: 0,
+                flipHorizontal = map["flipHorizontal"] as? Boolean ?: false,
+                flipVertical = map["flipVertical"] as? Boolean ?: false
+            )
+        }
+
+        val transitions = rawTransitions.map { map ->
+            ExportTransition(
+                leftClipId = map["leftClipId"] as? String ?: "",
+                rightClipId = map["rightClipId"] as? String ?: "",
+                type = map["type"] as? String ?: "none",
+                durationMs = (map["durationMs"] as? Number)?.toLong() ?: 1000L,
+                enabled = map["enabled"] as? Boolean ?: true
+            )
+        }
+
+        val audioTracks = rawAudio.map { map ->
+            ExportAudioTrack(
+                path = map["path"] as? String ?: "",
+                startTimeMs = (map["startTimeMs"] as? Number)?.toLong() ?: 0L,
+                trimStartMs = (map["trimStartMs"] as? Number)?.toLong() ?: 0L,
+                trimEndMs = (map["trimEndMs"] as? Number)?.toLong() ?: 5000L,
+                volume = (map["volume"] as? Number)?.toDouble() ?: 1.0
+            )
+        }
+
+        Thread {
+            try {
+                val engine = VideoExportEngine(applicationContext)
+                val exportResult = engine.exportVideo(
+                    clips = clips,
+                    transitions = transitions,
+                    audioTracks = audioTracks,
+                    targetWidth = width,
+                    targetHeight = height,
+                    targetFps = fps,
+                    targetBitrate = bitrate,
+                    customOutputName = customName,
+                    progressCallback = object : VideoExportEngine.ProgressCallback {
+                        override fun onProgress(progress: Double) {
+                            runOnUiThread {
+                                filePickerChannel?.invokeMethod("exportProgressUpdate", mapOf("progress" to progress))
+                            }
+                        }
+                    }
+                )
+
+                runOnUiThread {
+                    result.success(exportResult)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Export error: ${e.message}", e)
+                runOnUiThread {
+                    result.error("EXPORT_ERROR", "Export failed: ${e.message}", null)
                 }
             }
         }.start()

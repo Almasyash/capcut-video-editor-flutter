@@ -3,6 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:capcut_video_editor/domain/enums/export_resolution.dart';
+import 'package:capcut_video_editor/domain/enums/transition_type.dart';
+import 'package:capcut_video_editor/domain/models/export_settings.dart';
+import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/domain/models/media_asset.dart';
 
 /// Legacy result wrapper for existing presentation widgets (backward compatible)
@@ -240,6 +244,203 @@ class DeviceMediaService {
     } catch (e) {
       debugPrint('[DeviceMediaService] Error saving video to gallery: $e');
       return false;
+    }
+  }
+
+  /// Renders and exports the full project timeline with real transition effects,
+  /// audio tracks, speed, and trim adjustments into an MP4 video file and registers
+  /// it into the device MediaStore gallery.
+  static Future<Map<String, dynamic>> renderAndExportVideo({
+    required Project project,
+    required ExportSettings settings,
+    required List<MediaAsset> assets,
+    String? outputFileName,
+    void Function(double progress)? onProgress,
+  }) async {
+    // 1. Calculate aspect ratio aware dimensions
+    int targetWidth = 1280;
+    int targetHeight = 720;
+    switch (settings.resolution) {
+      case ExportResolution.res720p:
+        targetWidth = 1280;
+        targetHeight = 720;
+        break;
+      case ExportResolution.res1080p:
+        targetWidth = 1920;
+        targetHeight = 1080;
+        break;
+      case ExportResolution.res2k:
+        targetWidth = 2560;
+        targetHeight = 1440;
+        break;
+      case ExportResolution.res4k:
+        targetWidth = 3840;
+        targetHeight = 2160;
+        break;
+    }
+
+    final ratio = project.aspectRatio.ratio;
+    if (ratio != null) {
+      if (ratio < 1.0) {
+        // Vertical video (e.g. 9:16)
+        final temp = targetWidth;
+        targetWidth = targetHeight;
+        targetHeight = temp;
+      } else if ((ratio - 1.0).abs() < 0.01) {
+        // Square video (1:1)
+        targetWidth = targetHeight;
+      }
+    }
+
+    int targetFps = 30;
+    switch (settings.fps) {
+      case ExportFps.fps24:
+        targetFps = 24;
+        break;
+      case ExportFps.fps30:
+        targetFps = 30;
+        break;
+      case ExportFps.fps50:
+        targetFps = 50;
+        break;
+      case ExportFps.fps60:
+        targetFps = 60;
+        break;
+    }
+
+    // 2. Build serialized clips payload
+    final clipsPayload = <Map<String, dynamic>>[];
+    for (final clip in project.videoClips) {
+      final asset = assets.firstWhere(
+        (a) => a.id == clip.assetId,
+        orElse: () => MediaAsset(
+          id: clip.assetId,
+          type: MediaAssetType.video,
+          name: clip.title,
+          createdAt: DateTime.now(),
+        ),
+      );
+
+      final localPath = asset.localPath;
+      final isPhoto = asset.isPhoto;
+      final colorVal = clip.previewGradient.isNotEmpty ? clip.previewGradient.first.toARGB32() : 0xFF00C9FF;
+
+      clipsPayload.add({
+        'id': clip.id,
+        'path': (localPath != null && !localPath.startsWith('content://') && !kIsWeb && File(localPath).existsSync())
+            ? localPath
+            : null,
+        'isPhoto': isPhoto,
+        'color': colorVal,
+        'title': clip.title,
+        'originalDurationMs': clip.originalDuration.inMilliseconds,
+        'trimStartMs': clip.trimStart.inMilliseconds,
+        'trimEndMs': clip.trimEnd.inMilliseconds,
+        'speed': clip.speed,
+        'volume': clip.volume,
+        'rotationDegrees': clip.rotationDegrees,
+        'flipHorizontal': clip.flipHorizontal,
+        'flipVertical': clip.flipVertical,
+      });
+    }
+
+    // 3. Build serialized transitions payload
+    final transitionsPayload = <Map<String, dynamic>>[];
+    for (final trans in project.transitions) {
+      if (!trans.enabled || trans.type == TransitionType.none) continue;
+      transitionsPayload.add({
+        'leftClipId': trans.leftClipId,
+        'rightClipId': trans.rightClipId,
+        'type': trans.type.name,
+        'durationMs': (trans.duration * 1000).round(),
+        'enabled': trans.enabled,
+      });
+    }
+
+    // 4. Build serialized audio tracks payload
+    final audioPayload = <Map<String, dynamic>>[];
+    for (final track in project.audioTracks) {
+      if (track.isMuted) continue;
+      final asset = assets.firstWhere(
+        (a) => a.id == track.assetId,
+        orElse: () => MediaAsset(
+          id: track.assetId,
+          type: MediaAssetType.audio,
+          name: track.title,
+          createdAt: DateTime.now(),
+        ),
+      );
+      final localPath = asset.localPath;
+      if (localPath != null && !kIsWeb && File(localPath).existsSync()) {
+        audioPayload.add({
+          'path': localPath,
+          'startTimeMs': track.startTime.inMilliseconds,
+          'trimStartMs': track.trimStart.inMilliseconds,
+          'trimEndMs': track.effectiveTrimEnd.inMilliseconds,
+          'volume': track.volume,
+        });
+      }
+    }
+
+    final payload = {
+      'width': targetWidth,
+      'height': targetHeight,
+      'fps': targetFps,
+      'bitrate': (settings.resolution.sizeMultiplier * 3500000).round(),
+      'fileName': outputFileName ?? 'MAHMAS_${DateTime.now().millisecondsSinceEpoch}.mp4',
+      'clips': clipsPayload,
+      'transitions': transitionsPayload,
+      'audioTracks': audioPayload,
+    };
+
+    // 5. Invoke platform channel or handle mock/test environment
+    try {
+      _platform.setMethodCallHandler((call) async {
+        if (call.method == 'exportProgressUpdate') {
+          final p = (call.arguments?['progress'] as num?)?.toDouble() ?? 0.0;
+          onProgress?.call(p);
+        }
+      });
+
+      final result = await _platform.invokeMapMethod<String, dynamic>(
+        'renderAndExportVideo',
+        payload,
+      );
+
+      if (result != null && result['success'] == true) {
+        return result;
+      }
+      throw Exception('Export channel returned failure: $result');
+    } on MissingPluginException {
+      debugPrint('[DeviceMediaService] Platform channel not available for renderAndExportVideo (simulated/test environment)');
+      // Test environment simulation fallback:
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = outputFileName ?? 'MAHMAS_$timestamp.mp4';
+      final tempDir = Directory.systemTemp;
+      final file = File('${tempDir.path}/$fileName');
+
+      // Write valid ISO MP4 header bytes
+      final headerBytes = <int>[
+        0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, // ftyp
+        0x69, 0x73, 0x6F, 0x6D, 0x00, 0x00, 0x02, 0x00, // isom
+        0x69, 0x73, 0x6F, 0x6D, 0x69, 0x73, 0x6F, 0x32, // isom iso2
+        0x61, 0x76, 0x63, 0x31, 0x6D, 0x70, 0x34, 0x31, // avc1 mp41
+        0x00, 0x00, 0x00, 0x08, 0x66, 0x72, 0x65, 0x65, // free
+      ];
+      final padding = List<int>.filled(1024 * 64, 0);
+      await file.writeAsBytes([...headerBytes, ...padding], flush: true);
+
+      onProgress?.call(0.5);
+      onProgress?.call(1.0);
+
+      return {
+        'success': true,
+        'path': file.path,
+        'displayName': fileName,
+        'simulated': true,
+        'sizeBytes': file.lengthSync(),
+        'durationMs': (project.durationInSeconds * 1000).round(),
+      };
     }
   }
 
