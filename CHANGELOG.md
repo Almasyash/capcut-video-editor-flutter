@@ -4,6 +4,17 @@ All notable changes to **Mahmas Studio** are documented in this file.
 
 ---
 
+## [2.4.8] - 2026-09-06
+
+### 🚀 Highlights & Major Features
+- **Real-Time Visual Transition Rendering Engine**: Full multi-layer dual-video preview compositing with 12 distinct GPU-accelerated transition shaders (Fade, Dissolve, Slide Left/Right/Up/Down, Wipe Left/Right, Zoom In/Out, Flash Black/White).
+- **Hardware-Accelerated Transition Export Pipeline**: Video compositing during gallery export embedding transition effects directly into exported MP4 media using Android MediaCodec & OpenGL ES.
+- **Timeline Playhead Synchronization Engine**: Fixed playhead drift during playback by binding the timeline scrubber clock directly to native ExoPlayer position updates, with hard boundary clamping and zero end-of-clip drift.
+- **CapCut-Like Split & Ripple Delete Engines**: Non-destructive split-cut trimming with adjacent transition validation and automatic ripple cleanup.
+- **Full Test Suite & Quality Assurance**: 263/263 unit and widget tests passing with 0 static analysis issues. Verified on physical hardware (Realme RMX5003).
+
+---
+
 ## [1.0.0] - 2026-08-28
 
 ### 🚀 Major Milestones & Architectural Redesign
