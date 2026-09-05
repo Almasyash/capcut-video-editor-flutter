@@ -1,0 +1,15 @@
+enum TransitionType {
+  none,
+  fade,
+  dissolve,
+  blackFade,
+  whiteFade,
+  slideLeft,
+  slideRight,
+  slideUp,
+  slideDown,
+  wipeLeft,
+  wipeRight,
+  zoomIn,
+  zoomOut,
+}

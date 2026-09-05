@@ -14,6 +14,9 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/tex
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/top_navigation_bar.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_preview_section.dart';
+import 'package:capcut_video_editor/domain/models/video_clip.dart';
+import 'package:capcut_video_editor/domain/models/project.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/transition_selection_sheet.dart';
 
 void main() {
   testWidgets('TopNavigationBar renders Editor FS branding', (WidgetTester tester) async {
@@ -173,5 +176,62 @@ void main() {
     expect(find.text('Epic Cinematic Intro'), findsNothing);
     expect(find.text('Deep House Sunset'), findsNothing);
     expect(find.text('Midnight Beats (Copyright Free)'), findsNothing);
+  });
+
+  testWidgets('TransitionSelectionSheet shows transition types and applies valid transition', (WidgetTester tester) async {
+    const clip1 = VideoClip(
+      id: 'clip1',
+      assetId: 'asset1',
+      title: 'Clip 1',
+      originalDuration: Duration(seconds: 10),
+      trimStart: Duration.zero,
+      trimEnd: Duration(seconds: 10),
+      previewGradient: [Colors.black, Colors.white],
+    );
+
+    const clip2 = VideoClip(
+      id: 'clip2',
+      assetId: 'asset2',
+      title: 'Clip 2',
+      originalDuration: Duration(seconds: 10),
+      trimStart: Duration.zero,
+      trimEnd: Duration(seconds: 10),
+      previewGradient: [Colors.black, Colors.white],
+    );
+
+    final project = Project(
+      id: 'test_proj',
+      name: 'Test',
+      videoClips: [clip1, clip2],
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+
+    final viewModel = EditorViewModel(initialProject: project);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TransitionSelectionSheet(
+            viewModel: viewModel,
+            leftClipId: 'clip1',
+            rightClipId: 'clip2',
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Transitions'), findsOneWidget);
+    expect(find.text('Fade'), findsOneWidget);
+    expect(find.text('Dissolve'), findsOneWidget);
+
+    // Tap the checkmark icon to apply the default fade transition
+    await tester.tap(find.byIcon(Icons.check_circle_rounded));
+    await tester.pumpAndSettle(const Duration(milliseconds: 500));
+
+    expect(viewModel.transitions.length, 1);
+    expect(viewModel.transitions.first.leftClipId, 'clip1');
+    expect(viewModel.transitions.first.rightClipId, 'clip2');
   });
 }

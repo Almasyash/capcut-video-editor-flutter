@@ -10,6 +10,7 @@ import 'package:capcut_video_editor/domain/models/sticker_item.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
+import 'package:capcut_video_editor/domain/models/transition.dart';
 
 /// Top-level immutable Project model for draft management and persistent storage
 class Project {
@@ -29,6 +30,7 @@ class Project {
   final ColorAdjustments colorAdjustments;
   final VideoEffect activeEffect;
   final Color canvasBackgroundColor;
+  final List<Transition> transitions;
   final double canvasBlurSigma;
   final double playheadPosition;
 
@@ -60,6 +62,7 @@ class Project {
       color: Colors.grey,
     ),
     this.canvasBackgroundColor = Colors.black,
+    this.transitions = const [],
     this.canvasBlurSigma = 0.0,
     this.playheadPosition = 0.0,
   });
@@ -105,13 +108,13 @@ class Project {
     ColorAdjustments? colorAdjustments,
     VideoEffect? activeEffect,
     Color? canvasBackgroundColor,
+    List<Transition>? transitions,
     double? canvasBlurSigma,
     double? playheadPosition,
   }) {
     final newAudioTracks = clearAudioTrack
         ? const <AudioTrack>[]
         : (audioTracks ?? (audioTrack != null ? [audioTrack] : this.audioTracks));
-
     return Project(
       id: id ?? this.id,
       name: name ?? this.name,
@@ -129,6 +132,7 @@ class Project {
       colorAdjustments: colorAdjustments ?? this.colorAdjustments,
       activeEffect: activeEffect ?? this.activeEffect,
       canvasBackgroundColor: canvasBackgroundColor ?? this.canvasBackgroundColor,
+      transitions: transitions ?? this.transitions,
       canvasBlurSigma: canvasBlurSigma ?? this.canvasBlurSigma,
       playheadPosition: playheadPosition ?? this.playheadPosition,
     );
@@ -153,6 +157,7 @@ class Project {
       'colorAdjustments': colorAdjustments.toJson(),
       'activeEffect': activeEffect.name,
       'canvasBackgroundColor': canvasBackgroundColor.toARGB32(),
+      'transitions': transitions.map((tr) => tr.toJson()).toList(),
       'canvasBlurSigma': canvasBlurSigma,
       'playheadPosition': playheadPosition,
     };
@@ -165,6 +170,7 @@ class Project {
       orElse: () => AspectRatioPreset.ratio9x16,
     );
 
+    // Resolve activeEffect
     final effectRaw = json['activeEffect'];
     final String effectName;
     if (effectRaw is String) {
@@ -181,15 +187,22 @@ class Project {
 
     final colorVal = json['canvasBackgroundColor'] as int?;
 
+    // Audio tracks handling
     List<AudioTrack> parsedAudioTracks = [];
     if (json['audioTracks'] is List) {
-      parsedAudioTracks = (json['audioTracks'] as List<dynamic>)
+      parsedAudioTracks = (json['audioTracks'] as List)
           .map((a) => AudioTrack.fromJson(a as Map<String, dynamic>))
           .toList();
     } else if (json['audioTrack'] is Map) {
-      parsedAudioTracks = [
-        AudioTrack.fromJson(json['audioTrack'] as Map<String, dynamic>)
-      ];
+      parsedAudioTracks = [AudioTrack.fromJson(json['audioTrack'] as Map<String, dynamic>)];
+    }
+
+    // Transitions handling
+    List<Transition> parsedTransitions = [];
+    if (json['transitions'] is List) {
+      parsedTransitions = (json['transitions'] as List)
+          .map((t) => Transition.fromJson(t as Map<String, dynamic>))
+          .toList();
     }
 
     return Project(
@@ -199,35 +212,17 @@ class Project {
       createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
       updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ?? DateTime.now(),
       aspectRatio: aspect,
-      videoClips: (json['videoClips'] as List<dynamic>?)
-              ?.map((c) => VideoClip.fromJson(c as Map<String, dynamic>))
-              .toList() ??
-          const [],
-      overlayClips: (json['overlayClips'] as List<dynamic>?)
-              ?.map((o) => OverlayClip.fromJson(o as Map<String, dynamic>))
-              .toList() ??
-          const [],
-      stickerOverlays: (json['stickerOverlays'] as List<dynamic>?)
-              ?.map((s) => StickerOverlay.fromJson(s as Map<String, dynamic>))
-              .toList() ??
-          const [],
-      textOverlays: (json['textOverlays'] as List<dynamic>?)
-              ?.map((t) => TextOverlay.fromJson(t as Map<String, dynamic>))
-              .toList() ??
-          const [],
+      videoClips: (json['videoClips'] as List?)?.map((c) => VideoClip.fromJson(c as Map<String, dynamic>)).toList() ?? const [],
+      overlayClips: (json['overlayClips'] as List?)?.map((o) => OverlayClip.fromJson(o as Map<String, dynamic>)).toList() ?? const [],
+      stickerOverlays: (json['stickerOverlays'] as List?)?.map((s) => StickerOverlay.fromJson(s as Map<String, dynamic>)).toList() ?? const [],
+      textOverlays: (json['textOverlays'] as List?)?.map((t) => TextOverlay.fromJson(t as Map<String, dynamic>)).toList() ?? const [],
       audioTracks: parsedAudioTracks,
-      mediaLibrary: (json['mediaLibrary'] as List<dynamic>?)
-              ?.map((m) => MediaAsset.fromJson(m as Map<String, dynamic>))
-              .toList() ??
-          const [],
-      activeFilter: json['activeFilter'] != null
-          ? EditorFilter.fromJson(json['activeFilter'] as Map<String, dynamic>)
-          : EditorFilter.presets.first,
-      colorAdjustments: json['colorAdjustments'] != null
-          ? ColorAdjustments.fromJson(json['colorAdjustments'] as Map<String, dynamic>)
-          : const ColorAdjustments(),
+      mediaLibrary: (json['mediaLibrary'] as List?)?.map((m) => MediaAsset.fromJson(m as Map<String, dynamic>)).toList() ?? const [],
+      activeFilter: json['activeFilter'] != null ? EditorFilter.fromJson(json['activeFilter'] as Map<String, dynamic>) : EditorFilter.presets.first,
+      colorAdjustments: json['colorAdjustments'] != null ? ColorAdjustments.fromJson(json['colorAdjustments'] as Map<String, dynamic>) : const ColorAdjustments(),
       activeEffect: effect,
       canvasBackgroundColor: colorVal != null ? Color(colorVal) : Colors.black,
+      transitions: parsedTransitions,
       canvasBlurSigma: (json['canvasBlurSigma'] as num?)?.toDouble() ?? 0.0,
       playheadPosition: (json['playheadPosition'] as num?)?.toDouble() ?? 0.0,
     );

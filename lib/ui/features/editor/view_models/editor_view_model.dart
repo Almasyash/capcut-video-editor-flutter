@@ -25,7 +25,16 @@ import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
 import 'package:capcut_video_editor/core/services/project_storage_service.dart';
 import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
+import 'package:capcut_video_editor/domain/models/transition.dart';
+import 'package:capcut_video_editor/domain/services/transition_validator.dart';
 
+/// Result returned from every transition mutation.
+class TransitionMutationResult {
+  final bool success;
+  final List<String> errors;
+
+  const TransitionMutationResult({required this.success, this.errors = const []});
+}
 /// State representation for undo/redo history
 class _EditorSnapshot {
   final List<VideoClip> clips;
@@ -33,6 +42,7 @@ class _EditorSnapshot {
   final List<StickerOverlay> stickerOverlays;
   final List<TextOverlay> textOverlays;
   final List<AudioTrack> audioTracks;
+  final List<Transition> transitions;
   final int? selectedIndex;
   final int? selectedOverlayIndex;
   final String? selectedAudioTrackId;
@@ -49,6 +59,7 @@ class _EditorSnapshot {
     required this.stickerOverlays,
     required this.textOverlays,
     required this.audioTracks,
+    required this.transitions,
     required this.selectedIndex,
     this.selectedOverlayIndex,
     this.selectedAudioTrackId,
@@ -151,6 +162,7 @@ class EditorViewModel extends ChangeNotifier {
   List<OverlayClip> get overlayClips => List.unmodifiable(_overlayClips);
   List<StickerOverlay> get stickerOverlays => List.unmodifiable(_stickerOverlays);
   List<AudioTrack> get audioTracks => List.unmodifiable(_audioTracks);
+  List<Transition> get transitions => List.unmodifiable(_currentProject.transitions);
   AudioTrack? get audioTrack => _audioTracks.isNotEmpty
       ? (_selectedAudioTrackId != null
           ? (_audioTracks.firstWhere((a) => a.id == _selectedAudioTrackId, orElse: () => _audioTracks.first))
@@ -380,6 +392,15 @@ class EditorViewModel extends ChangeNotifier {
     _isAudioSelected = false;
     _undoStack.clear();
     _redoStack.clear();
+
+    // Validate loaded transitions and drop invalid ones
+    final validator = TransitionValidator(_projectForValidation);
+    final validTransitions = _currentProject.transitions.where((t) => validator.validate(t).isEmpty).toList();
+    if (validTransitions.length != _currentProject.transitions.length) {
+      debugPrint('[WARNING] Loaded project has invalid transitions. They will be removed.');
+      _currentProject = _currentProject.copyWith(transitions: validTransitions);
+    }
+    
     notifyListeners();
   }
 
@@ -400,6 +421,10 @@ class EditorViewModel extends ChangeNotifier {
 
   /// Explicitly flushes and saves the active project state to disk
   Future<void> saveCurrentProject() async {
+    // Validate transitions before persistence so invalid transition data cannot be saved
+    final validator = TransitionValidator(_projectForValidation);
+    final validTransitions = _currentProject.transitions.where((t) => validator.validate(t).isEmpty).toList();
+
     _currentProject = _currentProject.copyWith(
       aspectRatio: _aspectRatio,
       videoClips: _videoClips,
@@ -416,6 +441,7 @@ class EditorViewModel extends ChangeNotifier {
       canvasBackgroundColor: _canvasBackgroundColor,
       canvasBlurSigma: _canvasBlurSigma,
       playheadPosition: _playheadPosition,
+      transitions: validTransitions,
       thumbnailPath: _videoClips.isNotEmpty
           ? getAssetById(_videoClips.first.assetId)?.thumbnailPath
           : null,
@@ -433,6 +459,7 @@ class EditorViewModel extends ChangeNotifier {
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
         audioTracks: List.from(_audioTracks),
+        transitions: List.from(_currentProject.transitions),
         selectedIndex: _selectedClipIndex,
         selectedOverlayIndex: _selectedOverlayIndex,
         selectedAudioTrackId: _selectedAudioTrackId,
@@ -460,6 +487,7 @@ class EditorViewModel extends ChangeNotifier {
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
         audioTracks: List.from(_audioTracks),
+        transitions: List.from(_currentProject.transitions),
         selectedIndex: _selectedClipIndex,
         selectedOverlayIndex: _selectedOverlayIndex,
         selectedAudioTrackId: _selectedAudioTrackId,
@@ -478,6 +506,7 @@ class EditorViewModel extends ChangeNotifier {
     _stickerOverlays = List.from(snapshot.stickerOverlays);
     _textOverlays = List.from(snapshot.textOverlays);
     _audioTracks = List.from(snapshot.audioTracks);
+    _currentProject = _currentProject.copyWith(transitions: List.from(snapshot.transitions));
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
@@ -505,6 +534,7 @@ class EditorViewModel extends ChangeNotifier {
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
         audioTracks: List.from(_audioTracks),
+        transitions: List.from(_currentProject.transitions),
         selectedIndex: _selectedClipIndex,
         selectedOverlayIndex: _selectedOverlayIndex,
         selectedAudioTrackId: _selectedAudioTrackId,
@@ -523,6 +553,7 @@ class EditorViewModel extends ChangeNotifier {
     _stickerOverlays = List.from(snapshot.stickerOverlays);
     _textOverlays = List.from(snapshot.textOverlays);
     _audioTracks = List.from(snapshot.audioTracks);
+    _currentProject = _currentProject.copyWith(transitions: List.from(snapshot.transitions));
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
@@ -926,6 +957,7 @@ class EditorViewModel extends ChangeNotifier {
     _videoClips.insert(targetIndex + 1, clipPartB);
 
     _selectedClipIndex = targetIndex + 1;
+    _cleanupInvalidTransitions();
     scheduleAutoSave();
     notifyListeners();
     return true;
@@ -948,6 +980,8 @@ class EditorViewModel extends ChangeNotifier {
     final newTrimStart = Duration(milliseconds: clip.trimStart.inMilliseconds + deltaMs);
 
     _videoClips[_selectedClipIndex!] = clip.copyWith(trimStart: newTrimStart);
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
     notifyListeners();
     return true;
   }
@@ -967,6 +1001,8 @@ class EditorViewModel extends ChangeNotifier {
     final newTrimEnd = Duration(milliseconds: clip.trimStart.inMilliseconds + offsetMs);
 
     _videoClips[_selectedClipIndex!] = clip.copyWith(trimEnd: newTrimEnd);
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
     notifyListeners();
     return true;
   }
@@ -982,6 +1018,8 @@ class EditorViewModel extends ChangeNotifier {
       trimStart: newTrimStart,
       trimEnd: newTrimEnd,
     );
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -1012,6 +1050,7 @@ class EditorViewModel extends ChangeNotifier {
       _syncAudioPlayback(forceSeek: true);
     }
 
+    _cleanupInvalidTransitions();
     scheduleAutoSave();
     notifyListeners();
     return true;
@@ -1063,6 +1102,7 @@ class EditorViewModel extends ChangeNotifier {
       _syncAudioPlayback(forceSeek: true);
     }
 
+    _cleanupInvalidTransitions();
     scheduleAutoSave();
     notifyListeners();
     return true;
@@ -1256,6 +1296,8 @@ class EditorViewModel extends ChangeNotifier {
     final clip = _videoClips.removeAt(oldIndex);
     _videoClips.insert(newIndex, clip);
     _selectedClipIndex = newIndex;
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -1419,6 +1461,8 @@ class EditorViewModel extends ChangeNotifier {
       previewGradient: gradient,
       previewIcon: icon,
     );
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -1442,6 +1486,7 @@ class EditorViewModel extends ChangeNotifier {
     final clampedSpeed = speed.clamp(0.25, 4.0);
     _videoClips[_selectedClipIndex!] = clip.copyWith(speed: clampedSpeed);
     _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    _cleanupInvalidTransitions();
     scheduleAutoSave();
     notifyListeners();
   }
@@ -2437,5 +2482,83 @@ class EditorViewModel extends ChangeNotifier {
     VideoPlaybackService.instance.disposeAll();
     saveCurrentProject();
     super.dispose();
+  }
+  // --- Transitions Management ---
+  
+  Project get _projectForValidation => _currentProject.copyWith(videoClips: _videoClips);
+
+  TransitionMutationResult addTransition(Transition transition) {
+    final candidateTransitions = [..._currentProject.transitions, transition];
+    final validator = TransitionValidator(_projectForValidation);
+    final errors = validator.validateAll(candidateTransitions);
+    if (errors.isNotEmpty) {
+      return TransitionMutationResult(success: false, errors: errors);
+    }
+    
+    _saveSnapshot();
+    _currentProject = _currentProject.copyWith(transitions: candidateTransitions);
+    scheduleAutoSave();
+    notifyListeners();
+    return const TransitionMutationResult(success: true);
+  }
+
+  TransitionMutationResult editTransition({required String id, required Transition newTransition}) {
+    final index = _currentProject.transitions.indexWhere((t) => t.id == id);
+    if (index == -1) {
+      return const TransitionMutationResult(success: false, errors: ['Transition not found']);
+    }
+    
+    final candidateTransitions = List<Transition>.from(_currentProject.transitions);
+    candidateTransitions[index] = newTransition;
+    
+    final validator = TransitionValidator(_projectForValidation);
+    final errors = validator.validateAll(candidateTransitions);
+    if (errors.isNotEmpty) {
+      return TransitionMutationResult(success: false, errors: errors);
+    }
+    
+    _saveSnapshot();
+    _currentProject = _currentProject.copyWith(transitions: candidateTransitions);
+    scheduleAutoSave();
+    notifyListeners();
+    return const TransitionMutationResult(success: true);
+  }
+
+  TransitionMutationResult replaceTransition({required String oldId, required Transition replacement}) {
+    return editTransition(id: oldId, newTransition: replacement);
+  }
+
+  TransitionMutationResult removeTransition(String id) {
+    final index = _currentProject.transitions.indexWhere((t) => t.id == id);
+    if (index == -1) {
+      return const TransitionMutationResult(success: false, errors: ['Transition not found']);
+    }
+    
+    _saveSnapshot();
+    final candidateTransitions = List<Transition>.from(_currentProject.transitions)..removeAt(index);
+    _currentProject = _currentProject.copyWith(transitions: candidateTransitions);
+    scheduleAutoSave();
+    notifyListeners();
+    return const TransitionMutationResult(success: true);
+  }
+
+  void _cleanupInvalidTransitions() {
+    final validator = TransitionValidator(_projectForValidation);
+    final List<Transition> validTransitions = [];
+    final currentList = _currentProject.transitions;
+    for (final t in currentList) {
+      final singleError = validator.validate(t);
+      if (singleError.isEmpty) {
+        validTransitions.add(t);
+      } else {
+        debugPrint('[CLEANUP] Transition ${t.id} invalidated by errors: $singleError');
+      }
+    }
+    
+    if (validTransitions.length != currentList.length) {
+      _currentProject = _currentProject.copyWith(transitions: validTransitions);
+      scheduleAutoSave();
+      notifyListeners();
+    }
   }
 }

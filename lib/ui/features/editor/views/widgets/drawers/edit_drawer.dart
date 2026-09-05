@@ -3,6 +3,8 @@ import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
+import 'package:capcut_video_editor/domain/models/transition.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/transition_selection_sheet.dart';
 
 class EditDrawer extends StatelessWidget {
   final EditorViewModel viewModel;
@@ -146,6 +148,14 @@ class EditDrawer extends StatelessWidget {
                     onTap: viewModel.toggleSelectedClipFreeze,
                     isActive: clip.isFrozen,
                   ),
+                  if (viewModel.selectedClipIndex != null &&
+                      viewModel.selectedClipIndex! < viewModel.videoClips.length - 1)
+                    _buildToolButton(
+                      icon: Icons.transform_rounded,
+                      label: 'Transition',
+                      onTap: () => _showTransitionModal(context),
+                      color: AppColors.primary,
+                    ),
                   _buildToolButton(
                     icon: Icons.delete_outline_rounded,
                     label: 'Delete',
@@ -382,6 +392,33 @@ class EditDrawer extends StatelessWidget {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => MediaPickerSheet(viewModel: viewModel, isReplacing: true),
+    );
+  }
+
+  void _showTransitionModal(BuildContext context) {
+    final idx = viewModel.selectedClipIndex;
+    if (idx == null || idx >= viewModel.videoClips.length - 1) return;
+
+    final leftClip = viewModel.videoClips[idx];
+    final rightClip = viewModel.videoClips[idx + 1];
+
+    Transition? existing;
+    try {
+      existing = viewModel.transitions.firstWhere(
+        (t) => t.leftClipId == leftClip.id && t.rightClipId == rightClip.id,
+      );
+    } catch (_) {}
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => TransitionSelectionSheet(
+        viewModel: viewModel,
+        leftClipId: leftClip.id,
+        rightClipId: rightClip.id,
+        existingTransition: existing,
+      ),
     );
   }
 }

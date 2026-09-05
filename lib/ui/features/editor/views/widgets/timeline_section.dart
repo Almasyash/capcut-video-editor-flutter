@@ -8,8 +8,10 @@ import 'package:capcut_video_editor/domain/enums/tool_action_type.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'audio_track_item.dart';
 import 'media_picker_sheet.dart';
+import 'package:capcut_video_editor/domain/models/transition.dart';
 import 'timeline_clip_item.dart';
 import 'timeline_ruler.dart';
+import 'transition_selection_sheet.dart';
 
 /// CapCut-style Multi-Layer Interactive Timeline with universal vertical layer scrolling,
 /// pinned horizontal ruler, dynamic multi-layer rows, auto-scroll to newly created layers,
@@ -421,7 +423,7 @@ class _TimelineSectionState extends State<TimelineSection> {
             final isSelected = viewModel.selectedClipIndex == idx;
 
             final asset = viewModel.getAssetById(clip.assetId);
-            return TimelineClipItem(
+            final clipWidget = TimelineClipItem(
               key: ValueKey(clip.id),
               clip: clip,
               localPath: asset?.localPath,
@@ -435,6 +437,73 @@ class _TimelineSectionState extends State<TimelineSection> {
                 viewModel.updateClipTrim(idx, newStart, newEnd);
               },
             );
+
+            if (idx < viewModel.videoClips.length - 1) {
+              final nextClip = viewModel.videoClips[idx + 1];
+              Transition? existingTransition;
+              try {
+                existingTransition = viewModel.transitions.firstWhere(
+                  (t) => t.leftClipId == clip.id && t.rightClipId == nextClip.id,
+                );
+              } catch (_) {}
+
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  clipWidget,
+                  GestureDetector(
+                    onTap: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (ctx) => TransitionSelectionSheet(
+                          viewModel: viewModel,
+                          leftClipId: clip.id,
+                          rightClipId: nextClip.id,
+                          existingTransition: existingTransition,
+                        ),
+                      );
+                    },
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        color: existingTransition != null
+                            ? AppColors.primary
+                            : AppColors.surfaceLight,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: existingTransition != null
+                              ? Colors.white
+                              : AppColors.divider,
+                          width: 1.2,
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black45,
+                            blurRadius: 3,
+                            offset: Offset(0, 1),
+                          )
+                        ],
+                      ),
+                      child: Icon(
+                        existingTransition != null
+                            ? Icons.transform_rounded
+                            : Icons.hourglass_empty_rounded,
+                        size: 13,
+                        color: existingTransition != null
+                            ? Colors.black
+                            : AppColors.textMuted,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }
+
+            return clipWidget;
           }),
 
           // + Add Clip Button on Timeline
