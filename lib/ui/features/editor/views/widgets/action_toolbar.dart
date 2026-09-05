@@ -145,6 +145,21 @@ class ActionToolbar extends StatelessWidget {
                   },
                 ),
 
+                // Extract Audio (Appears exclusively for selected Video Clips)
+                if (hasSelectedClip)
+                  _buildActionButton(
+                    context: context,
+                    icon: viewModel.isExtractingAudio ? Icons.hourglass_top_rounded : Icons.audiotrack_rounded,
+                    label: viewModel.isExtractingAudio ? 'Extracting...' : 'Extract Audio',
+                    isAccent: true,
+                    enabled: !viewModel.isExtractingAudio,
+                    onTap: () {
+                      viewModel.extractAudioFromSelectedClip(
+                        onFeedback: (msg) => _showFeedback(context, msg),
+                      );
+                    },
+                  ),
+
                 // Duplicate Action
                 _buildActionButton(
                   context: context,

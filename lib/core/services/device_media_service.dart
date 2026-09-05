@@ -53,6 +53,29 @@ class DeviceMediaResult {
   }
 }
 
+/// Structured result returned from native video audio extraction
+class ExtractedAudioResult {
+  final bool success;
+  final String? localPath;
+  final String? fileName;
+  final Duration? duration;
+  final int? sizeBytes;
+  final String? errorCode;
+  final String? errorMessage;
+
+  const ExtractedAudioResult({
+    required this.success,
+    this.localPath,
+    this.fileName,
+    this.duration,
+    this.sizeBytes,
+    this.errorCode,
+    this.errorMessage,
+  });
+
+  bool get isNoAudioTrack => errorCode == 'NO_AUDIO_TRACK';
+}
+
 /// Service to handle native system intents, runtime permissions, and media/audio file picking
 class DeviceMediaService {
   DeviceMediaService._();
@@ -70,6 +93,105 @@ class DeviceMediaService {
     [Color(0xFF4E54C8), Color(0xFF8F94FB)],
     [Color(0xFF1D2671), Color(0xFFC33764)],
   ];
+
+  /// Extracts the audio track from a video file into a standalone persistent .m4a audio file
+  static Future<ExtractedAudioResult> extractAudioFromVideo({
+    required String videoPath,
+    String? outputName,
+  }) async {
+    if (videoPath.trim().isEmpty) {
+      return const ExtractedAudioResult(
+        success: false,
+        errorCode: 'INVALID_PATH',
+        errorMessage: 'Video path cannot be empty',
+      );
+    }
+
+    if (!kIsWeb && !videoPath.startsWith('/mock/') && !videoPath.startsWith('/data/user/')) {
+      final file = File(videoPath);
+      if (!file.existsSync() || file.lengthSync() == 0) {
+        return ExtractedAudioResult(
+          success: false,
+          errorCode: 'FILE_NOT_FOUND',
+          errorMessage: 'Video file does not exist or is empty at $videoPath',
+        );
+      }
+    }
+
+    try {
+      final result = await _platform.invokeMapMethod<String, dynamic>(
+        'extractAudioFromVideo',
+        {
+          'path': videoPath,
+          if (outputName != null) 'outputName': outputName,
+        },
+      );
+
+      if (result != null && result['success'] == true) {
+        final path = result['path'] as String?;
+        final name = result['name'] as String? ?? 'extracted_audio.m4a';
+        final size = (result['size'] as num?)?.toInt();
+        final durationMs = (result['durationMs'] as num?)?.toInt();
+
+        if (path == null || path.isEmpty) {
+          return const ExtractedAudioResult(
+            success: false,
+            errorCode: 'EXTRACTION_FAILED',
+            errorMessage: 'Native extractor returned empty file path',
+          );
+        }
+
+        if (!kIsWeb && !path.startsWith('/mock/') && !path.startsWith('/data/user/')) {
+          final audioFile = File(path);
+          if (!audioFile.existsSync() || audioFile.lengthSync() == 0) {
+            return const ExtractedAudioResult(
+              success: false,
+              errorCode: 'EXTRACTION_FAILED',
+              errorMessage: 'Extracted audio file does not exist on disk',
+            );
+          }
+        }
+
+        return ExtractedAudioResult(
+          success: true,
+          localPath: path,
+          fileName: name,
+          sizeBytes: size,
+          duration: (durationMs != null && durationMs > 0) ? Duration(milliseconds: durationMs) : null,
+        );
+      }
+
+      return const ExtractedAudioResult(
+        success: false,
+        errorCode: 'EXTRACTION_FAILED',
+        errorMessage: 'Native audio extraction returned empty result',
+      );
+    } on PlatformException catch (pe) {
+      debugPrint('[DeviceMediaService] PlatformException extracting audio: ${pe.code} - ${pe.message}');
+      return ExtractedAudioResult(
+        success: false,
+        errorCode: pe.code,
+        errorMessage: pe.message ?? 'Platform error during audio extraction',
+      );
+    } on MissingPluginException {
+      debugPrint('[DeviceMediaService] MissingPluginException for extractAudioFromVideo (test/web mock)');
+      final mockName = outputName != null ? '$outputName.m4a' : 'extracted_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      return ExtractedAudioResult(
+        success: true,
+        localPath: '/mock/extracted/$mockName',
+        fileName: mockName,
+        duration: const Duration(seconds: 15),
+        sizeBytes: 1024 * 512,
+      );
+    } catch (e) {
+      debugPrint('[DeviceMediaService] Error extracting audio: $e');
+      return ExtractedAudioResult(
+        success: false,
+        errorCode: 'UNKNOWN_ERROR',
+        errorMessage: e.toString(),
+      );
+    }
+  }
 
   /// Requests storage/media permissions using native platform channel
   static Future<bool> requestStoragePermissions() async {

@@ -7,7 +7,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.media.AudioAttributes
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
+import android.media.MediaMuxer
 import android.media.MediaPlayer
 import android.media.MediaScannerConnection
 import android.net.Uri
@@ -28,6 +32,7 @@ import io.flutter.view.TextureRegistry
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.nio.ByteBuffer
 import java.util.Locale
 
 class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
@@ -306,6 +311,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         try {
                             android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_PAUSED (video textureId=$textureId)")
                             holder.pendingPlay = false
+                            holder.pendingSeekMs = null
                             if (holder.player.isPlaying) {
                                 holder.player.pause()
                             }
@@ -552,6 +558,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     try {
                         android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_PAUSED (audio)")
                         audioHolder.pendingPlay = false
+                        audioHolder.pendingSeekMs = null
                         if (audioHolder.player?.isPlaying == true) {
                             audioHolder.player?.pause()
                         }
@@ -656,6 +663,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     val path = call.argument<String>("path") ?: ""
                     val customName = call.argument<String>("fileName")
                     handleSaveVideoToGallery(path, customName, result)
+                }
+                "extractAudioFromVideo" -> {
+                    val path = call.argument<String>("path") ?: ""
+                    val customName = call.argument<String>("outputName")
+                    handleExtractAudioFromVideo(path, customName, result)
                 }
                 else -> {
                     result.notImplemented()
@@ -916,5 +928,132 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {
             result.error("GALLERY_EXPORT_ERROR", "Failed saving video to media gallery: ${e.message}", null)
         }
+    }
+
+    private fun handleExtractAudioFromVideo(videoPath: String, customName: String?, result: MethodChannel.Result) {
+        if (videoPath.isBlank()) {
+            result.error("INVALID_PATH", "Video file path cannot be empty", null)
+            return
+        }
+
+        val videoFile = File(videoPath)
+        if (!videoFile.exists() || videoFile.length() == 0L) {
+            result.error("FILE_NOT_FOUND", "Video file does not exist or is empty at $videoPath", null)
+            return
+        }
+
+        Thread {
+            val extractor = MediaExtractor()
+            try {
+                extractor.setDataSource(videoFile.absolutePath)
+                val trackCount = extractor.trackCount
+                var audioTrackIndex = -1
+                var audioFormat: MediaFormat? = null
+
+                for (i in 0 until trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("audio/")) {
+                        audioTrackIndex = i
+                        audioFormat = format
+                        break
+                    }
+                }
+
+                if (audioTrackIndex == -1 || audioFormat == null) {
+                    extractor.release()
+                    runOnUiThread {
+                        result.error("NO_AUDIO_TRACK", "This video has no audio track to extract.", null)
+                    }
+                    return@Thread
+                }
+
+                val outputDir = File(filesDir, "extracted_audio").apply { if (!exists()) mkdirs() }
+                val sanitizedName = if (!customName.isNullOrBlank()) {
+                    val clean = customName.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+                    if (clean.endsWith(".m4a")) clean else "$clean.m4a"
+                } else {
+                    "extracted_${System.currentTimeMillis()}.m4a"
+                }
+                val outputFile = File(outputDir, sanitizedName)
+                if (outputFile.exists()) {
+                    outputFile.delete()
+                }
+
+                val muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                extractor.selectTrack(audioTrackIndex)
+                val muxerTrackIndex = muxer.addTrack(audioFormat)
+                muxer.start()
+
+                val maxBufferSize = if (audioFormat.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                    audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                } else {
+                    256 * 1024
+                }
+                val buffer = ByteBuffer.allocate(maxBufferSize)
+                val bufferInfo = MediaCodec.BufferInfo()
+
+                while (true) {
+                    bufferInfo.offset = 0
+                    bufferInfo.size = extractor.readSampleData(buffer, 0)
+                    if (bufferInfo.size < 0) {
+                        bufferInfo.size = 0
+                        break
+                    }
+                    bufferInfo.presentationTimeUs = extractor.sampleTime
+                    bufferInfo.flags = extractor.sampleFlags
+                    muxer.writeSampleData(muxerTrackIndex, buffer, bufferInfo)
+                    extractor.advance()
+                }
+
+                try {
+                    muxer.stop()
+                } catch (stopEx: Exception) {
+                    android.util.Log.w("AudioExtraction", "Muxer stop warning: ${stopEx.message}")
+                }
+                muxer.release()
+                extractor.release()
+
+                if (!outputFile.exists() || outputFile.length() == 0L) {
+                    runOnUiThread {
+                        result.error("EXTRACTION_FAILED", "Extracted audio output file was empty or not created", null)
+                    }
+                    return@Thread
+                }
+
+                var durationMs: Long = 0L
+                if (audioFormat.containsKey(MediaFormat.KEY_DURATION)) {
+                    durationMs = audioFormat.getLong(MediaFormat.KEY_DURATION) / 1000L
+                }
+                if (durationMs <= 0L) {
+                    try {
+                        val retriever = MediaMetadataRetriever()
+                        retriever.setDataSource(outputFile.absolutePath)
+                        val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        durationMs = durStr?.toLongOrNull() ?: 0L
+                        retriever.release()
+                    } catch (e: Exception) {}
+                }
+
+                val responseMap = mapOf(
+                    "success" to true,
+                    "path" to outputFile.absolutePath,
+                    "name" to outputFile.name,
+                    "size" to outputFile.length(),
+                    "durationMs" to durationMs
+                )
+
+                runOnUiThread {
+                    result.success(responseMap)
+                }
+            } catch (e: Exception) {
+                try {
+                    extractor.release()
+                } catch (_: Exception) {}
+                runOnUiThread {
+                    result.error("EXTRACTION_ERROR", "Failed extracting audio: ${e.message}", null)
+                }
+            }
+        }.start()
     }
 }

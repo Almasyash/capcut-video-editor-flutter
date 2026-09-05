@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/core/services/asset_storage_service.dart';
@@ -117,6 +118,9 @@ class EditorViewModel extends ChangeNotifier {
   double _exportProgress = 0.0;
   Timer? _exportTimer;
 
+  // Audio Extraction State
+  bool _isExtractingAudio = false;
+
   // --- Getters ---
 
   List<MediaAsset> get mediaLibrary => List.unmodifiable(_mediaLibrary);
@@ -171,6 +175,7 @@ class EditorViewModel extends ChangeNotifier {
 
   bool get isExporting => _isExporting;
   double get exportProgress => _exportProgress;
+  bool get isExtractingAudio => _isExtractingAudio;
 
   /// Centralized TTS accessibility state
   bool get isTtsEnabled => TtsService.isEnabled;
@@ -553,8 +558,10 @@ class EditorViewModel extends ChangeNotifier {
     _isPlaying = false;
     _playbackTimer?.cancel();
     _playbackTimer = null;
-    if (AudioPlaybackService.instance.isPlaying) {
-      AudioPlaybackService.instance.pause();
+    AudioPlaybackService.instance.pause();
+    final activeSession = VideoPlaybackService.instance.activeSession;
+    if (activeSession != null && activeSession.isPlaying) {
+      VideoPlaybackService.instance.pause(activeSession.textureId);
     }
     notifyListeners();
   }
@@ -615,7 +622,7 @@ class EditorViewModel extends ChangeNotifier {
       AudioPlaybackService.instance.initialize(localPath).then((_) {
         AudioPlaybackService.instance.setVolume(effectiveVolume);
         AudioPlaybackService.instance.setSpeed(activeTrack!.speed);
-        if (_isPlaying) {
+        if (_isPlaying && _playheadPosition < totalDurationInSeconds) {
           AudioPlaybackService.instance.play(position: Duration(milliseconds: sourceOffsetMs));
         } else {
           AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
@@ -633,7 +640,7 @@ class EditorViewModel extends ChangeNotifier {
       AudioPlaybackService.instance.seekTo(Duration(milliseconds: sourceOffsetMs));
     }
 
-    if (_isPlaying) {
+    if (_isPlaying && _playheadPosition < totalDurationInSeconds) {
       if (isStartingPlay || !AudioPlaybackService.instance.isPlaying) {
         AudioPlaybackService.instance.play(position: Duration(milliseconds: sourceOffsetMs));
       }
@@ -1328,6 +1335,108 @@ class EditorViewModel extends ChangeNotifier {
     addAudioTrack(track);
     debugPrint('[AssetLibrary] Inserted audio track ${track.title} at ${track.startTimeInSeconds}s (path: $localPath)');
     return track;
+  }
+
+  /// Extracts the audio stream from the currently selected VideoClip into an independent AudioTrack
+  Future<AudioTrack?> extractAudioFromSelectedClip({void Function(String message)? onFeedback}) async {
+    if (_isExtractingAudio) return null;
+    if (_selectedClipIndex == null || selectedClip == null) {
+      onFeedback?.call('Select a video clip to extract audio');
+      return null;
+    }
+
+    final videoClip = selectedClip!;
+    final videoAsset = getAssetById(videoClip.assetId);
+    final localPath = videoAsset?.localPath;
+
+    if (localPath == null || localPath.isEmpty) {
+      onFeedback?.call('Unable to extract audio: Video file path is missing.');
+      return null;
+    }
+
+    if (!kIsWeb && !localPath.startsWith('/mock/') && !localPath.startsWith('/data/user/')) {
+      final file = File(localPath);
+      if (!file.existsSync()) {
+        onFeedback?.call('Video file not found or inaccessible on device storage.');
+        return null;
+      }
+    }
+
+    _isExtractingAudio = true;
+    notifyListeners();
+
+    try {
+      final sanitizedTitle = videoClip.title.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      final extractionResult = await DeviceMediaService.extractAudioFromVideo(
+        videoPath: localPath,
+        outputName: '${sanitizedTitle}_audio',
+      );
+
+      if (!extractionResult.success) {
+        _isExtractingAudio = false;
+        notifyListeners();
+        if (extractionResult.isNoAudioTrack) {
+          onFeedback?.call('This video has no audio track to extract.');
+          TtsService.announce('This video has no audio track to extract.');
+        } else {
+          onFeedback?.call(extractionResult.errorMessage ?? 'Audio extraction failed.');
+        }
+        return null;
+      }
+
+      // Create and register new independent MediaAsset
+      final newAssetId = 'asset_audio_extracted_${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(9999)}';
+      final audioDisplayName = '${videoClip.title} - Extracted Audio';
+      final extractedAsset = MediaAsset(
+        id: newAssetId,
+        type: MediaAssetType.audio,
+        name: audioDisplayName,
+        localPath: extractionResult.localPath,
+        duration: extractionResult.duration ?? videoClip.originalDuration,
+        sizeBytes: extractionResult.sizeBytes,
+        createdAt: DateTime.now(),
+      );
+
+      addMediaAsset(extractedAsset);
+
+      // Compute global timeline start position of the selected video clip
+      final clipStartSec = getClipStartTime(_selectedClipIndex!);
+      final clipStartTime = Duration(milliseconds: (clipStartSec * 1000).round());
+
+      // Generate waveform
+      final random = math.Random(newAssetId.hashCode);
+      final waveform = List.generate(40, (_) => 0.2 + random.nextDouble() * 0.8);
+
+      final newTrack = AudioTrack(
+        id: 'audio_extracted_${DateTime.now().millisecondsSinceEpoch}',
+        assetId: newAssetId,
+        name: audioDisplayName,
+        artist: 'Extracted Audio',
+        startTime: clipStartTime,
+        duration: extractedAsset.duration ?? videoClip.originalDuration,
+        trimStart: videoClip.trimStart,
+        trimEnd: videoClip.trimEnd,
+        volume: videoClip.volume > 0 ? videoClip.volume : 0.85,
+        speed: videoClip.speed,
+        waveformPoints: waveform,
+      );
+
+      // Mute source video clip so that only the extracted audio track plays (prevents dual-playback)
+      _videoClips[_selectedClipIndex!] = videoClip.copyWith(volume: 0.0);
+
+      addAudioTrack(newTrack);
+      _isExtractingAudio = false;
+      scheduleAutoSave();
+      onFeedback?.call('Audio extracted successfully.');
+      TtsService.announce('Audio extracted successfully');
+      notifyListeners();
+      return newTrack;
+    } catch (e) {
+      _isExtractingAudio = false;
+      notifyListeners();
+      onFeedback?.call('Audio extraction failed: $e');
+      return null;
+    }
   }
 
   void removeAudioTrack([String? id]) {

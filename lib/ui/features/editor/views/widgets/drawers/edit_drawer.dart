@@ -83,6 +83,21 @@ class EditDrawer extends StatelessWidget {
                     color: AppColors.primary,
                   ),
                   _buildToolButton(
+                    icon: viewModel.isExtractingAudio ? Icons.hourglass_top_rounded : Icons.audiotrack_rounded,
+                    label: viewModel.isExtractingAudio ? 'Extracting...' : 'Extract Audio',
+                    onTap: () => viewModel.extractAudioFromSelectedClip(
+                      onFeedback: (msg) => ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(msg),
+                          duration: const Duration(seconds: 2),
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: AppColors.surfaceElevated,
+                        ),
+                      ),
+                    ),
+                    color: AppColors.secondary,
+                  ),
+                  _buildToolButton(
                     icon: Icons.speed_rounded,
                     label: 'Speed (${clip.speed}x)',
                     onTap: () => _showSpeedDialog(context),
