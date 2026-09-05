@@ -152,6 +152,12 @@ class EditDrawer extends StatelessWidget {
                     onTap: viewModel.deleteSelectedClip,
                     color: AppColors.error,
                   ),
+                  _buildToolButton(
+                    icon: Icons.playlist_remove_rounded,
+                    label: 'Ripple Delete',
+                    onTap: viewModel.rippleDeleteSelectedClip,
+                    color: AppColors.error,
+                  ),
                 ],
               ),
             ),

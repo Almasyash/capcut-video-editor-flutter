@@ -265,11 +265,15 @@ class ActionToolbar extends StatelessWidget {
                   onTap: () => _showVolumeDialog(context),
                 ),
 
-                // Delete Action
+                // Delete Action (Context-Aware Normal Delete)
                 _buildActionButton(
                   context: context,
                   icon: Icons.delete_outline_rounded,
-                  label: 'Delete',
+                  label: hasSelectedText
+                      ? 'Delete Text'
+                      : (hasSelectedAudio
+                          ? 'Delete Audio'
+                          : (hasSelectedOverlay ? 'Delete Overlay' : 'Delete')),
                   enabled: hasAnySelection,
                   onTap: () {
                     if (hasSelectedText) {
@@ -287,6 +291,23 @@ class ActionToolbar extends StatelessWidget {
                     }
                   },
                 ),
+
+                // Ripple Delete Action (Main Video Track Gap Closure)
+                if (hasSelectedClip || viewModel.videoClips.isNotEmpty)
+                  _buildActionButton(
+                    context: context,
+                    icon: Icons.playlist_remove_rounded,
+                    label: 'Ripple Delete',
+                    enabled: hasSelectedClip && viewModel.videoClips.isNotEmpty,
+                    onTap: () {
+                      final success = viewModel.rippleDeleteSelectedClip();
+                      if (success) {
+                        _showFeedback(context, '✂️ Ripple deleted clip (gap closed)');
+                      } else {
+                        _showFeedback(context, 'Select a video clip to ripple delete');
+                      }
+                    },
+                  ),
 
                 // Export Button
                 _buildActionButton(

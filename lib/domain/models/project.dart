@@ -165,9 +165,17 @@ class Project {
       orElse: () => AspectRatioPreset.ratio9x16,
     );
 
-    final effectName = json['activeEffect'] as String? ?? 'none';
+    final effectRaw = json['activeEffect'];
+    final String effectName;
+    if (effectRaw is String) {
+      effectName = effectRaw;
+    } else if (effectRaw is Map) {
+      effectName = effectRaw['name'] as String? ?? effectRaw['type'] as String? ?? 'none';
+    } else {
+      effectName = 'none';
+    }
     final effect = VideoEffect.presets.firstWhere(
-      (e) => e.name.toLowerCase() == effectName.toLowerCase() || e.type.name == effectName,
+      (e) => e.name.toLowerCase() == effectName.toLowerCase() || e.type.name.toLowerCase() == effectName.toLowerCase(),
       orElse: () => VideoEffect.presets.first,
     );
 

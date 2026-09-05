@@ -34,8 +34,10 @@ class _EditorSnapshot {
   final List<TextOverlay> textOverlays;
   final List<AudioTrack> audioTracks;
   final int? selectedIndex;
+  final int? selectedOverlayIndex;
   final String? selectedAudioTrackId;
   final String? selectedTextId;
+  final String? selectedStickerId;
   final double playheadPosition;
   final EditorFilter activeFilter;
   final ColorAdjustments colorAdjustments;
@@ -48,8 +50,10 @@ class _EditorSnapshot {
     required this.textOverlays,
     required this.audioTracks,
     required this.selectedIndex,
+    this.selectedOverlayIndex,
     this.selectedAudioTrackId,
     this.selectedTextId,
+    this.selectedStickerId,
     required this.playheadPosition,
     required this.activeFilter,
     required this.colorAdjustments,
@@ -430,8 +434,10 @@ class EditorViewModel extends ChangeNotifier {
         textOverlays: List.from(_textOverlays),
         audioTracks: List.from(_audioTracks),
         selectedIndex: _selectedClipIndex,
+        selectedOverlayIndex: _selectedOverlayIndex,
         selectedAudioTrackId: _selectedAudioTrackId,
         selectedTextId: _selectedTextId,
+        selectedStickerId: _selectedStickerId,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
         colorAdjustments: _colorAdjustments,
@@ -455,8 +461,10 @@ class EditorViewModel extends ChangeNotifier {
         textOverlays: List.from(_textOverlays),
         audioTracks: List.from(_audioTracks),
         selectedIndex: _selectedClipIndex,
+        selectedOverlayIndex: _selectedOverlayIndex,
         selectedAudioTrackId: _selectedAudioTrackId,
         selectedTextId: _selectedTextId,
+        selectedStickerId: _selectedStickerId,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
         colorAdjustments: _colorAdjustments,
@@ -473,9 +481,13 @@ class EditorViewModel extends ChangeNotifier {
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
+    _selectedOverlayIndex = (snapshot.selectedOverlayIndex != null && snapshot.selectedOverlayIndex! < _overlayClips.length)
+        ? snapshot.selectedOverlayIndex
+        : null;
     _selectedAudioTrackId = snapshot.selectedAudioTrackId;
     _isAudioSelected = _selectedAudioTrackId != null;
     _selectedTextId = snapshot.selectedTextId;
+    _selectedStickerId = snapshot.selectedStickerId;
     _playheadPosition = snapshot.playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
     _activeFilter = snapshot.activeFilter;
     _colorAdjustments = snapshot.colorAdjustments;
@@ -494,8 +506,10 @@ class EditorViewModel extends ChangeNotifier {
         textOverlays: List.from(_textOverlays),
         audioTracks: List.from(_audioTracks),
         selectedIndex: _selectedClipIndex,
+        selectedOverlayIndex: _selectedOverlayIndex,
         selectedAudioTrackId: _selectedAudioTrackId,
         selectedTextId: _selectedTextId,
+        selectedStickerId: _selectedStickerId,
         playheadPosition: _playheadPosition,
         activeFilter: _activeFilter,
         colorAdjustments: _colorAdjustments,
@@ -512,9 +526,13 @@ class EditorViewModel extends ChangeNotifier {
     _selectedClipIndex = (snapshot.selectedIndex != null && snapshot.selectedIndex! < _videoClips.length)
         ? snapshot.selectedIndex
         : (_videoClips.isNotEmpty ? 0 : null);
+    _selectedOverlayIndex = (snapshot.selectedOverlayIndex != null && snapshot.selectedOverlayIndex! < _overlayClips.length)
+        ? snapshot.selectedOverlayIndex
+        : null;
     _selectedAudioTrackId = snapshot.selectedAudioTrackId;
     _isAudioSelected = _selectedAudioTrackId != null;
     _selectedTextId = snapshot.selectedTextId;
+    _selectedStickerId = snapshot.selectedStickerId;
     _playheadPosition = snapshot.playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
     _activeFilter = snapshot.activeFilter;
     _colorAdjustments = snapshot.colorAdjustments;
@@ -967,21 +985,87 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Clip Operations: DELETE, DUPLICATE (Track & Layer), ADD ---
+  // --- Clip Operations: DELETE, RIPPLE DELETE, DUPLICATE (Track & Layer), ADD ---
 
-  void deleteSelectedClip() {
-    if (_selectedClipIndex == null || _videoClips.isEmpty) return;
+  /// Normal Delete of a main video clip
+  bool deleteSelectedClip({int? index}) {
+    if (_videoClips.isEmpty) return false;
+    final targetIndex = index ?? _selectedClipIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _videoClips.length) {
+      return false;
+    }
+
     _saveSnapshot();
 
-    _videoClips.removeAt(_selectedClipIndex!);
+    _videoClips.removeAt(targetIndex);
     if (_videoClips.isEmpty) {
       _selectedClipIndex = null;
       _playheadPosition = 0.0;
     } else {
-      _selectedClipIndex = math.min(_selectedClipIndex!, _videoClips.length - 1);
+      _selectedClipIndex = math.min(targetIndex, _videoClips.length - 1);
       _playheadPosition = _playheadPosition.clamp(0.0, totalDurationInSeconds);
     }
+
+    if (_videoClips.isEmpty && _audioTracks.isEmpty) {
+      pause();
+    } else {
+      _syncAudioPlayback(forceSeek: true);
+    }
+
+    scheduleAutoSave();
     notifyListeners();
+    return true;
+  }
+
+  /// CapCut-style Ripple Delete of a main video clip:
+  /// Closes the gap by shifting subsequent main-track video clips backward by the deleted clip's duration.
+  /// Preserves other track timings, repositions playhead predictably, selects the replacement clip,
+  /// and maintains MediaAsset integrity.
+  bool rippleDeleteSelectedClip({int? index}) {
+    if (_videoClips.isEmpty) return false;
+    final targetIndex = index ?? _selectedClipIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _videoClips.length) {
+      return false;
+    }
+
+    _saveSnapshot();
+
+    final deletedClip = _videoClips[targetIndex];
+    final deletedStart = getClipStartTime(targetIndex);
+    final deletedDuration = deletedClip.durationInSeconds;
+    final deletedEnd = deletedStart + deletedDuration;
+
+    _videoClips.removeAt(targetIndex);
+
+    // Playhead Repositioning per Phase 12:
+    // 1. If playhead was after the deleted region, shift backward by deleted duration
+    // 2. If playhead was inside the deleted region, place it at the beginning of the deleted region
+    // 3. If playhead was before the deleted region, keep it unchanged
+    if (_playheadPosition >= deletedEnd) {
+      _playheadPosition = (_playheadPosition - deletedDuration);
+    } else if (_playheadPosition >= deletedStart) {
+      _playheadPosition = deletedStart;
+    }
+
+    // Update Selection per Phase 13:
+    if (_videoClips.isEmpty) {
+      _selectedClipIndex = null;
+      _playheadPosition = 0.0;
+    } else {
+      _selectedClipIndex = math.min(targetIndex, _videoClips.length - 1);
+      _playheadPosition = _playheadPosition.clamp(0.0, totalDurationInSeconds);
+    }
+
+    // Playback handling per Phase 17:
+    if (_videoClips.isEmpty && _audioTracks.isEmpty) {
+      pause();
+    } else {
+      _syncAudioPlayback(forceSeek: true);
+    }
+
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
   }
 
   /// Duplicate on main timeline track
@@ -1186,8 +1270,31 @@ class EditorViewModel extends ChangeNotifier {
 
   void removeOverlayClip(String id) {
     _saveSnapshot();
-    _overlayClips.removeWhere((o) => o.id == id);
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index != -1) {
+      _overlayClips.removeAt(index);
+      if (_overlayClips.isEmpty) {
+        _selectedOverlayIndex = null;
+      } else {
+        _selectedOverlayIndex = math.min(index, _overlayClips.length - 1);
+      }
+      _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+      scheduleAutoSave();
+      notifyListeners();
+    }
+  }
+
+  void deleteSelectedOverlay() {
+    if (selectedOverlay != null) {
+      removeOverlayClip(selectedOverlay!.id);
+    }
+  }
+
+  void clearOverlayClips() {
+    _saveSnapshot();
+    _overlayClips.clear();
     _selectedOverlayIndex = null;
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -1533,21 +1640,41 @@ class EditorViewModel extends ChangeNotifier {
     final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
     if (targetId == null) return;
     _saveSnapshot();
-    _audioTracks.removeWhere((t) => t.id == targetId);
-    if (_selectedAudioTrackId == targetId) {
-      _selectedAudioTrackId = null;
-      _isAudioSelected = false;
+    final index = _audioTracks.indexWhere((t) => t.id == targetId);
+    if (index != -1) {
+      _audioTracks.removeAt(index);
+      if (_selectedAudioTrackId == targetId) {
+        if (_audioTracks.isEmpty) {
+          _selectedAudioTrackId = null;
+          _isAudioSelected = false;
+        } else {
+          _selectedAudioTrackId = _audioTracks[math.min(index, _audioTracks.length - 1)].id;
+          _isAudioSelected = true;
+        }
+      }
+      _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+      if (_audioTracks.isEmpty) {
+        AudioPlaybackService.instance.dispose();
+      } else {
+        _syncAudioPlayback(forceSeek: true);
+      }
+      scheduleAutoSave();
+      notifyListeners();
     }
-    if (_audioTracks.isEmpty) {
-      AudioPlaybackService.instance.dispose();
-    } else {
-      _syncAudioPlayback(forceSeek: true);
-    }
-    notifyListeners();
   }
 
   void deleteSelectedAudioTrack() {
     removeAudioTrack();
+  }
+
+  void clearAudioTracks() {
+    _saveSnapshot();
+    _audioTracks.clear();
+    _selectedAudioTrackId = null;
+    _isAudioSelected = false;
+    AudioPlaybackService.instance.dispose();
+    scheduleAutoSave();
+    notifyListeners();
   }
 
   bool trimAudioLeftToPlayhead() {
@@ -1832,10 +1959,14 @@ class EditorViewModel extends ChangeNotifier {
 
   void removeTextOverlay(String id) {
     _saveSnapshot();
-    _textOverlays.removeWhere((t) => t.id == id);
-    if (_selectedTextId == id) _selectedTextId = null;
-    scheduleAutoSave();
-    notifyListeners();
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index != -1) {
+      _textOverlays.removeAt(index);
+      if (_selectedTextId == id) _selectedTextId = null;
+      _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+      scheduleAutoSave();
+      notifyListeners();
+    }
   }
 
   void deleteSelectedText() {
@@ -2081,9 +2212,44 @@ class EditorViewModel extends ChangeNotifier {
 
   void removeSticker(String id) {
     _saveSnapshot();
-    _stickerOverlays.removeWhere((s) => s.id == id);
-    if (_selectedStickerId == id) _selectedStickerId = null;
-    notifyListeners();
+    final index = _stickerOverlays.indexWhere((s) => s.id == id);
+    if (index != -1) {
+      _stickerOverlays.removeAt(index);
+      if (_selectedStickerId == id) _selectedStickerId = null;
+      _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+      scheduleAutoSave();
+      notifyListeners();
+    }
+  }
+
+  void deleteSelectedSticker() {
+    if (_selectedStickerId != null) {
+      removeSticker(_selectedStickerId!);
+    }
+  }
+
+  /// Unified delete dispatcher for currently selected timeline element
+  bool deleteSelectedItem({bool ripple = false}) {
+    if (selectedTextOverlay != null) {
+      deleteSelectedText();
+      return true;
+    } else if (selectedAudioTrack != null) {
+      deleteSelectedAudioTrack();
+      return true;
+    } else if (selectedOverlay != null) {
+      deleteSelectedOverlay();
+      return true;
+    } else if (_selectedStickerId != null) {
+      deleteSelectedSticker();
+      return true;
+    } else if (selectedClip != null) {
+      if (ripple) {
+        return rippleDeleteSelectedClip();
+      } else {
+        return deleteSelectedClip();
+      }
+    }
+    return false;
   }
 
   // --- Effects, Filters & Color Adjustments ---

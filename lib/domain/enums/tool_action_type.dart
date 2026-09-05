@@ -6,6 +6,7 @@ enum ToolActionType {
   trimLeft('Trim Left', Icons.align_horizontal_left_rounded),
   trimRight('Trim Right', Icons.align_horizontal_right_rounded),
   delete('Delete', Icons.delete_outline_rounded),
+  rippleDelete('Ripple Delete', Icons.playlist_remove_rounded),
   duplicate('Duplicate', Icons.copy_all_rounded),
   speed('Speed', Icons.speed_rounded),
   volume('Volume', Icons.volume_up_rounded),
