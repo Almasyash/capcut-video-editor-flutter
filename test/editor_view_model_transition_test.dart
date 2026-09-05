@@ -146,5 +146,49 @@ void main() {
       // After trimming, the transition should be cleaned up because it exceeds the remaining 0.5s duration
       expect(viewModel.transitions, isEmpty);
     });
+
+    test('activeTransitionAtPlayhead accurately evaluates boundary window and progress', () {
+      final transition = Transition(
+        type: TransitionType.slideLeft,
+        duration: 2.0, // Window: [10 - 1.0, 10 + 1.0] = [9.0, 11.0]
+        leftClipId: 'clip1',
+        rightClipId: 'clip2',
+      );
+
+      viewModel.addTransition(transition);
+
+      // Outside transition window before start (playhead = 5.0)
+      viewModel.seekTo(5.0);
+      expect(viewModel.activeTransitionAtPlayhead, isNull);
+
+      // Outside transition window just before (playhead = 8.9)
+      viewModel.seekTo(8.9);
+      expect(viewModel.activeTransitionAtPlayhead, isNull);
+
+      // Exactly at transition start (playhead = 9.0)
+      viewModel.seekTo(9.0);
+      var active = viewModel.activeTransitionAtPlayhead;
+      expect(active, isNotNull);
+      expect(active!.transition.type, TransitionType.slideLeft);
+      expect(active.progress, closeTo(0.0, 0.001));
+      expect(active.leftClip.id, 'clip1');
+      expect(active.rightClip.id, 'clip2');
+
+      // Midway through transition at clip boundary (playhead = 10.0)
+      viewModel.seekTo(10.0);
+      active = viewModel.activeTransitionAtPlayhead;
+      expect(active, isNotNull);
+      expect(active!.progress, closeTo(0.5, 0.001));
+
+      // Exactly at transition end (playhead = 11.0)
+      viewModel.seekTo(11.0);
+      active = viewModel.activeTransitionAtPlayhead;
+      expect(active, isNotNull);
+      expect(active!.progress, closeTo(1.0, 0.001));
+
+      // Outside transition window after end (playhead = 11.1)
+      viewModel.seekTo(11.1);
+      expect(viewModel.activeTransitionAtPlayhead, isNull);
+    });
   });
 }

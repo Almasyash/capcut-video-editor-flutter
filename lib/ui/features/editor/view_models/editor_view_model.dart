@@ -25,6 +25,7 @@ import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
 import 'package:capcut_video_editor/core/services/project_storage_service.dart';
 import 'package:capcut_video_editor/data/repositories/mock_media_repository.dart';
+import 'package:capcut_video_editor/domain/enums/transition_type.dart';
 import 'package:capcut_video_editor/domain/models/transition.dart';
 import 'package:capcut_video_editor/domain/services/transition_validator.dart';
 
@@ -2561,4 +2562,65 @@ class EditorViewModel extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Evaluates and returns the active transition state at the current playhead position,
+  /// or null if no transition is currently active.
+  ActiveTransitionState? get activeTransitionAtPlayhead {
+    if (_currentProject.transitions.isEmpty || _videoClips.length < 2) return null;
+
+    double accumulated = 0.0;
+    for (int i = 0; i < _videoClips.length - 1; i++) {
+      final leftClip = _videoClips[i];
+      final rightClip = _videoClips[i + 1];
+      final boundaryTime = accumulated + leftClip.durationInSeconds;
+
+      for (final transition in _currentProject.transitions) {
+        if (!transition.enabled || transition.type == TransitionType.none) continue;
+        if (transition.leftClipId == leftClip.id && transition.rightClipId == rightClip.id) {
+          final halfDuration = transition.duration / 2.0;
+          final transitionStart = boundaryTime - halfDuration;
+          final transitionEnd = boundaryTime + halfDuration;
+
+          if (_playheadPosition >= transitionStart && _playheadPosition <= transitionEnd) {
+            final progress = ((_playheadPosition - transitionStart) / transition.duration).clamp(0.0, 1.0);
+            return ActiveTransitionState(
+              transition: transition,
+              leftClip: leftClip,
+              rightClip: rightClip,
+              leftClipStartTime: accumulated,
+              rightClipStartTime: boundaryTime,
+              transitionStartTime: transitionStart,
+              transitionEndTime: transitionEnd,
+              progress: progress,
+            );
+          }
+        }
+      }
+      accumulated = boundaryTime;
+    }
+    return null;
+  }
+}
+
+/// Immutable state describing a currently executing transition between two adjacent clips
+class ActiveTransitionState {
+  final Transition transition;
+  final VideoClip leftClip;
+  final VideoClip rightClip;
+  final double leftClipStartTime;
+  final double rightClipStartTime;
+  final double transitionStartTime;
+  final double transitionEndTime;
+  final double progress; // 0.0 to 1.0
+
+  const ActiveTransitionState({
+    required this.transition,
+    required this.leftClip,
+    required this.rightClip,
+    required this.leftClipStartTime,
+    required this.rightClipStartTime,
+    required this.transitionStartTime,
+    required this.transitionEndTime,
+    required this.progress,
+  });
 }

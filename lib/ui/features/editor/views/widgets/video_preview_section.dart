@@ -11,6 +11,7 @@ import 'package:capcut_video_editor/domain/models/editor_filter.dart';
 import 'package:capcut_video_editor/domain/models/media_asset.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
+import 'package:capcut_video_editor/domain/enums/transition_type.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
 import 'package:capcut_video_editor/core/services/video_playback_service.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
@@ -160,6 +161,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
   @override
   Widget build(BuildContext context) {
     final activeClip = viewModel.currentActiveClipAtPlayhead;
+    final activeTransition = viewModel.activeTransitionAtPlayhead;
     final activeOverlays = viewModel.activeOverlayClipsAtPlayhead;
     final activeStickers = viewModel.activeStickersAtPlayhead;
     final activeTexts = viewModel.activeTextOverlaysAtPlayhead;
@@ -197,7 +199,9 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                   fit: StackFit.expand,
                   children: [
                     // 1. Primary Video Canvas with Transformations, Filters & Adjustments
-                    if (activeClip != null)
+                    if (activeTransition != null)
+                      _buildTransitionCanvas(activeTransition, filter, adjustments)
+                    else if (activeClip != null)
                       _buildMainVideoCanvas(activeClip, filter, adjustments)
                     else
                       const Center(
@@ -277,6 +281,20 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
                               ),
                             ),
                           ],
+                          if (activeTransition != null) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppColors.accentPurple.withValues(alpha: 0.85),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                'TRANSITION: ${activeTransition.transition.type.name.toUpperCase()} ${(activeTransition.progress * 100).toInt()}%',
+                                style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -316,6 +334,287 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildTransitionCanvas(
+    ActiveTransitionState state,
+    ColorFilter? filter,
+    ColorFilter? adjustments,
+  ) {
+    final outgoing = _buildSingleClipVisual(state.leftClip);
+    final incoming = _buildSingleClipVisual(state.rightClip);
+    final progress = state.progress;
+
+    Widget effect;
+    switch (state.transition.type) {
+      case TransitionType.fade:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            Opacity(opacity: (1.0 - progress).clamp(0.0, 1.0), child: outgoing),
+            Opacity(opacity: progress.clamp(0.0, 1.0), child: incoming),
+          ],
+        );
+        break;
+
+      case TransitionType.dissolve:
+        final smooth = progress * progress * (3 - 2 * progress);
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            Opacity(opacity: (1.0 - smooth).clamp(0.0, 1.0), child: outgoing),
+            Opacity(opacity: smooth.clamp(0.0, 1.0), child: incoming),
+          ],
+        );
+        break;
+
+      case TransitionType.blackFade:
+        if (progress < 0.5) {
+          final outOpacity = (1.0 - (progress * 2.0)).clamp(0.0, 1.0);
+          effect = Container(
+            color: Colors.black,
+            child: Opacity(opacity: outOpacity, child: outgoing),
+          );
+        } else {
+          final inOpacity = ((progress - 0.5) * 2.0).clamp(0.0, 1.0);
+          effect = Container(
+            color: Colors.black,
+            child: Opacity(opacity: inOpacity, child: incoming),
+          );
+        }
+        break;
+
+      case TransitionType.whiteFade:
+        if (progress < 0.5) {
+          final outOpacity = (1.0 - (progress * 2.0)).clamp(0.0, 1.0);
+          effect = Container(
+            color: Colors.white,
+            child: Opacity(opacity: outOpacity, child: outgoing),
+          );
+        } else {
+          final inOpacity = ((progress - 0.5) * 2.0).clamp(0.0, 1.0);
+          effect = Container(
+            color: Colors.white,
+            child: Opacity(opacity: inOpacity, child: incoming),
+          );
+        }
+        break;
+
+      case TransitionType.slideLeft:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            FractionalTranslation(
+              translation: Offset(-progress, 0.0),
+              child: outgoing,
+            ),
+            FractionalTranslation(
+              translation: Offset(1.0 - progress, 0.0),
+              child: incoming,
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.slideRight:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            FractionalTranslation(
+              translation: Offset(progress, 0.0),
+              child: outgoing,
+            ),
+            FractionalTranslation(
+              translation: Offset(progress - 1.0, 0.0),
+              child: incoming,
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.slideUp:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            FractionalTranslation(
+              translation: Offset(0.0, -progress),
+              child: outgoing,
+            ),
+            FractionalTranslation(
+              translation: Offset(0.0, 1.0 - progress),
+              child: incoming,
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.slideDown:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            FractionalTranslation(
+              translation: Offset(0.0, progress),
+              child: outgoing,
+            ),
+            FractionalTranslation(
+              translation: Offset(0.0, progress - 1.0),
+              child: incoming,
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.wipeLeft:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            outgoing,
+            ClipRect(
+              child: Align(
+                alignment: Alignment.centerRight,
+                widthFactor: progress.clamp(0.0, 1.0),
+                child: incoming,
+              ),
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.wipeRight:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            outgoing,
+            ClipRect(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                widthFactor: progress.clamp(0.0, 1.0),
+                child: incoming,
+              ),
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.zoomIn:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            outgoing,
+            Transform.scale(
+              scale: progress.clamp(0.01, 1.0),
+              child: Opacity(
+                opacity: progress.clamp(0.0, 1.0),
+                child: incoming,
+              ),
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.zoomOut:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            incoming,
+            Transform.scale(
+              scale: (1.0 - progress).clamp(0.01, 1.0),
+              child: Opacity(
+                opacity: (1.0 - progress).clamp(0.0, 1.0),
+                child: outgoing,
+              ),
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.none:
+        effect = progress < 0.5 ? outgoing : incoming;
+        break;
+    }
+
+    Widget videoContent = effect;
+    if (filter != null) {
+      videoContent = ColorFiltered(colorFilter: filter, child: videoContent);
+    }
+    if (adjustments != null) {
+      videoContent = ColorFiltered(colorFilter: adjustments, child: videoContent);
+    }
+    if (viewModel.canvasBlurSigma > 0.0) {
+      videoContent = ImageFiltered(
+        imageFilter: ui.ImageFilter.blur(
+          sigmaX: viewModel.canvasBlurSigma,
+          sigmaY: viewModel.canvasBlurSigma,
+        ),
+        child: videoContent,
+      );
+    }
+
+    return videoContent;
+  }
+
+  Widget _buildSingleClipVisual(VideoClip clip) {
+    final asset = viewModel.getAssetById(clip.assetId);
+    final localPath = asset?.localPath;
+    final thumbnailPath = asset?.thumbnailPath;
+    final isPhoto = asset?.isPhoto ?? false;
+
+    final hasLocalFile = localPath != null &&
+        !localPath.startsWith('content://') &&
+        !kIsWeb &&
+        File(localPath).existsSync();
+
+    final hasThumbnail = thumbnailPath != null &&
+        !thumbnailPath.startsWith('content://') &&
+        !kIsWeb &&
+        File(thumbnailPath).existsSync();
+
+    Widget canvasChild;
+    if (hasLocalFile) {
+      if (isPhoto) {
+        canvasChild = Image.file(
+          File(localPath),
+          fit: BoxFit.contain,
+          errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(clip),
+        );
+      } else {
+        final isActiveClip = viewModel.currentActiveClipAtPlayhead?.id == clip.id;
+        if (isActiveClip && _session != null && _session!.isInitialized) {
+          canvasChild = Center(
+            child: AspectRatio(
+              aspectRatio: _session!.aspectRatio,
+              child: Texture(textureId: _session!.textureId),
+            ),
+          );
+        } else if (hasThumbnail) {
+          canvasChild = Image.file(
+            File(thumbnailPath),
+            fit: BoxFit.contain,
+            errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(clip),
+          );
+        } else {
+          canvasChild = _buildPlaceholderGraphic(clip);
+        }
+      }
+    } else {
+      canvasChild = _buildPlaceholderGraphic(clip);
+    }
+
+    return Opacity(
+      opacity: clip.opacity,
+      child: Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.identity()
+          ..rotateZ(clip.rotationDegrees * math.pi / 180)
+          ..scaleByDouble(
+            clip.flipHorizontal ? -1.0 : 1.0,
+            clip.flipVertical ? -1.0 : 1.0,
+            1.0,
+            1.0,
+          ),
+        child: canvasChild,
       ),
     );
   }
