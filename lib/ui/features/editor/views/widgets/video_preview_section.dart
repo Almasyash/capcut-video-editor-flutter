@@ -125,9 +125,7 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
     // 3. Handle clip boundary switches on the same media file (e.g. split clips)
     if (_session != null && _session!.isInitialized && activeClip != null && activeClip.id != _lastActiveClipId) {
       _lastActiveClipId = activeClip.id;
-      if (!widget.viewModel.isPlaying) {
-        VideoPlaybackService.instance.seekTo(_session!.textureId, Duration(milliseconds: sourceOffsetMs));
-      }
+      VideoPlaybackService.instance.seekTo(_session!.textureId, Duration(milliseconds: sourceOffsetMs));
     }
 
     // 4. Sync play/pause state with authoritative start position

@@ -1,6 +1,26 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+
+/// Represents a position and lifecycle event emitted from the authoritative native video decoder.
+class VideoPositionEvent {
+  final int textureId;
+  final Duration position;
+  final Duration duration;
+  final bool isCompleted;
+
+  const VideoPositionEvent({
+    required this.textureId,
+    required this.position,
+    required this.duration,
+    this.isCompleted = false,
+  });
+
+  @override
+  String toString() =>
+      'VideoPositionEvent(textureId: $textureId, pos: ${position.inMilliseconds}ms, dur: ${duration.inMilliseconds}ms, isCompleted: $isCompleted)';
+}
 
 /// Represents an active native video playback session attached to a Flutter texture.
 class VideoPlayerSession {
@@ -11,6 +31,7 @@ class VideoPlayerSession {
   final String path;
   bool isPlaying;
   bool isDisposed;
+  Duration currentPosition;
 
   VideoPlayerSession({
     required this.textureId,
@@ -20,6 +41,7 @@ class VideoPlayerSession {
     required this.path,
     this.isPlaying = false,
     this.isDisposed = false,
+    this.currentPosition = Duration.zero,
   });
 
   double get aspectRatio => (width > 0 && height > 0) ? (width / height) : 16 / 9;
@@ -33,11 +55,118 @@ class VideoPlaybackService {
   static VideoPlaybackService? _instance;
   static VideoPlaybackService get instance => _instance ??= VideoPlaybackService._();
 
-  VideoPlaybackService._();
+  final _positionEventController = StreamController<VideoPositionEvent>.broadcast(sync: true);
+  Stream<VideoPositionEvent> get onPositionChanged => _positionEventController.stream;
+
+  final _completionEventController = StreamController<VideoPositionEvent>.broadcast(sync: true);
+  Stream<VideoPositionEvent> get onCompletion => _completionEventController.stream;
+
+  VideoPlaybackService._() {
+    _initChannelHandler();
+  }
+
+  void _initChannelHandler() {
+    try {
+      _channel.setMethodCallHandler(_handlePlatformCall);
+    } catch (_) {
+      // Ignored in headless unit test environments where BinaryMessenger is not yet initialized
+    }
+  }
+
+  Future<dynamic> _handlePlatformCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onPositionUpdate':
+        final textureId = (call.arguments['textureId'] as num).toInt();
+        final positionMs = (call.arguments['positionMs'] as num).toInt();
+        final durationMs = (call.arguments['durationMs'] as num).toInt();
+        final session = _sessions[textureId];
+        if (session != null) {
+          session.currentPosition = Duration(milliseconds: positionMs);
+        }
+        final event = VideoPositionEvent(
+          textureId: textureId,
+          position: Duration(milliseconds: positionMs),
+          duration: Duration(milliseconds: durationMs),
+          isCompleted: false,
+        );
+        _positionEventController.add(event);
+        break;
+      case 'onCompletion':
+        final textureId = (call.arguments['textureId'] as num).toInt();
+        final positionMs = (call.arguments['positionMs'] as num).toInt();
+        final durationMs = (call.arguments['durationMs'] as num).toInt();
+        final session = _sessions[textureId];
+        if (session != null) {
+          session.isPlaying = false;
+          session.currentPosition = Duration(milliseconds: positionMs);
+        }
+        final event = VideoPositionEvent(
+          textureId: textureId,
+          position: Duration(milliseconds: positionMs),
+          duration: Duration(milliseconds: durationMs),
+          isCompleted: true,
+        );
+        _completionEventController.add(event);
+        _positionEventController.add(event);
+        break;
+    }
+  }
 
   final Map<int, VideoPlayerSession> _sessions = {};
   VideoPlayerSession? _activeSession;
   VideoPlayerSession? get activeSession => _activeSession;
+
+  /// Manually emit a simulated position event (used for headless test environments)
+  void emitSimulatedPosition(
+    int textureId,
+    Duration position, [
+    Duration? duration,
+    bool isCompleted = false,
+  ]) {
+    final dur = duration ?? _sessions[textureId]?.duration ?? position;
+    final event = VideoPositionEvent(
+      textureId: textureId,
+      position: position,
+      duration: dur,
+      isCompleted: isCompleted,
+    );
+    final session = _sessions[textureId];
+    if (session != null) {
+      session.currentPosition = position;
+      if (isCompleted) {
+        session.isPlaying = false;
+      }
+    }
+    if (isCompleted) {
+      _completionEventController.add(event);
+    }
+    _positionEventController.add(event);
+  }
+
+  /// Emits a simulated completion event (used for headless test environments)
+  void emitSimulatedCompletion(int textureId, Duration position, [Duration? duration]) {
+    emitSimulatedPosition(textureId, position, duration, true);
+  }
+
+  /// Registers a simulated session (for headless widget and unit tests)
+  VideoPlayerSession registerSimulatedSession(
+    int textureId,
+    String path,
+    Duration duration, {
+    int width = 1920,
+    int height = 1080,
+  }) {
+    final session = VideoPlayerSession(
+      textureId: textureId,
+      duration: duration,
+      width: width,
+      height: height,
+      path: path,
+    );
+    _sessions[textureId] = session;
+    _activeSession = session;
+    return session;
+  }
 
   /// Initializes a hardware-accelerated playback session for [localPath].
   Future<VideoPlayerSession?> createSession(String localPath) async {
@@ -73,6 +202,27 @@ class VideoPlaybackService {
       debugPrint('[VideoPlaybackService] createSession failed for $localPath: $e');
     }
     return null;
+  }
+
+  /// Queries the authoritative native player position
+  Future<Duration?> getPosition(int textureId) async {
+    try {
+      final result = await _channel.invokeMapMethod<String, dynamic>('getPosition', {
+        'textureId': textureId,
+      });
+      if (result != null && result.containsKey('positionMs')) {
+        final posMs = (result['positionMs'] as num).toInt();
+        final pos = Duration(milliseconds: posMs);
+        final session = _sessions[textureId];
+        if (session != null) {
+          session.currentPosition = pos;
+        }
+        return pos;
+      }
+    } catch (e) {
+      debugPrint('[VideoPlaybackService] getPosition failed: $e');
+    }
+    return _sessions[textureId]?.currentPosition;
   }
 
   /// Starts playback of video frames and native audio track at optional [position].

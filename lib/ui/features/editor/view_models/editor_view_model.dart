@@ -77,12 +77,116 @@ class _EditorSnapshot {
 /// universal multi-track trimming and dragging, undo/redo history, and export.
 class EditorViewModel extends ChangeNotifier {
   EditorViewModel({Project? initialProject}) {
+    _initVideoPlaybackSubscription();
     if (initialProject != null) {
       loadProject(initialProject);
     } else {
       _initializeProject();
     }
   }
+
+  StreamSubscription<VideoPositionEvent>? _videoPositionSubscription;
+  StreamSubscription<VideoPositionEvent>? _videoCompletionSubscription;
+
+  void _initVideoPlaybackSubscription() {
+    _videoPositionSubscription?.cancel();
+    _videoPositionSubscription = VideoPlaybackService.instance.onPositionChanged.listen((event) {
+      _handleVideoPositionEvent(event);
+    });
+
+    _videoCompletionSubscription?.cancel();
+    _videoCompletionSubscription = VideoPlaybackService.instance.onCompletion.listen((event) {
+      _handleVideoCompletionEvent(event);
+    });
+  }
+
+  void _handleVideoPositionEvent(VideoPositionEvent event) {
+    if (!_isPlaying) return;
+    final activeSession = VideoPlaybackService.instance.activeSession;
+    if (activeSession == null || activeSession.textureId != event.textureId) return;
+
+    final activeClip = currentActiveClipAtPlayhead;
+    final activeClipStart = activeClipStartTimeAtPlayhead;
+    if (activeClip is! VideoClip) return;
+
+    final posSec = event.position.inMilliseconds / 1000.0;
+    final trimStartSec = activeClip.trimStart.inMilliseconds / 1000.0;
+    final deltaInClipSec = (posSec - trimStartSec) / activeClip.speed;
+    final clipEnd = activeClipStart + activeClip.durationInSeconds;
+    final targetTimelineSec = activeClipStart + deltaInClipSec;
+
+    if (event.isCompleted || targetTimelineSec >= clipEnd) {
+      final clipIdx = _videoClips.indexOf(activeClip);
+      if (clipIdx >= 0 && clipIdx < _videoClips.length - 1) {
+        // Multi-clip handoff to next clip
+        _playheadPosition = clipEnd;
+        _autoSelectActiveClip();
+        _syncAudioPlayback();
+        notifyListeners();
+      } else {
+        if (_isLooping && totalDurationInSeconds > 0.0) {
+          _playheadPosition = 0.0;
+          _autoSelectActiveClip();
+          _syncAudioPlayback(forceSeek: true, isStartingPlay: true);
+          notifyListeners();
+        } else {
+          // Natural end of timeline: clamp playhead to exact end boundary and pause
+          _playheadPosition = totalDurationInSeconds;
+          _autoSelectActiveClip();
+          pause();
+        }
+      }
+    } else {
+      if (_playbackTimer != null) {
+        _playbackTimer?.cancel();
+        _playbackTimer = null;
+      }
+      _playheadPosition = targetTimelineSec.clamp(0.0, totalDurationInSeconds);
+      _autoSelectActiveClip();
+      _syncAudioPlayback();
+      notifyListeners();
+    }
+  }
+
+  void _handleVideoCompletionEvent(VideoPositionEvent event) {
+    if (!_isPlaying) return;
+    final activeSession = VideoPlaybackService.instance.activeSession;
+    if (activeSession == null || activeSession.textureId != event.textureId) return;
+
+    final activeClip = currentActiveClipAtPlayhead;
+    final activeClipStart = activeClipStartTimeAtPlayhead;
+    if (activeClip is VideoClip) {
+      final clipEnd = activeClipStart + activeClip.durationInSeconds;
+      final clipIdx = _videoClips.indexOf(activeClip);
+      if (clipIdx >= 0 && clipIdx < _videoClips.length - 1) {
+        _playheadPosition = clipEnd;
+        _autoSelectActiveClip();
+        _syncAudioPlayback();
+        notifyListeners();
+      } else {
+        if (_isLooping && totalDurationInSeconds > 0.0) {
+          _playheadPosition = 0.0;
+          _autoSelectActiveClip();
+          _syncAudioPlayback(forceSeek: true, isStartingPlay: true);
+          notifyListeners();
+        } else {
+          _playheadPosition = totalDurationInSeconds;
+          _autoSelectActiveClip();
+          pause();
+        }
+      }
+    } else {
+      _playheadPosition = totalDurationInSeconds;
+      _autoSelectActiveClip();
+      pause();
+    }
+  }
+
+  @visibleForTesting
+  void handleVideoPositionEvent(VideoPositionEvent event) => _handleVideoPositionEvent(event);
+
+  @visibleForTesting
+  void handleVideoCompletionEvent(VideoPositionEvent event) => _handleVideoCompletionEvent(event);
 
   // --- Project & Persistence State ---
   late Project _currentProject;
@@ -256,9 +360,11 @@ class EditorViewModel extends ChangeNotifier {
   /// Returns the video clip currently visible at the playhead
   VideoClip? get currentActiveClipAtPlayhead {
     double accumulated = 0.0;
-    for (final clip in _videoClips) {
+    for (int i = 0; i < _videoClips.length; i++) {
+      final clip = _videoClips[i];
+      final isLast = i == _videoClips.length - 1;
       final clipEnd = accumulated + clip.durationInSeconds;
-      if (_playheadPosition >= accumulated && _playheadPosition <= clipEnd) {
+      if (_playheadPosition >= accumulated && (_playheadPosition < clipEnd || (isLast && _playheadPosition <= clipEnd))) {
         return clip;
       }
       accumulated = clipEnd;
@@ -269,9 +375,11 @@ class EditorViewModel extends ChangeNotifier {
   /// Returns the global timeline start time (in seconds) of the video clip visible at the playhead
   double get activeClipStartTimeAtPlayhead {
     double accumulated = 0.0;
-    for (final clip in _videoClips) {
+    for (int i = 0; i < _videoClips.length; i++) {
+      final clip = _videoClips[i];
+      final isLast = i == _videoClips.length - 1;
       final clipEnd = accumulated + clip.durationInSeconds;
-      if (_playheadPosition >= accumulated && _playheadPosition <= clipEnd) {
+      if (_playheadPosition >= accumulated && (_playheadPosition < clipEnd || (isLast && _playheadPosition <= clipEnd))) {
         return accumulated;
       }
       accumulated = clipEnd;
@@ -284,8 +392,9 @@ class EditorViewModel extends ChangeNotifier {
     double accumulated = 0.0;
     for (int i = 0; i < _videoClips.length; i++) {
       final clip = _videoClips[i];
+      final isLast = i == _videoClips.length - 1;
       final clipEnd = accumulated + clip.durationInSeconds;
-      if (_playheadPosition >= accumulated && _playheadPosition <= clipEnd) {
+      if (_playheadPosition >= accumulated && (_playheadPosition < clipEnd || (isLast && _playheadPosition <= clipEnd))) {
         return i;
       }
       accumulated = clipEnd;
@@ -599,31 +708,41 @@ class EditorViewModel extends ChangeNotifier {
 
     _isPlaying = true;
     _playbackTimer?.cancel();
+    _playbackTimer = null;
     _syncAudioPlayback(forceSeek: true, isStartingPlay: true);
 
-    // 33ms interval (~30 FPS smooth playback loop)
-    const intervalMs = 33;
-    _playbackTimer = Timer.periodic(const Duration(milliseconds: intervalMs), (timer) {
-      final nextPos = _playheadPosition + (intervalMs / 1000.0);
-      if (nextPos >= totalDurationInSeconds) {
-        if (_isLooping && totalDurationInSeconds > 0.0) {
-          _playheadPosition = 0.0;
-          _autoSelectActiveClip();
-          _syncAudioPlayback(forceSeek: true, isStartingPlay: true);
-          notifyListeners();
-        } else {
-          // Reached natural end of project: stop cleanly at final timeline position
-          _playheadPosition = totalDurationInSeconds;
-          _autoSelectActiveClip();
-          pause();
+    // If an active native video controller session exists, it will drive the playhead clock.
+    // Fallback timer is only started for non-video timelines (photos/audio-only or headless tests).
+    // If a native session begins emitting position updates, _handleVideoPositionEvent cancels any fallback timer.
+    final hasNativeSession = VideoPlaybackService.instance.activeSession != null;
+    if (!hasNativeSession) {
+      const intervalMs = 33;
+      _playbackTimer = Timer.periodic(const Duration(milliseconds: intervalMs), (timer) {
+        if (!_isPlaying) {
+          timer.cancel();
+          return;
         }
-      } else {
-        _playheadPosition = nextPos;
-        _autoSelectActiveClip();
-        _syncAudioPlayback();
-        notifyListeners();
-      }
-    });
+        final nextPos = _playheadPosition + (intervalMs / 1000.0);
+        if (nextPos >= totalDurationInSeconds) {
+          if (_isLooping && totalDurationInSeconds > 0.0) {
+            _playheadPosition = 0.0;
+            _autoSelectActiveClip();
+            _syncAudioPlayback(forceSeek: true, isStartingPlay: true);
+            notifyListeners();
+          } else {
+            // Reached natural end of project: stop cleanly at final timeline position
+            _playheadPosition = totalDurationInSeconds;
+            _autoSelectActiveClip();
+            pause();
+          }
+        } else {
+          _playheadPosition = nextPos;
+          _autoSelectActiveClip();
+          _syncAudioPlayback();
+          notifyListeners();
+        }
+      });
+    }
     notifyListeners();
   }
 
@@ -2437,6 +2556,11 @@ class EditorViewModel extends ChangeNotifier {
     _isDisposed = true;
     _autoSaveDebounceTimer?.cancel();
     _playbackTimer?.cancel();
+    _playbackTimer = null;
+    _videoPositionSubscription?.cancel();
+    _videoPositionSubscription = null;
+    _videoCompletionSubscription?.cancel();
+    _videoCompletionSubscription = null;
     _exportTimer?.cancel();
     _isPlaying = false;
     if (AudioPlaybackService.instance.isInitialized) {

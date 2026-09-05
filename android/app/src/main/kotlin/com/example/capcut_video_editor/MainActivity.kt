@@ -18,6 +18,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.speech.tts.TextToSpeech
@@ -47,6 +49,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var tts: TextToSpeech? = null
     private var filePickerChannel: MethodChannel? = null
+    private var videoPlayerChannel: MethodChannel? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     class VideoPlayerHolder(
         val player: MediaPlayer,
@@ -55,7 +59,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
         var isSeeking: Boolean = false,
         var pendingSeekMs: Long? = null,
         var pendingPlay: Boolean = false,
-        var pendingSeekResult: MethodChannel.Result? = null
+        var pendingSeekResult: MethodChannel.Result? = null,
+        var positionRunnable: Runnable? = null
     )
 
     class AudioPlayerHolder(
@@ -68,6 +73,41 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
 
     private val videoPlayers = mutableMapOf<Long, VideoPlayerHolder>()
     private val audioHolder = AudioPlayerHolder()
+
+    private fun startVideoPositionUpdates(textureId: Long, holder: VideoPlayerHolder) {
+        stopVideoPositionUpdates(holder)
+        val runnable = object : Runnable {
+            override fun run() {
+                try {
+                    if (holder.player.isPlaying && !holder.isSeeking) {
+                        val currentPos = holder.player.currentPosition.toLong()
+                        val duration = holder.player.duration.toLong()
+                        videoPlayerChannel?.invokeMethod("onPositionUpdate", mapOf(
+                            "textureId" to textureId,
+                            "positionMs" to currentPos,
+                            "durationMs" to duration
+                        ))
+                        mainHandler.postDelayed(this, 16)
+                    } else if (holder.player.isPlaying) {
+                        mainHandler.postDelayed(this, 16)
+                    } else {
+                        stopVideoPositionUpdates(holder)
+                    }
+                } catch (e: Exception) {
+                    stopVideoPositionUpdates(holder)
+                }
+            }
+        }
+        holder.positionRunnable = runnable
+        mainHandler.post(runnable)
+    }
+
+    private fun stopVideoPositionUpdates(holder: VideoPlayerHolder) {
+        holder.positionRunnable?.let {
+            mainHandler.removeCallbacks(it)
+        }
+        holder.positionRunnable = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -99,6 +139,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
     private fun pauseAllPlayback() {
         for ((_, holder) in videoPlayers) {
             try {
+                stopVideoPositionUpdates(holder)
                 holder.pendingPlay = false
                 if (holder.player.isPlaying) {
                     holder.player.pause()
@@ -116,6 +157,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         for ((_, holder) in videoPlayers) {
             try {
+                stopVideoPositionUpdates(holder)
                 holder.pendingPlay = false
                 holder.isSeeking = false
                 holder.pendingSeekMs = null
@@ -175,7 +217,9 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VIDEO_PLAYER_CHANNEL).setMethodCallHandler { call, result ->
+        val vChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VIDEO_PLAYER_CHANNEL)
+        videoPlayerChannel = vChannel
+        vChannel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "init" -> {
                     val path = call.argument<String>("path") ?: ""
@@ -233,6 +277,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                                     holder.pendingPlay = false
                                     try {
                                         mp.start()
+                                        startVideoPositionUpdates(textureId, holder)
                                         android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video started after seek at ${mp.currentPosition}ms")
                                     } catch (e: Exception) {}
                                 }
@@ -243,9 +288,16 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
 
                         player.setOnCompletionListener { mp ->
                             android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video MediaPlayer onCompletion (textureId=$textureId, isLooping=${mp.isLooping})")
+                            stopVideoPositionUpdates(holder)
                             holder.pendingPlay = false
                             holder.isSeeking = false
                             holder.pendingSeekMs = null
+                            val finalPos = try { mp.duration.toLong() } catch (e: Exception) { 0L }
+                            videoPlayerChannel?.invokeMethod("onCompletion", mapOf(
+                                "textureId" to textureId,
+                                "positionMs" to finalPos,
+                                "durationMs" to finalPos
+                            ))
                         }
 
                         player.setOnErrorListener { _, what, extra ->
@@ -288,6 +340,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                                 } else {
                                     holder.pendingPlay = false
                                     holder.player.start()
+                                    startVideoPositionUpdates(textureId, holder)
                                 }
                             } else {
                                 if (holder.isSeeking) {
@@ -295,6 +348,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                                 } else {
                                     holder.pendingPlay = false
                                     holder.player.start()
+                                    startVideoPositionUpdates(textureId, holder)
                                 }
                             }
                             result.success(true)
@@ -311,6 +365,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     if (holder != null) {
                         try {
                             android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] PLAYER_PAUSED (video textureId=$textureId)")
+                            stopVideoPositionUpdates(holder)
                             holder.pendingPlay = false
                             holder.pendingSeekMs = null
                             if (holder.player.isPlaying) {
@@ -414,6 +469,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     val holder = videoPlayers.remove(textureId)
                     if (holder != null) {
                         try {
+                            stopVideoPositionUpdates(holder)
                             holder.pendingPlay = false
                             holder.isSeeking = false
                             holder.pendingSeekMs = null
@@ -428,6 +484,23 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         } catch (e: Exception) {}
                     }
                     result.success(true)
+                }
+                "getPosition" -> {
+                    val textureId = (call.argument<Number>("textureId"))?.toLong() ?: -1L
+                    val holder = videoPlayers[textureId]
+                    if (holder != null) {
+                        val pos = try { holder.player.currentPosition.toLong() } catch (e: Exception) { 0L }
+                        val dur = try { holder.player.duration.toLong() } catch (e: Exception) { 0L }
+                        val isPlaying = try { holder.player.isPlaying } catch (e: Exception) { false }
+                        result.success(mapOf(
+                            "textureId" to textureId,
+                            "positionMs" to pos,
+                            "durationMs" to dur,
+                            "isPlaying" to isPlaying
+                        ))
+                    } else {
+                        result.error("NOT_FOUND", "Player not found for textureId $textureId", null)
+                    }
                 }
                 else -> {
                     result.notImplemented()
