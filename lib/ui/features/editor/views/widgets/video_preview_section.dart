@@ -96,10 +96,8 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
               _session = session;
             });
             if (session != null && activeClip is VideoClip) {
-              VideoPlaybackService.instance.setVolume(session.textureId, activeClip.volume);
-              if (activeClip.speed != 1.0) {
-                VideoPlaybackService.instance.setSpeed(session.textureId, activeClip.speed);
-              }
+              VideoPlaybackService.instance.setVolume(session.textureId, activeClip.effectiveVolume);
+              VideoPlaybackService.instance.setSpeed(session.textureId, activeClip.speed);
               if (widget.viewModel.isPlaying) {
                 debugPrint('[AUTO_PLAY_TRACE] VideoPreviewSection calling play because viewModel.isPlaying is TRUE (pos=${sourceOffsetMs}ms)');
                 VideoPlaybackService.instance.play(session.textureId, position: Duration(milliseconds: sourceOffsetMs));
@@ -117,10 +115,8 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
 
     // 2. Sync dynamic volume & speed properties
     if (_session != null && _session!.isInitialized && activeClip is VideoClip) {
-      VideoPlaybackService.instance.setVolume(_session!.textureId, activeClip.volume);
-      if (activeClip.speed != 1.0) {
-        VideoPlaybackService.instance.setSpeed(_session!.textureId, activeClip.speed);
-      }
+      VideoPlaybackService.instance.setVolume(_session!.textureId, activeClip.effectiveVolume);
+      VideoPlaybackService.instance.setSpeed(_session!.textureId, activeClip.speed);
     }
 
     // 3. Handle clip boundary switches on the same media file (e.g. split clips)

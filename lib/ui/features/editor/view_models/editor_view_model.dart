@@ -1769,7 +1769,21 @@ class EditorViewModel extends ChangeNotifier {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
     final clip = _videoClips[_selectedClipIndex!];
-    _videoClips[_selectedClipIndex!] = clip.copyWith(volume: volume.clamp(0.0, 1.0));
+    final clampedVol = volume.clamp(0.0, 1.0);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      volume: clampedVol,
+      isMuted: clampedVol == 0.0 ? true : false,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleClipMute({int? index}) {
+    final targetIndex = index ?? _selectedClipIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _videoClips.length) return;
+    _saveSnapshot();
+    final clip = _videoClips[targetIndex];
+    _videoClips[targetIndex] = clip.copyWith(isMuted: !clip.isMuted);
     scheduleAutoSave();
     notifyListeners();
   }

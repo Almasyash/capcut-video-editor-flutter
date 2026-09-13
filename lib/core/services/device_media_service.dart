@@ -337,7 +337,7 @@ class DeviceMediaService {
         'trimStartMs': clip.trimStart.inMilliseconds,
         'trimEndMs': clip.trimEnd.inMilliseconds,
         'speed': clip.speed,
-        'volume': clip.volume,
+        'volume': clip.effectiveVolume,
         'rotationDegrees': clip.rotationDegrees,
         'flipHorizontal': clip.flipHorizontal,
         'flipVertical': clip.flipVertical,
@@ -386,6 +386,25 @@ class DeviceMediaService {
       }
     }
 
+    // 5. Build serialized text overlays payload
+    final textsPayload = <Map<String, dynamic>>[];
+    for (final text in project.textOverlays) {
+      if (text.text.trim().isEmpty) continue;
+      textsPayload.add({
+        'id': text.id,
+        'text': text.text,
+        'startTimeMs': text.startTime.inMilliseconds,
+        'durationMs': text.effectiveDuration.inMilliseconds,
+        'fontSize': text.fontSize,
+        'textColor': text.color.toARGB32(),
+        'backgroundColor': text.backgroundColor?.toARGB32(),
+        'x': text.position.dx,
+        'y': text.position.dy,
+        'isBold': text.isBold,
+        'isItalic': text.isItalic,
+      });
+    }
+
     final payload = {
       'width': targetWidth,
       'height': targetHeight,
@@ -395,6 +414,7 @@ class DeviceMediaService {
       'clips': clipsPayload,
       'transitions': transitionsPayload,
       'audioTracks': audioPayload,
+      'textOverlays': textsPayload,
     };
 
     // 5. Invoke platform channel or handle mock/test environment

@@ -251,7 +251,8 @@ class ActionToolbar extends StatelessWidget {
                 // Volume Controller
                 _buildActionButton(
                   context: context,
-                  icon: (hasSelectedAudio && (viewModel.selectedAudioTrack?.isMuted ?? false))
+                  icon: ((hasSelectedAudio && (viewModel.selectedAudioTrack?.isMuted ?? false)) ||
+                          (hasSelectedClip && ((viewModel.selectedClip?.isMuted ?? false) || (viewModel.selectedClip?.volume == 0.0))))
                       ? Icons.volume_off_rounded
                       : Icons.volume_up_rounded,
                   label: hasSelectedAudio
@@ -259,7 +260,9 @@ class ActionToolbar extends StatelessWidget {
                           ? 'Muted'
                           : 'Vol (${(viewModel.selectedAudioTrack!.volume * 100).round()}%)')
                       : (hasSelectedClip
-                          ? 'Vol (${(viewModel.selectedClip!.volume * 100).round()}%)'
+                          ? (viewModel.selectedClip!.isMuted
+                              ? 'Muted'
+                              : 'Vol (${(viewModel.selectedClip!.volume * 100).round()}%)')
                           : 'Volume'),
                   enabled: hasSelectedClip || hasSelectedAudio,
                   onTap: () => _showVolumeDialog(context),
@@ -518,7 +521,7 @@ class ActionToolbar extends StatelessWidget {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final double currentVolume = isAudio ? (viewModel.selectedAudioTrack?.volume ?? 0.8) : (viewModel.selectedClip?.volume ?? 1.0);
-            final bool isMuted = isAudio ? (viewModel.selectedAudioTrack?.isMuted ?? false) : false;
+            final bool isMuted = isAudio ? (viewModel.selectedAudioTrack?.isMuted ?? false) : (viewModel.selectedClip?.isMuted ?? false);
 
             return Padding(
               padding: const EdgeInsets.all(AppDimensions.lg),
@@ -535,21 +538,23 @@ class ActionToolbar extends StatelessWidget {
                       ),
                       Row(
                         children: [
-                          if (isAudio) ...[
-                            IconButton(
-                              icon: Icon(
-                                isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                                color: isMuted ? AppColors.error : AppColors.primary,
-                                size: 20,
-                              ),
-                              tooltip: isMuted ? 'Unmute' : 'Mute',
-                              onPressed: () {
-                                viewModel.toggleAudioMute(audio.id);
-                                setSheetState(() {});
-                              },
+                          IconButton(
+                            icon: Icon(
+                              isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                              color: isMuted ? AppColors.error : AppColors.primary,
+                              size: 20,
                             ),
-                            const SizedBox(width: 4),
-                          ],
+                            tooltip: isMuted ? 'Unmute' : 'Mute',
+                            onPressed: () {
+                              if (isAudio) {
+                                viewModel.toggleAudioMute(audio.id);
+                              } else {
+                                viewModel.toggleClipMute();
+                              }
+                              setSheetState(() {});
+                            },
+                          ),
+                          const SizedBox(width: 4),
                           Text(
                             isMuted ? 'Muted' : '${(currentVolume * 100).round()}%',
                             style: TextStyle(

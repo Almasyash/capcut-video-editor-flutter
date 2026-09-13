@@ -105,9 +105,10 @@ class EditDrawer extends StatelessWidget {
                     onTap: () => _showSpeedDialog(context),
                   ),
                   _buildToolButton(
-                    icon: Icons.volume_up_rounded,
-                    label: 'Volume (${(clip.volume * 100).round()}%)',
+                    icon: clip.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                    label: clip.isMuted ? 'Muted' : 'Volume (${(clip.volume * 100).round()}%)',
                     onTap: () => _showVolumeDialog(context),
+                    color: clip.isMuted ? AppColors.error : null,
                   ),
                   _buildToolButton(
                     icon: Icons.rotate_right_rounded,
@@ -245,11 +246,11 @@ class EditDrawer extends StatelessWidget {
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                   ),
                   const SizedBox(height: 16),
-                  Wrap(
+                    Wrap(
                     spacing: 10,
                     runSpacing: 10,
                     children: speeds.map((s) {
-                      final isSelected = clip.speed == s;
+                      final isSelected = ((viewModel.selectedClip?.speed ?? 1.0) - s).abs() < 0.05;
                       return ChoiceChip(
                         label: Text('${s}x'),
                         selected: isSelected,
@@ -291,6 +292,8 @@ class EditDrawer extends StatelessWidget {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            final isMuted = viewModel.selectedClip?.isMuted ?? false;
+            final currentVolume = viewModel.selectedClip?.volume ?? 1.0;
             return Padding(
               padding: const EdgeInsets.all(AppDimensions.lg),
               child: Column(
@@ -304,23 +307,46 @@ class EditDrawer extends StatelessWidget {
                         'Clip Volume',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                       ),
-                      Text(
-                        '${(clip.volume * 100).round()}%',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.primary),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                              color: isMuted ? AppColors.error : AppColors.primary,
+                              size: 20,
+                            ),
+                            tooltip: isMuted ? 'Unmute' : 'Mute',
+                            onPressed: () {
+                              viewModel.toggleClipMute();
+                              setSheetState(() {});
+                            },
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isMuted ? 'Muted' : '${(currentVolume * 100).round()}%',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isMuted ? AppColors.error : AppColors.primary,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Slider(
-                    value: clip.volume,
+                    value: currentVolume.clamp(0.0, 1.0),
                     min: 0.0,
                     max: 1.0,
                     divisions: 100,
-                    activeColor: AppColors.primary,
-                    onChanged: (val) {
-                      setSheetState(() {});
-                      viewModel.setClipVolume(val);
-                    },
+                    activeColor: isMuted ? AppColors.textMuted : AppColors.primary,
+                    onChanged: isMuted
+                        ? null
+                        : (val) {
+                            setSheetState(() {});
+                            viewModel.setClipVolume(val);
+                          },
                   ),
                   const SizedBox(height: 16),
                 ],

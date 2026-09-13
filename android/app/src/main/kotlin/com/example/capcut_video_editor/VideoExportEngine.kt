@@ -87,6 +87,20 @@ data class ExportAudioTrack(
     val volume: Double
 )
 
+data class ExportTextOverlay(
+    val id: String,
+    val text: String,
+    val startTimeMs: Long,
+    val durationMs: Long,
+    val fontSize: Double,
+    val textColor: Int,
+    val backgroundColor: Int?,
+    val x: Double,
+    val y: Double,
+    val isBold: Boolean,
+    val isItalic: Boolean
+)
+
 /**
  * High-performance hardware video export engine using Android MediaExtractor,
  * MediaCodec hardware decoders, SurfaceTexture (GL_TEXTURE_EXTERNAL_OES),
@@ -400,6 +414,7 @@ class VideoExportEngine(private val context: Context) {
         val reusableModelMatrix = FloatArray(16)
         val reusableMvpMatrix = FloatArray(16)
         val reusableQuadBuffer: FloatBuffer
+        val reusableOverlayQuadBuffer: FloatBuffer
         val fullQuadBuffer: FloatBuffer
 
         // Quad for full screen FBO blitting
@@ -417,6 +432,10 @@ class VideoExportEngine(private val context: Context) {
             Matrix.scaleM(tex2DSTMatrix, 0, 1f, -1f, 1f)
 
             reusableQuadBuffer = ByteBuffer.allocateDirect(16 * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+
+            reusableOverlayQuadBuffer = ByteBuffer.allocateDirect(16 * 4)
                 .order(ByteOrder.nativeOrder())
                 .asFloatBuffer()
 
@@ -757,6 +776,26 @@ class VideoExportEngine(private val context: Context) {
             totalGlDrawNs += (System.nanoTime() - tDraw)
         }
 
+        fun renderOverlay(
+            textureId: Int,
+            dstLeft: Float,
+            dstTop: Float,
+            dstRight: Float,
+            dstBottom: Float
+        ) {
+            reusableOverlayQuadBuffer.clear()
+            reusableOverlayQuadBuffer.put(dstLeft).put(dstTop).put(0.0f).put(1.0f)
+            reusableOverlayQuadBuffer.put(dstLeft).put(dstBottom).put(0.0f).put(0.0f)
+            reusableOverlayQuadBuffer.put(dstRight).put(dstTop).put(1.0f).put(1.0f)
+            reusableOverlayQuadBuffer.put(dstRight).put(dstBottom).put(1.0f).put(0.0f)
+            reusableOverlayQuadBuffer.position(0)
+
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            render2DTexture(textureId, projMatrix, reusableOverlayQuadBuffer)
+            GLES20.glDisable(GLES20.GL_BLEND)
+        }
+
         fun renderSolidColor(
             color: Int,
             mvpMatrix: FloatArray,
@@ -938,6 +977,7 @@ class VideoExportEngine(private val context: Context) {
         clips: List<ExportClip>,
         transitions: List<ExportTransition>,
         audioTracks: List<ExportAudioTrack>,
+        textOverlays: List<ExportTextOverlay> = emptyList(),
         targetWidth: Int,
         targetHeight: Int,
         targetFps: Int,
@@ -998,10 +1038,11 @@ class VideoExportEngine(private val context: Context) {
         // Check for audio track source
         var audioExtractor: MediaExtractor? = null
         var audioFormat: MediaFormat? = null
+        var initialAudioPtsUs = 0L
 
-        val primaryAudioTrack = audioTracks.firstOrNull { it.path.isNotBlank() && File(it.path).exists() }
-        val primaryAudioSource = primaryAudioTrack?.path
-            ?: clips.firstOrNull { it.path != null && File(it.path).exists() && !it.isPhoto }?.path
+        val primaryAudioTrack = audioTracks.firstOrNull { it.path.isNotBlank() && File(it.path).exists() && it.volume > 0.0 }
+        val primaryClip = clips.firstOrNull { it.path != null && File(it.path).exists() && !it.isPhoto && it.volume > 0.0 }
+        val primaryAudioSource = primaryAudioTrack?.path ?: primaryClip?.path
 
         if (primaryAudioSource != null) {
             try {
@@ -1021,6 +1062,10 @@ class VideoExportEngine(private val context: Context) {
                     extractor.release()
                 } else if (primaryAudioTrack != null && primaryAudioTrack.trimStartMs > 0L) {
                     audioExtractor?.seekTo(primaryAudioTrack.trimStartMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    initialAudioPtsUs = audioExtractor?.sampleTime ?: 0L
+                } else if (primaryClip != null && primaryClip.trimStartMs > 0L) {
+                    audioExtractor?.seekTo(primaryClip.trimStartMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+                    initialAudioPtsUs = audioExtractor?.sampleTime ?: 0L
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Audio track setup skipped: ${e.message}")
@@ -1088,6 +1133,66 @@ class VideoExportEngine(private val context: Context) {
             }
         }
         decoderInitNs = System.nanoTime() - initStart
+
+        // Text overlay textures cache
+        val textTextures = mutableMapOf<String, Pair<Bitmap, Int>>()
+        for (overlay in textOverlays) {
+            if (overlay.text.isNotBlank()) {
+                try {
+                    val scaleFactor = height / 720.0f
+                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = overlay.textColor
+                        textSize = (overlay.fontSize.toFloat() * scaleFactor).coerceAtLeast(18f)
+                        typeface = Typeface.create(
+                            Typeface.DEFAULT,
+                            when {
+                                overlay.isBold && overlay.isItalic -> Typeface.BOLD_ITALIC
+                                overlay.isBold -> Typeface.BOLD
+                                overlay.isItalic -> Typeface.ITALIC
+                                else -> Typeface.NORMAL
+                            }
+                        )
+                    }
+
+                    val fontMetrics = paint.fontMetrics
+                    val textW = paint.measureText(overlay.text)
+                    val textH = fontMetrics.descent - fontMetrics.ascent
+
+                    val padX = (16f * scaleFactor).toInt()
+                    val padY = (10f * scaleFactor).toInt()
+                    val bmpW = (textW + padX * 2).toInt().coerceAtLeast(4)
+                    val bmpH = (textH + padY * 2).toInt().coerceAtLeast(4)
+
+                    val bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+
+                    val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = overlay.backgroundColor ?: Color.argb(165, 0, 0, 0)
+                        style = Paint.Style.FILL
+                    }
+                    val radius = 8f * scaleFactor
+                    canvas.drawRoundRect(RectF(0f, 0f, bmpW.toFloat(), bmpH.toFloat()), radius, radius, bgPaint)
+
+                    val drawX = padX.toFloat()
+                    val drawY = padY.toFloat() - fontMetrics.ascent
+                    canvas.drawText(overlay.text, drawX, drawY, paint)
+
+                    val texIds = IntArray(1)
+                    GLES20.glGenTextures(1, texIds, 0)
+                    val texId = texIds[0]
+                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                    GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+                    GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
+
+                    textTextures[overlay.id] = Pair(bmp, texId)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed creating text overlay texture for '${overlay.text}': ${e.message}")
+                }
+            }
+        }
 
         // Framebuffers for transition compositing (only allocated if transitions exist)
         val hasTransitions = transitions.any { it.enabled && it.durationMs > 0 && it.type != "none" }
@@ -1333,6 +1438,25 @@ class VideoExportEngine(private val context: Context) {
                     renderClip(clip, localMs)
                 }
 
+                // Composite Active Text Overlays
+                if (textTextures.isNotEmpty()) {
+                    for (txt in textOverlays) {
+                        val txtEnd = txt.startTimeMs + txt.durationMs
+                        if (currentTimeMs in txt.startTimeMs..txtEnd) {
+                            val data = textTextures[txt.id] ?: continue
+                            val texId = data.second
+                            val bW = data.first.width.toFloat()
+                            val bH = data.first.height.toFloat()
+                            val dstLeft = ((width - bW) * txt.x.toFloat()).coerceIn(0f, (width - bW).coerceAtLeast(0f))
+                            val dstTop = ((height - bH) * txt.y.toFloat()).coerceIn(0f, (height - bH).coerceAtLeast(0f))
+                            val dstRight = dstLeft + bW
+                            val dstBottom = dstTop + bH
+
+                            inputSurface.renderOverlay(texId, dstLeft, dstTop, dstRight, dstBottom)
+                        }
+                    }
+                }
+
                 // 3. Submit Frame to MediaCodec
                 drainThread.error?.let { throw RuntimeException("Encoder drain failed: ${it.message}", it) }
                 val inputStart = System.nanoTime()
@@ -1353,10 +1477,14 @@ class VideoExportEngine(private val context: Context) {
             // Signal End of Video Stream and wait for background drain thread to finish
             val drainJoinStart = System.nanoTime()
             encoder.signalEndOfInputStream()
+
+            if (!drainThread.muxerStartedLatch.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw RuntimeException("Encoder drain thread never started muxer")
+            }
+
+            drainThread.isRunning = false
             drainThread.join(30_000L)
             if (drainThread.isAlive) {
-                drainThread.isRunning = false
-                drainThread.join(1000L)
                 throw RuntimeException("Encoder drain timed out after 30 seconds")
             }
             drainThread.error?.let { throw RuntimeException("Encoder drain failed: ${it.message}", it) }
@@ -1380,10 +1508,12 @@ class VideoExportEngine(private val context: Context) {
                         if (audioBufferInfo.size < 0) {
                             break
                         }
-                        audioBufferInfo.presentationTimeUs = audioExtractor.sampleTime
-                        if (audioBufferInfo.presentationTimeUs > totalDurationMs * 1000L) {
+                        val rawSampleTimeUs = audioExtractor.sampleTime
+                        val presentationTimeUs = (rawSampleTimeUs - initialAudioPtsUs).coerceAtLeast(0L)
+                        if (presentationTimeUs > totalDurationMs * 1000L) {
                             break
                         }
+                        audioBufferInfo.presentationTimeUs = presentationTimeUs
                         audioBufferInfo.flags = audioExtractor.sampleFlags
                         muxer.writeSampleData(drainThread.audioTrackIndex, audioBuffer, audioBufferInfo)
                         audioExtractor.advance()
@@ -1516,6 +1646,14 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
                     GLES20.glDeleteTextures(1, textures, 0)
                 }
                 photoTextures.clear()
+            } catch (e: Exception) {}
+            try {
+                for ((_, pair) in textTextures) {
+                    val textures = intArrayOf(pair.second)
+                    GLES20.glDeleteTextures(1, textures, 0)
+                    pair.first.recycle()
+                }
+                textTextures.clear()
             } catch (e: Exception) {}
             videoDecoders.values.forEach { it.release() }
             videoDecoders.clear()

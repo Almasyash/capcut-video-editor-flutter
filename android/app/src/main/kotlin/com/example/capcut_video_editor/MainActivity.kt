@@ -1193,6 +1193,22 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 volume = (map["volume"] as? Number)?.toDouble() ?: 1.0
             )
         }
+        val rawTexts = call.argument<List<Map<String, Any>>>("textOverlays") ?: emptyList()
+        val textOverlays = rawTexts.map { map ->
+            ExportTextOverlay(
+                id = map["id"] as? String ?: "",
+                text = map["text"] as? String ?: "",
+                startTimeMs = (map["startTimeMs"] as? Number)?.toLong() ?: 0L,
+                durationMs = (map["durationMs"] as? Number)?.toLong() ?: 3000L,
+                fontSize = (map["fontSize"] as? Number)?.toDouble() ?: 24.0,
+                textColor = (map["textColor"] as? Number)?.toInt() ?: android.graphics.Color.WHITE,
+                backgroundColor = (map["backgroundColor"] as? Number)?.toInt(),
+                x = (map["x"] as? Number)?.toDouble() ?: 0.5,
+                y = (map["y"] as? Number)?.toDouble() ?: 0.75,
+                isBold = map["isBold"] as? Boolean ?: true,
+                isItalic = map["isItalic"] as? Boolean ?: false
+            )
+        }
 
         Thread {
             try {
@@ -1201,6 +1217,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     clips = clips,
                     transitions = transitions,
                     audioTracks = audioTracks,
+                    textOverlays = textOverlays,
                     targetWidth = width,
                     targetHeight = height,
                     targetFps = fps,

@@ -13,6 +13,7 @@ class VideoClip {
   final Duration trimEnd;
   final double speed;
   final double volume;
+  final bool isMuted;
   final double opacity; // 0.0 to 1.0
   final int rotationDegrees; // 0, 90, 180, 270
   final bool flipHorizontal;
@@ -44,6 +45,7 @@ class VideoClip {
     required this.trimEnd,
     this.speed = 1.0,
     this.volume = 1.0,
+    this.isMuted = false,
     this.opacity = 1.0,
     this.rotationDegrees = 0,
     this.flipHorizontal = false,
@@ -57,6 +59,9 @@ class VideoClip {
     this.scale = 1.0,
     this.rotationAngle = 0.0,
   });
+
+  /// Effective playback volume respecting mute state
+  double get effectiveVolume => isMuted ? 0.0 : volume;
 
   /// Effective duration on the timeline after trimming and speed adjustment
   Duration get activeDuration {
@@ -77,6 +82,7 @@ class VideoClip {
     Duration? trimEnd,
     double? speed,
     double? volume,
+    bool? isMuted,
     double? opacity,
     int? rotationDegrees,
     bool? flipHorizontal,
@@ -99,6 +105,7 @@ class VideoClip {
       trimEnd: trimEnd ?? this.trimEnd,
       speed: speed ?? this.speed,
       volume: volume ?? this.volume,
+      isMuted: isMuted ?? this.isMuted,
       opacity: opacity ?? this.opacity,
       rotationDegrees: rotationDegrees ?? this.rotationDegrees,
       flipHorizontal: flipHorizontal ?? this.flipHorizontal,
@@ -124,6 +131,7 @@ class VideoClip {
       'trimEndMs': trimEnd.inMilliseconds,
       'speed': speed,
       'volume': volume,
+      'isMuted': isMuted,
       'opacity': opacity,
       'rotationDegrees': rotationDegrees,
       'flipHorizontal': flipHorizontal,
@@ -147,6 +155,7 @@ class VideoClip {
       trimEnd: Duration(milliseconds: (json['trimEndMs'] as num?)?.toInt() ?? (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
       volume: (json['volume'] as num?)?.toDouble() ?? 1.0,
+      isMuted: json['isMuted'] as bool? ?? false,
       opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
       rotationDegrees: (json['rotationDegrees'] as num?)?.toInt() ?? 0,
       flipHorizontal: json['flipHorizontal'] as bool? ?? false,
@@ -173,6 +182,7 @@ class VideoClip {
           trimEnd == other.trimEnd &&
           speed == other.speed &&
           volume == other.volume &&
+          isMuted == other.isMuted &&
           opacity == other.opacity &&
           rotationDegrees == other.rotationDegrees &&
           flipHorizontal == other.flipHorizontal &&
@@ -193,6 +203,7 @@ class VideoClip {
       trimEnd.hashCode ^
       speed.hashCode ^
       volume.hashCode ^
+      isMuted.hashCode ^
       opacity.hashCode ^
       rotationDegrees.hashCode ^
       flipHorizontal.hashCode ^
