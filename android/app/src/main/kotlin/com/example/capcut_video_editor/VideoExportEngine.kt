@@ -25,6 +25,7 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
+import java.util.concurrent.CountDownLatch
 import kotlin.math.max
 import kotlin.math.min
 
@@ -126,6 +127,39 @@ class VideoExportEngine(private val context: Context) {
         var isInitialized = false
             private set
 
+        var totalInputWaitNs: Long = 0L
+            private set
+        var totalOutputWaitNs: Long = 0L
+            private set
+        var totalSurfaceWaitNs: Long = 0L
+            private set
+
+        fun feedInputBuffers() {
+            val dec = decoder ?: return
+            val ext = extractor ?: return
+            if (isEos) return
+            val t0 = System.nanoTime()
+            try {
+                while (!isEos) {
+                    val inIdx = try { dec.dequeueInputBuffer(0L) } catch (e: Exception) { -1 }
+                    if (inIdx < 0) break
+                    val inBuf = dec.getInputBuffer(inIdx) ?: break
+                    val size = ext.readSampleData(inBuf, 0)
+                    if (size < 0) {
+                        dec.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        isEos = true
+                        break
+                    } else {
+                        val pts = ext.sampleTime
+                        dec.queueInputBuffer(inIdx, 0, size, pts, 0)
+                        ext.advance()
+                    }
+                }
+            } finally {
+                totalInputWaitNs += (System.nanoTime() - t0)
+            }
+        }
+
         init {
             try {
                 // 1. Generate OES Texture
@@ -168,11 +202,16 @@ class VideoExportEngine(private val context: Context) {
                     }
 
                     val mime = videoFormat.getString(MediaFormat.KEY_MIME) ?: MediaFormat.MIMETYPE_VIDEO_AVC
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        videoFormat.setInteger(MediaFormat.KEY_PRIORITY, 0)
+                        videoFormat.setFloat(MediaFormat.KEY_OPERATING_RATE, Float.MAX_VALUE)
+                    }
                     val dec = MediaCodec.createDecoderByType(mime)
                     dec.configure(videoFormat, surface, null, 0)
                     dec.start()
                     decoder = dec
                     isInitialized = true
+                    feedInputBuffers()
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Hardware decoder initialization failed for $filePath: ${e.message}")
@@ -188,6 +227,7 @@ class VideoExportEngine(private val context: Context) {
                 decoder?.flush()
                 currentPtsUs = -1L
                 isEos = false
+                feedInputBuffers()
             } catch (e: Exception) {
                 Log.w(TAG, "Hardware decoder seek error: ${e.message}")
             }
@@ -203,29 +243,14 @@ class VideoExportEngine(private val context: Context) {
             val maxLoops = 100
 
             while (loops++ < maxLoops) {
-                // Non-blocking feed extractor samples into decoder input buffers
-                while (!isEos) {
-                    val inIdx = decoder!!.dequeueInputBuffer(0L)
-                    if (inIdx < 0) break
-                    val inBuf = decoder!!.getInputBuffer(inIdx)
-                    if (inBuf != null) {
-                        val size = extractor!!.readSampleData(inBuf, 0)
-                        if (size < 0) {
-                            decoder!!.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            isEos = true
-                            break
-                        } else {
-                            val pts = extractor!!.sampleTime
-                            decoder!!.queueInputBuffer(inIdx, 0, size, pts, 0)
-                            extractor!!.advance()
-                        }
-                    } else {
-                        break
-                    }
-                }
+                // Keep decoder input buffers filled so decoding continues concurrently
+                feedInputBuffers()
 
                 // Dequeue decoded output buffer (short timeout 1000us)
+                val tOut = System.nanoTime()
                 val outIdx = decoder!!.dequeueOutputBuffer(bufferInfo, 1000L)
+                totalOutputWaitNs += (System.nanoTime() - tOut)
+
                 if (outIdx >= 0) {
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         decoder!!.releaseOutputBuffer(outIdx, false)
@@ -233,12 +258,19 @@ class VideoExportEngine(private val context: Context) {
                     }
                     currentPtsUs = bufferInfo.presentationTimeUs
                     val shouldRender = currentPtsUs >= targetTimeUs
+
+                    val tSurf = System.nanoTime()
                     decoder!!.releaseOutputBuffer(outIdx, shouldRender)
                     if (shouldRender) {
                         surfaceTexture?.updateTexImage()
                         surfaceTexture?.getTransformMatrix(stMatrix)
+                        totalSurfaceWaitNs += (System.nanoTime() - tSurf)
+
+                        // Immediately pipeline next frame decode into hardware while GPU renders
+                        feedInputBuffers()
                         return true
                     }
+                    totalSurfaceWaitNs += (System.nanoTime() - tSurf)
                 } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (isEos) break
                 }
@@ -361,6 +393,9 @@ class VideoExportEngine(private val context: Context) {
         val projMatrix = FloatArray(16)
         val identityMatrix = FloatArray(16)
         val tex2DSTMatrix = FloatArray(16)
+
+        var totalGlDrawNs: Long = 0L
+            private set
 
         val reusableModelMatrix = FloatArray(16)
         val reusableMvpMatrix = FloatArray(16)
@@ -692,7 +727,9 @@ class VideoExportEngine(private val context: Context) {
             GLES20.glVertexAttribPointer(oesTexCoordLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, quadBuffer)
             GLES20.glEnableVertexAttribArray(oesTexCoordLoc)
 
+            val tDraw = System.nanoTime()
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            totalGlDrawNs += (System.nanoTime() - tDraw)
         }
 
         fun render2DTexture(
@@ -715,7 +752,9 @@ class VideoExportEngine(private val context: Context) {
             GLES20.glVertexAttribPointer(tex2DTexCoordLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, quadBuffer)
             GLES20.glEnableVertexAttribArray(tex2DTexCoordLoc)
 
+            val tDraw = System.nanoTime()
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            totalGlDrawNs += (System.nanoTime() - tDraw)
         }
 
         fun renderSolidColor(
@@ -735,7 +774,9 @@ class VideoExportEngine(private val context: Context) {
             GLES20.glVertexAttribPointer(solidPosLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, quadBuffer)
             GLES20.glEnableVertexAttribArray(solidPosLoc)
 
+            val tDraw = System.nanoTime()
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            totalGlDrawNs += (System.nanoTime() - tDraw)
         }
 
         fun renderTransition(
@@ -765,7 +806,9 @@ class VideoExportEngine(private val context: Context) {
             GLES20.glVertexAttribPointer(transTexCoordLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, fboQuadBuffer)
             GLES20.glEnableVertexAttribArray(transTexCoordLoc)
 
+            val tDraw = System.nanoTime()
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            totalGlDrawNs += (System.nanoTime() - tDraw)
         }
 
         fun setPresentationTime(nsecs: Long) {
@@ -787,6 +830,86 @@ class VideoExportEngine(private val context: Context) {
             eglDisplay = EGL14.EGL_NO_DISPLAY
             eglContext = EGL14.EGL_NO_CONTEXT
             eglSurface = EGL14.EGL_NO_SURFACE
+        }
+    }
+
+    /**
+     * Dedicated asynchronous background drain thread for MediaCodec video encoder and MediaMuxer.
+     * Pipelines frame encoding and container muxing concurrently with OpenGL rendering and decoding.
+     */
+    private class EncoderDrainThread(
+        private val encoder: MediaCodec,
+        private val muxer: MediaMuxer,
+        private val audioFormat: MediaFormat?
+    ) : Thread("EncoderDrainThread") {
+        @Volatile var isRunning = true
+        @Volatile var error: Throwable? = null
+        val muxerStartedLatch = CountDownLatch(1)
+        @Volatile var muxerStarted = false
+        var videoTrackIndex = -1
+        var audioTrackIndex = -1
+
+        var drainWaitNs = 0L
+        var muxWriteNs = 0L
+        var totalDrainNs = 0L
+
+        override fun run() {
+            val t0 = System.nanoTime()
+            val bufferInfo = MediaCodec.BufferInfo()
+            try {
+                while (isRunning) {
+                    val waitStart = System.nanoTime()
+                    val encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, 10_000L) // 10ms poll
+                    drainWaitNs += (System.nanoTime() - waitStart)
+
+                    if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                        if (!isRunning) break
+                        continue
+                    } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        if (muxerStarted) {
+                            throw RuntimeException("Video encoder format changed twice")
+                        }
+                        val newFormat = encoder.outputFormat
+                        videoTrackIndex = muxer.addTrack(newFormat)
+                        if (audioFormat != null) {
+                            audioTrackIndex = muxer.addTrack(audioFormat)
+                        }
+                        muxer.start()
+                        muxerStarted = true
+                        muxerStartedLatch.countDown()
+                    } else if (encoderStatus >= 0) {
+                        val writeStart = System.nanoTime()
+                        val encodedData = encoder.getOutputBuffer(encoderStatus)
+                            ?: throw RuntimeException("encoderOutputBuffer $encoderStatus was null")
+
+                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                            bufferInfo.size = 0
+                        }
+
+                        if (bufferInfo.size != 0) {
+                            if (!muxerStarted) {
+                                throw RuntimeException("muxer hasn't started")
+                            }
+                            encodedData.position(bufferInfo.offset)
+                            encodedData.limit(bufferInfo.offset + bufferInfo.size)
+                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
+                        }
+
+                        encoder.releaseOutputBuffer(encoderStatus, false)
+                        muxWriteNs += (System.nanoTime() - writeStart)
+
+                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                            break
+                        }
+                    }
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "EncoderDrainThread error: ${t.message}", t)
+                error = t
+                muxerStartedLatch.countDown()
+            } finally {
+                totalDrainNs = System.nanoTime() - t0
+            }
         }
     }
 
@@ -843,6 +966,7 @@ class VideoExportEngine(private val context: Context) {
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
+                setFloat(MediaFormat.KEY_OPERATING_RATE, Float.MAX_VALUE)
             }
         }
 
@@ -853,12 +977,9 @@ class VideoExportEngine(private val context: Context) {
         encoder.start()
 
         val muxer = MediaMuxer(tempOutputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        var muxerStarted = false
-        var videoTrackIndex = -1
 
         // Check for audio track source
         var audioExtractor: MediaExtractor? = null
-        var audioTrackIndex = -1
         var audioFormat: MediaFormat? = null
 
         val primaryAudioTrack = audioTracks.firstOrNull { it.path.isNotBlank() && File(it.path).exists() }
@@ -888,6 +1009,9 @@ class VideoExportEngine(private val context: Context) {
                 Log.w(TAG, "Audio track setup skipped: ${e.message}")
             }
         }
+
+        val drainThread = EncoderDrainThread(encoder, muxer, audioFormat)
+        drainThread.start()
 
         // Texture caches
         val photoTextures = mutableMapOf<String, Int>()
@@ -953,50 +1077,14 @@ class VideoExportEngine(private val context: Context) {
         val fboA = if (hasTransitions) Framebuffer(width, height) else null
         val fboB = if (hasTransitions) Framebuffer(width, height) else null
 
-        val bufferInfo = MediaCodec.BufferInfo()
-
-        fun drainEncoder(endOfStream: Boolean) {
-            val timeoutUs = if (endOfStream) 10000L else 0L
-            while (true) {
-                val encoderStatus = encoder.dequeueOutputBuffer(bufferInfo, timeoutUs)
-                if (encoderStatus == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    break
-                } else if (encoderStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    if (muxerStarted) {
-                        throw RuntimeException("format changed twice")
-                    }
-                    val newFormat = encoder.outputFormat
-                    videoTrackIndex = muxer.addTrack(newFormat)
-                    if (audioFormat != null) {
-                        audioTrackIndex = muxer.addTrack(audioFormat)
-                    }
-                    muxer.start()
-                    muxerStarted = true
-                } else if (encoderStatus >= 0) {
-                    val encodedData = encoder.getOutputBuffer(encoderStatus)
-                        ?: throw RuntimeException("encoderOutputBuffer $encoderStatus was null")
-
-                    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                        bufferInfo.size = 0
-                    }
-
-                    if (bufferInfo.size != 0) {
-                        if (!muxerStarted) {
-                            throw RuntimeException("muxer hasn't started")
-                        }
-                        encodedData.position(bufferInfo.offset)
-                        encodedData.limit(bufferInfo.offset + bufferInfo.size)
-                        muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo)
-                    }
-
-                    encoder.releaseOutputBuffer(encoderStatus, false)
-
-                    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        break
-                    }
-                }
-            }
-        }
+        var totalEglSwapNs = 0L
+        var totalDrainJoinNs = 0L
+        var totalDecoderInputWaitNs = 0L
+        var totalDecoderOutputWaitNs = 0L
+        var totalSurfaceTextureWaitNs = 0L
+        var totalGlDrawNs = 0L
+        var totalEncoderDrainWaitNs = 0L
+        var totalMuxWriteNs = 0L
 
         // Helper to get or create a hardware video decoder for a clip
         fun getDecoderForClip(clip: ExportClip): HardwareVideoDecoder? {
@@ -1229,15 +1317,14 @@ class VideoExportEngine(private val context: Context) {
                 }
 
                 // 3. Submit Frame to MediaCodec
+                drainThread.error?.let { throw RuntimeException("Encoder drain failed: ${it.message}", it) }
                 val inputStart = System.nanoTime()
                 val ptsNs = (frameIndex * 1_000_000_000L) / fps
                 inputSurface.setPresentationTime(ptsNs)
                 inputSurface.swapBuffers()
-                totalInputNs += (System.nanoTime() - inputStart)
-
-                val drainStart = System.nanoTime()
-                drainEncoder(false)
-                totalDrainNs += (System.nanoTime() - drainStart)
+                val swapElapsed = System.nanoTime() - inputStart
+                totalInputNs += swapElapsed
+                totalEglSwapNs += swapElapsed
 
                 // Report progress
                 if (frameIndex % max(1, totalFrames / 20) == 0 || frameIndex == totalFrames - 1) {
@@ -1246,14 +1333,20 @@ class VideoExportEngine(private val context: Context) {
                 }
             }
 
-            // Signal End of Video Stream
-            val drainEosStart = System.nanoTime()
+            // Signal End of Video Stream and wait for background drain thread to finish
+            val drainJoinStart = System.nanoTime()
             encoder.signalEndOfInputStream()
-            drainEncoder(true)
-            totalDrainNs += (System.nanoTime() - drainEosStart)
+            drainThread.join(30_000L)
+            if (drainThread.isAlive) {
+                drainThread.isRunning = false
+                drainThread.join(1000L)
+                throw RuntimeException("Encoder drain timed out after 30 seconds")
+            }
+            drainThread.error?.let { throw RuntimeException("Encoder drain failed: ${it.message}", it) }
+            totalDrainJoinNs = System.nanoTime() - drainJoinStart
 
             // 4. Remux Audio Track if available
-            if (audioExtractor != null && audioTrackIndex != -1 && muxerStarted) {
+            if (audioExtractor != null && drainThread.audioTrackIndex != -1 && drainThread.muxerStarted) {
                 val audioStart = System.nanoTime()
                 try {
                     val maxBufferSize = if (audioFormat?.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) == true) {
@@ -1275,7 +1368,7 @@ class VideoExportEngine(private val context: Context) {
                             break
                         }
                         audioBufferInfo.flags = audioExtractor.sampleFlags
-                        muxer.writeSampleData(audioTrackIndex, audioBuffer, audioBufferInfo)
+                        muxer.writeSampleData(drainThread.audioTrackIndex, audioBuffer, audioBufferInfo)
                         audioExtractor.advance()
                     }
                 } catch (audioEx: Exception) {
@@ -1287,9 +1380,8 @@ class VideoExportEngine(private val context: Context) {
             // 5. Finalize Muxer
             val muxStart = System.nanoTime()
             try {
-                if (muxerStarted) {
+                if (drainThread.muxerStarted) {
                     muxer.stop()
-                    muxerStarted = false
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Muxer stop exception: ${e.message}")
@@ -1303,14 +1395,36 @@ class VideoExportEngine(private val context: Context) {
             val realtimeFactor = (totalDurationMs / 1000.0) / elapsedSec
             val wallClockMs = elapsedSec * 1000.0
 
+            totalDecoderInputWaitNs = 0L
+            totalDecoderOutputWaitNs = 0L
+            totalSurfaceTextureWaitNs = 0L
+            for (dec in videoDecoders.values) {
+                totalDecoderInputWaitNs += dec.totalInputWaitNs
+                totalDecoderOutputWaitNs += dec.totalOutputWaitNs
+                totalSurfaceTextureWaitNs += dec.totalSurfaceWaitNs
+            }
+            totalGlDrawNs = inputSurface.totalGlDrawNs
+            totalEncoderDrainWaitNs = drainThread.drainWaitNs
+            totalMuxWriteNs = drainThread.muxWriteNs
+            val totalDrainNs = drainThread.totalDrainNs
+
             val decInitMs = decoderInitNs / 1_000_000.0
             val decodeMs = totalDecodeNs / 1_000_000.0
             val processMs = totalProcessNs / 1_000_000.0
             val renderMs = totalRenderNs / 1_000_000.0
             val inputMs = totalInputNs / 1_000_000.0
             val drainMs = totalDrainNs / 1_000_000.0
+            val drainJoinMs = totalDrainJoinNs / 1_000_000.0
             val audioMs = audioRemuxNs / 1_000_000.0
             val muxMs = muxFinalizeNs / 1_000_000.0
+
+            val decInMs = totalDecoderInputWaitNs / 1_000_000.0
+            val decOutMs = totalDecoderOutputWaitNs / 1_000_000.0
+            val surfWaitMs = totalSurfaceTextureWaitNs / 1_000_000.0
+            val glDrawMs = totalGlDrawNs / 1_000_000.0
+            val eglSwapMs = totalEglSwapNs / 1_000_000.0
+            val encWaitMs = totalEncoderDrainWaitNs / 1_000_000.0
+            val muxWriteMs = totalMuxWriteNs / 1_000_000.0
 
             Log.i(
                 TAG,
@@ -1320,15 +1434,24 @@ Output: ${width}x${height} @ ${fps}fps ($bitrate bps)
 Total Frames: $totalFrames | Total Duration: ${totalDurationMs}ms
 Wall Clock Time: %.3fs | Effective FPS: %.2f (%.2fx realtime)
 ---------------------------------------------------------------------
-STAGE BREAKDOWN:
+PRIMARY STAGE BREAKDOWN:
 1. DECODER_INIT  : %8.2f ms (%5.1f%%)
 2. FRAME_DECODE  : %8.2f ms (%5.1f%%) | avg: %6.2f ms/frame
 3. FRAME_PROCESS : %8.2f ms (%5.1f%%) | avg: %6.2f ms/frame
 4. GPU_RENDER    : %8.2f ms (%5.1f%%) | avg: %6.2f ms/frame
 5. ENCODER_INPUT : %8.2f ms (%5.1f%%) | avg: %6.2f ms/frame
-6. ENCODER_DRAIN : %8.2f ms (%5.1f%%) | avg: %6.2f ms/frame
+6. ENCODER_DRAIN : %8.2f ms (%5.1f%%) | avg: %6.2f ms/frame (async overlapped; join wait: %.2f ms)
 7. AUDIO_REMUX   : %8.2f ms (%5.1f%%)
 8. MUX_FINALIZE  : %8.2f ms (%5.1f%%)
+---------------------------------------------------------------------
+SUB-STAGE FINE-GRAINED BREAKDOWN:
+- DECODER_INPUT_FEED  : %8.2f ms | avg: %6.2f ms/frame
+- DECODER_OUTPUT_WAIT : %8.2f ms | avg: %6.2f ms/frame
+- SURFACE_TEXTURE_WAIT: %8.2f ms | avg: %6.2f ms/frame
+- GL_DRAW             : %8.2f ms | avg: %6.2f ms/frame
+- EGL_SWAP            : %8.2f ms | avg: %6.2f ms/frame
+- ENCODER_DRAIN_WAIT  : %8.2f ms | avg: %6.2f ms/frame
+- MUX_WRITE           : %8.2f ms | avg: %6.2f ms/frame
 =====================================================================
 """.trimIndent().format(
                     elapsedSec, effectiveFps, realtimeFactor,
@@ -1337,21 +1460,32 @@ STAGE BREAKDOWN:
                     processMs, (processMs / wallClockMs) * 100.0, processMs / totalFrames,
                     renderMs, (renderMs / wallClockMs) * 100.0, renderMs / totalFrames,
                     inputMs, (inputMs / wallClockMs) * 100.0, inputMs / totalFrames,
-                    drainMs, (drainMs / wallClockMs) * 100.0, drainMs / totalFrames,
+                    drainMs, (drainMs / wallClockMs) * 100.0, drainMs / totalFrames, drainJoinMs,
                     audioMs, (audioMs / wallClockMs) * 100.0,
-                    muxMs, (muxMs / wallClockMs) * 100.0
+                    muxMs, (muxMs / wallClockMs) * 100.0,
+                    decInMs, decInMs / totalFrames,
+                    decOutMs, decOutMs / totalFrames,
+                    surfWaitMs, surfWaitMs / totalFrames,
+                    glDrawMs, glDrawMs / totalFrames,
+                    eglSwapMs, eglSwapMs / totalFrames,
+                    encWaitMs, encWaitMs / totalFrames,
+                    muxWriteMs, muxWriteMs / totalFrames
                 )
             )
 
         } finally {
             // Clean up encoder and surfaces
             try {
-                if (muxerStarted) {
+                drainThread.isRunning = false
+                if (drainThread.isAlive) {
+                    drainThread.join(1000L)
+                }
+            } catch (e: Exception) {}
+            try {
+                if (drainThread.muxerStarted) {
                     muxer.stop()
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Muxer stop exception: ${e.message}")
-            }
+            } catch (e: Exception) {}
             try { muxer.release() } catch (e: Exception) {}
             try { encoder.stop() } catch (e: Exception) {}
             try { encoder.release() } catch (e: Exception) {}
@@ -1403,9 +1537,17 @@ STAGE BREAKDOWN:
                 "frameProcessMs" to totalProcessNs / 1_000_000.0,
                 "gpuRenderMs" to totalRenderNs / 1_000_000.0,
                 "encoderInputMs" to totalInputNs / 1_000_000.0,
-                "encoderDrainMs" to totalDrainNs / 1_000_000.0,
+                "encoderDrainMs" to drainThread.totalDrainNs / 1_000_000.0,
+                "encoderDrainJoinMs" to totalDrainJoinNs / 1_000_000.0,
                 "audioRemuxMs" to audioRemuxNs / 1_000_000.0,
-                "muxFinalizeMs" to muxFinalizeNs / 1_000_000.0
+                "muxFinalizeMs" to muxFinalizeNs / 1_000_000.0,
+                "decoderInputWaitMs" to totalDecoderInputWaitNs / 1_000_000.0,
+                "decoderOutputWaitMs" to totalDecoderOutputWaitNs / 1_000_000.0,
+                "surfaceTextureWaitMs" to totalSurfaceTextureWaitNs / 1_000_000.0,
+                "glDrawMs" to totalGlDrawNs / 1_000_000.0,
+                "eglSwapMs" to totalEglSwapNs / 1_000_000.0,
+                "encoderDrainWaitMs" to totalEncoderDrainWaitNs / 1_000_000.0,
+                "muxWriteMs" to totalMuxWriteNs / 1_000_000.0
             )
         )
     }
