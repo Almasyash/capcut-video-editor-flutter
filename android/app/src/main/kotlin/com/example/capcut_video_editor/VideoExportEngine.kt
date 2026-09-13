@@ -821,15 +821,32 @@ class VideoExportEngine(private val context: Context) {
 
         fun release() {
             if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
-                EGL14.eglDestroySurface(eglDisplay, eglSurface)
-                EGL14.eglDestroyContext(eglDisplay, eglContext)
+                try {
+                    if (oesProgram != 0) GLES20.glDeleteProgram(oesProgram)
+                    if (tex2DProgram != 0) GLES20.glDeleteProgram(tex2DProgram)
+                    if (solidProgram != 0) GLES20.glDeleteProgram(solidProgram)
+                    if (transProgram != 0) GLES20.glDeleteProgram(transProgram)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error deleting GL programs: ${e.message}")
+                }
+                EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
+                if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglDestroySurface(eglDisplay, eglSurface)
+                }
+                if (eglContext != EGL14.EGL_NO_CONTEXT) {
+                    EGL14.eglDestroyContext(eglDisplay, eglContext)
+                }
                 EGL14.eglReleaseThread()
                 EGL14.eglTerminate(eglDisplay)
             }
-            surface.release()
+            try { surface.release() } catch (e: Exception) {}
             eglDisplay = EGL14.EGL_NO_DISPLAY
             eglContext = EGL14.EGL_NO_CONTEXT
             eglSurface = EGL14.EGL_NO_SURFACE
+            oesProgram = 0
+            tex2DProgram = 0
+            solidProgram = 0
+            transProgram = 0
         }
     }
 
@@ -1489,19 +1506,25 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
             try { muxer.release() } catch (e: Exception) {}
             try { encoder.stop() } catch (e: Exception) {}
             try { encoder.release() } catch (e: Exception) {}
-            try { inputSurface.release() } catch (e: Exception) {}
-            try { audioExtractor?.release() } catch (e: Exception) {}
+
+            // Clean up OpenGL FBOs, textures, and decoder surfaces while EGL context is still current
+            try { fboA?.release() } catch (e: Exception) {}
+            try { fboB?.release() } catch (e: Exception) {}
+            try {
+                photoTextures.values.forEach { tex ->
+                    val textures = intArrayOf(tex)
+                    GLES20.glDeleteTextures(1, textures, 0)
+                }
+                photoTextures.clear()
+            } catch (e: Exception) {}
             videoDecoders.values.forEach { it.release() }
             videoDecoders.clear()
-            photoTextures.values.forEach { tex ->
-                val textures = intArrayOf(tex)
-                GLES20.glDeleteTextures(1, textures, 0)
-            }
-            photoTextures.clear()
+
+            // Now release EGL and input surface
+            try { inputSurface.release() } catch (e: Exception) {}
+            try { audioExtractor?.release() } catch (e: Exception) {}
             photoBitmaps.values.forEach { try { it.recycle() } catch (e: Exception) {} }
             photoBitmaps.clear()
-            fboA?.release()
-            fboB?.release()
         }
 
         if (!tempOutputFile.exists() || tempOutputFile.length() == 0L) {
