@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:capcut_video_editor/domain/models/transition.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/project.dart';
@@ -64,25 +65,81 @@ class TransitionValidator {
       errors.add('Transition duration must be <= 3.0s');
     }
     
-    // 6. usable left duration (consider trim and speed)
-    if (leftClip != null) {
-      final usableLeft = _usableDuration(leftClip);
-      if (duration > usableLeft) {
-        errors.add('Transition duration exceeds usable left clip duration ($usableLeft s)');
+    // 6. Dynamic maximum duration evaluation
+    if (leftClip != null && rightClip != null) {
+      final maxAllowed = calculateMaxDuration(
+        leftClip,
+        rightClip,
+        existingTransitions: project.transitions,
+        currentTransitionId: transition.id,
+      );
+      if (duration > maxAllowed + 0.01) {
+        errors.add('Transition duration ($duration s) exceeds maximum valid duration ($maxAllowed s)');
       }
-    }
-    // 7. usable right duration
-    if (rightClip != null) {
-      final usableRight = _usableDuration(rightClip);
-      if (duration > usableRight) {
-        errors.add('Transition duration exceeds usable right clip duration ($usableRight s)');
+    } else {
+      if (leftClip != null) {
+        final usableLeft = usableDuration(leftClip);
+        if (duration > usableLeft) {
+          errors.add('Transition duration exceeds usable left clip duration ($usableLeft s)');
+        }
+      }
+      if (rightClip != null) {
+        final usableRight = usableDuration(rightClip);
+        if (duration > usableRight) {
+          errors.add('Transition duration exceeds usable right clip duration ($usableRight s)');
+        }
       }
     }
     return errors;
   }
 
+  /// Dynamically computes the maximum valid transition duration between two clips.
+  /// Accounts for active duration, head/tail handles, speed, and collision with adjacent transitions.
+  static double calculateMaxDuration(
+    VideoClip leftClip,
+    VideoClip rightClip, {
+    List<Transition>? existingTransitions,
+    String? currentTransitionId,
+  }) {
+    final usableLeft = usableDuration(leftClip);
+    final usableRight = usableDuration(rightClip);
+
+    // Baseline active bounds: a transition cannot exceed either clip's active timeline duration
+    double maxPossible = math.min(usableLeft, usableRight);
+
+    // If both clips are trimmed and have source handles, check handle bounds
+    final availableTailSec = (leftClip.originalDuration - leftClip.trimEnd).inMilliseconds / 1000.0 / leftClip.speed;
+    final availableHeadSec = rightClip.trimStart.inMilliseconds / 1000.0 / rightClip.speed;
+
+    if (availableTailSec > 0.05 && availableHeadSec > 0.05) {
+      final handleMax = 2.0 * math.min(availableTailSec, availableHeadSec);
+      maxPossible = math.min(maxPossible, handleMax);
+    }
+
+    // Check adjacent transitions to prevent overlapping transition windows
+    if (existingTransitions != null && existingTransitions.isNotEmpty) {
+      for (final t in existingTransitions) {
+        if (!t.enabled || t.id == currentTransitionId) continue;
+        // If there's an existing transition to the left of leftClip:
+        if (t.rightClipId == leftClip.id) {
+          final remainingLeft = usableLeft - (t.duration / 2.0);
+          maxPossible = math.min(maxPossible, 2.0 * math.max(0.05, remainingLeft));
+        }
+        // If there's an existing transition to the right of rightClip:
+        if (t.leftClipId == rightClip.id) {
+          final remainingRight = usableRight - (t.duration / 2.0);
+          maxPossible = math.min(maxPossible, 2.0 * math.max(0.05, remainingRight));
+        }
+      }
+    }
+
+    // Dynamic clamp between 0.1s and 3.0s (or clip active duration if < 0.1s in edge cases)
+    final clamped = maxPossible.clamp(0.1, 3.0);
+    return double.parse(clamped.toStringAsFixed(2));
+  }
+
   /// Helper to compute usable duration after trim and speed.
-  double _usableDuration(VideoClip clip) {
+  static double usableDuration(VideoClip clip) {
     final start = clip.trimStart.inMilliseconds / 1000.0;
     final end = clip.trimEnd.inMilliseconds / 1000.0;
     final base = (end - start).clamp(0.0, clip.originalDuration.inMilliseconds / 1000.0);
@@ -90,3 +147,4 @@ class TransitionValidator {
     return base / speed;
   }
 }
+

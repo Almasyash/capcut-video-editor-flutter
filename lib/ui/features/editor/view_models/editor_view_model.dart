@@ -2864,6 +2864,33 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
+  int? _selectedTransitionBoundaryIndex;
+  int? get selectedTransitionBoundaryIndex => _selectedTransitionBoundaryIndex;
+
+  void selectTransitionBoundary(int? index) {
+    _selectedTransitionBoundaryIndex = index;
+    notifyListeners();
+  }
+
+  /// Calculates dynamic maximum transition duration for the given adjacent clips.
+  double getMaxTransitionDurationForBoundary(String leftClipId, String rightClipId) {
+    final left = _videoClips.where((c) => c.id == leftClipId).firstOrNull;
+    final right = _videoClips.where((c) => c.id == rightClipId).firstOrNull;
+    if (left == null || right == null) return 0.5;
+    return TransitionValidator.calculateMaxDuration(
+      left,
+      right,
+      existingTransitions: _currentProject.transitions,
+    );
+  }
+
+  /// Canonical mapping from timeline time to clip source time.
+  static double timelineToSourceTime(VideoClip clip, double timelinePos, double clipTimelineStart) {
+    final deltaSec = (timelinePos - clipTimelineStart);
+    final sourceOffsetSec = (clip.trimStart.inMilliseconds / 1000.0) + (deltaSec * clip.speed);
+    return sourceOffsetSec.clamp(0.0, clip.originalDuration.inMilliseconds / 1000.0);
+  }
+
   /// Evaluates and returns the active transition state at the current playhead position,
   /// or null if no transition is currently active.
   ActiveTransitionState? get activeTransitionAtPlayhead {
@@ -2884,6 +2911,9 @@ class EditorViewModel extends ChangeNotifier {
 
           if (_playheadPosition >= transitionStart && _playheadPosition <= transitionEnd) {
             final progress = ((_playheadPosition - transitionStart) / transition.duration).clamp(0.0, 1.0);
+            final sourceTimeA = timelineToSourceTime(leftClip, _playheadPosition, accumulated);
+            final sourceTimeB = timelineToSourceTime(rightClip, _playheadPosition, boundaryTime);
+
             return ActiveTransitionState(
               transition: transition,
               leftClip: leftClip,
@@ -2893,6 +2923,8 @@ class EditorViewModel extends ChangeNotifier {
               transitionStartTime: transitionStart,
               transitionEndTime: transitionEnd,
               progress: progress,
+              sourceTimeA: sourceTimeA,
+              sourceTimeB: sourceTimeB,
             );
           }
         }
@@ -2913,6 +2945,11 @@ class ActiveTransitionState {
   final double transitionStartTime;
   final double transitionEndTime;
   final double progress; // 0.0 to 1.0
+  final double sourceTimeA; // in seconds
+  final double sourceTimeB; // in seconds
+
+  int get sourceOffsetMsA => (sourceTimeA * 1000).round();
+  int get sourceOffsetMsB => (sourceTimeB * 1000).round();
 
   const ActiveTransitionState({
     required this.transition,
@@ -2923,5 +2960,8 @@ class ActiveTransitionState {
     required this.transitionStartTime,
     required this.transitionEndTime,
     required this.progress,
+    required this.sourceTimeA,
+    required this.sourceTimeB,
   });
 }
+

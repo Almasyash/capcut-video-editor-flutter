@@ -57,10 +57,35 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
       VideoPlaybackService.instance.disposeSession(_session!.textureId);
       _session = null;
     }
+    if (_secondarySession != null) {
+      VideoPlaybackService.instance.disposeSession(_secondarySession!.textureId);
+      _secondarySession = null;
+    }
     super.dispose();
   }
 
+  VideoPlayerSession? _secondarySession;
+  String? _secondaryLoadedPath;
+  String? _secondaryClipId;
+
   void _syncPlayerWithModel() {
+    final activeTransition = widget.viewModel.activeTransitionAtPlayhead;
+
+    if (activeTransition != null) {
+      _syncTransitionPlayback(activeTransition);
+    } else {
+      _syncNormalPlayback();
+    }
+  }
+
+  void _syncNormalPlayback() {
+    if (_secondarySession != null) {
+      VideoPlaybackService.instance.disposeSession(_secondarySession!.textureId);
+      _secondarySession = null;
+      _secondaryLoadedPath = null;
+      _secondaryClipId = null;
+    }
+
     final activeClip = widget.viewModel.currentActiveClipAtPlayhead;
     final activeClipStart = widget.viewModel.activeClipStartTimeAtPlayhead;
     String? localPath;
@@ -153,6 +178,116 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
       }
     }
   }
+
+  void _syncTransitionPlayback(ActiveTransitionState trans) {
+    final leftClip = trans.leftClip;
+    final rightClip = trans.rightClip;
+    String? pathA;
+    String? pathB;
+
+    final assetA = widget.viewModel.getAssetById(leftClip.assetId);
+    if (assetA != null && !assetA.isPhoto) {
+      pathA = assetA.localPath;
+    }
+    final assetB = widget.viewModel.getAssetById(rightClip.assetId);
+    if (assetB != null && !assetB.isPhoto) {
+      pathB = assetB.localPath;
+    }
+
+    // Primary session: Clip A
+    _lastActiveClipId = leftClip.id;
+    if (pathA != _loadedPath) {
+      _loadedPath = pathA;
+      if (_session != null) {
+        VideoPlaybackService.instance.disposeSession(_session!.textureId);
+        _session = null;
+      }
+      if (pathA != null && !pathA.startsWith('content://') && !kIsWeb && File(pathA).existsSync()) {
+        VideoPlaybackService.instance.createSession(pathA).then((session) {
+          if (mounted && _loadedPath == pathA) {
+            setState(() {
+              _session = session;
+            });
+            if (session != null) {
+              VideoPlaybackService.instance.setVolume(session.textureId, leftClip.effectiveVolume * (1.0 - trans.progress));
+              VideoPlaybackService.instance.setSpeed(session.textureId, leftClip.speed);
+              if (widget.viewModel.isPlaying) {
+                VideoPlaybackService.instance.play(session.textureId, position: Duration(milliseconds: trans.sourceOffsetMsA));
+              } else {
+                VideoPlaybackService.instance.seekTo(session.textureId, Duration(milliseconds: trans.sourceOffsetMsA));
+              }
+            }
+          }
+        });
+      }
+    } else if (_session != null && _session!.isInitialized) {
+      VideoPlaybackService.instance.setVolume(sessionSafeId(_session!), leftClip.effectiveVolume * (1.0 - trans.progress));
+      VideoPlaybackService.instance.setSpeed(sessionSafeId(_session!), leftClip.speed);
+    }
+
+    // Secondary session: Clip B
+    _secondaryClipId = rightClip.id;
+    if (pathB != _secondaryLoadedPath) {
+      _secondaryLoadedPath = pathB;
+      if (_secondarySession != null) {
+        VideoPlaybackService.instance.disposeSession(_secondarySession!.textureId);
+        _secondarySession = null;
+      }
+      if (pathB != null && !pathB.startsWith('content://') && !kIsWeb && File(pathB).existsSync()) {
+        VideoPlaybackService.instance.createSession(pathB).then((session) {
+          if (mounted && _secondaryLoadedPath == pathB) {
+            setState(() {
+              _secondarySession = session;
+            });
+            if (session != null) {
+              VideoPlaybackService.instance.setVolume(session.textureId, rightClip.effectiveVolume * trans.progress);
+              VideoPlaybackService.instance.setSpeed(session.textureId, rightClip.speed);
+              if (widget.viewModel.isPlaying) {
+                VideoPlaybackService.instance.play(session.textureId, position: Duration(milliseconds: trans.sourceOffsetMsB));
+              } else {
+                VideoPlaybackService.instance.seekTo(session.textureId, Duration(milliseconds: trans.sourceOffsetMsB));
+              }
+            }
+          }
+        });
+      }
+    } else if (_secondarySession != null && _secondarySession!.isInitialized) {
+      VideoPlaybackService.instance.setVolume(sessionSafeId(_secondarySession!), rightClip.effectiveVolume * trans.progress);
+      VideoPlaybackService.instance.setSpeed(sessionSafeId(_secondarySession!), rightClip.speed);
+    }
+
+    // Play / Pause / Scrub sync across both sessions
+    if (widget.viewModel.isPlaying && !_isPlaying) {
+      _isPlaying = true;
+      if (_session != null && _session!.isInitialized) {
+        VideoPlaybackService.instance.play(_session!.textureId, position: Duration(milliseconds: trans.sourceOffsetMsA));
+      }
+      if (_secondarySession != null && _secondarySession!.isInitialized) {
+        VideoPlaybackService.instance.play(_secondarySession!.textureId, position: Duration(milliseconds: trans.sourceOffsetMsB));
+      }
+    } else if (!widget.viewModel.isPlaying && _isPlaying) {
+      _isPlaying = false;
+      if (_session != null && _session!.isInitialized) {
+        VideoPlaybackService.instance.pause(_session!.textureId);
+        VideoPlaybackService.instance.seekTo(_session!.textureId, Duration(milliseconds: trans.sourceOffsetMsA));
+      }
+      if (_secondarySession != null && _secondarySession!.isInitialized) {
+        VideoPlaybackService.instance.pause(_secondarySession!.textureId);
+        VideoPlaybackService.instance.seekTo(_secondarySession!.textureId, Duration(milliseconds: trans.sourceOffsetMsB));
+      }
+      _lastPlayheadPosition = widget.viewModel.playheadPosition;
+    } else if (!widget.viewModel.isPlaying && (_lastPlayheadPosition - widget.viewModel.playheadPosition).abs() > 0.02) {
+      _lastPlayheadPosition = widget.viewModel.playheadPosition;
+      if (_session != null && _session!.isInitialized) {
+        VideoPlaybackService.instance.seekTo(_session!.textureId, Duration(milliseconds: trans.sourceOffsetMsA));
+      }
+      if (_secondarySession != null && _secondarySession!.isInitialized) {
+        VideoPlaybackService.instance.seekTo(_secondarySession!.textureId, Duration(milliseconds: trans.sourceOffsetMsB));
+      }
+    }
+  }
+
+  int sessionSafeId(VideoPlayerSession s) => s.textureId;
 
   @override
   Widget build(BuildContext context) {
@@ -689,12 +824,25 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
           errorBuilder: (ctx, err, stack) => _buildPlaceholderGraphic(clip),
         );
       } else {
-        final isActiveClip = viewModel.currentActiveClipAtPlayhead?.id == clip.id;
-        if (isActiveClip && _session != null && _session!.isInitialized) {
+        final isSessionA = (_lastActiveClipId == clip.id || viewModel.currentActiveClipAtPlayhead?.id == clip.id) &&
+            _session != null &&
+            _session!.isInitialized;
+        final isSessionB = _secondaryClipId == clip.id &&
+            _secondarySession != null &&
+            _secondarySession!.isInitialized;
+
+        if (isSessionA) {
           canvasChild = Center(
             child: AspectRatio(
               aspectRatio: _session!.aspectRatio,
               child: Texture(textureId: _session!.textureId),
+            ),
+          );
+        } else if (isSessionB) {
+          canvasChild = Center(
+            child: AspectRatio(
+              aspectRatio: _secondarySession!.aspectRatio,
+              child: Texture(textureId: _secondarySession!.textureId),
             ),
           );
         } else if (hasThumbnail) {

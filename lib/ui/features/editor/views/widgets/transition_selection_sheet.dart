@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
@@ -32,65 +33,96 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
   TransitionCategory? _selectedCategory;
   bool _applyToAll = false;
 
+  double get _maxAllowedDuration {
+    return widget.viewModel.getMaxTransitionDurationForBoundary(
+      widget.leftClipId,
+      widget.rightClipId,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _selectedType = widget.existingTransition?.type ?? TransitionType.fade;
-    _duration = widget.existingTransition?.duration ?? TransitionRegistry.defaultDuration;
+    final maxAllowed = widget.viewModel.getMaxTransitionDurationForBoundary(
+      widget.leftClipId,
+      widget.rightClipId,
+    );
+    final initialDuration = widget.existingTransition?.duration ?? TransitionRegistry.defaultDuration;
+    _duration = initialDuration.clamp(TransitionRegistry.minDuration, maxAllowed);
     _selectedCategory = _selectedType == TransitionType.none
         ? null
         : _selectedType.category;
   }
 
-  void _applyTransition() {
+  void _onSelectType(TransitionType type) {
+    setState(() {
+      _selectedType = type;
+    });
+    _syncToViewModel(type, _duration);
+  }
+
+  void _onDurationChanged(double duration) {
+    setState(() {
+      _duration = duration;
+    });
+    if (_selectedType != TransitionType.none) {
+      _syncToViewModel(_selectedType, duration);
+    }
+  }
+
+  void _syncToViewModel(TransitionType type, double duration) {
     if (_applyToAll) {
-      final result = widget.viewModel.applyTransitionToAll(
-        type: _selectedType,
-        duration: _duration,
-      );
-      if (!result.success) {
-        _showError(result.errors.isNotEmpty ? result.errors.first : 'Failed to apply to all');
-        return;
+      final result = widget.viewModel.applyTransitionToAll(type: type, duration: duration);
+      if (!result.success && result.errors.isNotEmpty) {
+        _showError(result.errors.first);
       }
-      Navigator.of(context).pop();
       return;
     }
 
-    if (_selectedType == TransitionType.none) {
-      if (widget.existingTransition != null) {
-        widget.viewModel.removeTransition(widget.existingTransition!.id);
+    if (type == TransitionType.none) {
+      final current = widget.viewModel.transitions.where(
+        (t) => t.leftClipId == widget.leftClipId && t.rightClipId == widget.rightClipId,
+      ).firstOrNull;
+      if (current != null) {
+        widget.viewModel.removeTransition(current.id);
       }
-      Navigator.of(context).pop();
       return;
     }
+
+    final current = widget.viewModel.transitions.where(
+      (t) => t.leftClipId == widget.leftClipId && t.rightClipId == widget.rightClipId,
+    ).firstOrNull;
 
     final newTransition = Transition(
-      id: widget.existingTransition?.id,
-      type: _selectedType,
-      duration: _duration,
+      id: current?.id,
+      type: type,
+      duration: duration,
       leftClipId: widget.leftClipId,
       rightClipId: widget.rightClipId,
     );
 
-    final result = widget.existingTransition != null
-        ? widget.viewModel.replaceTransition(
-            oldId: widget.existingTransition!.id,
-            replacement: newTransition,
-          )
+    final result = current != null
+        ? widget.viewModel.replaceTransition(oldId: current.id, replacement: newTransition)
         : widget.viewModel.addTransition(newTransition);
 
-    if (!result.success) {
-      _showError(result.errors.isNotEmpty ? result.errors.first : 'Failed to apply transition');
-    } else {
-      Navigator.of(context).pop();
+    if (!result.success && result.errors.isNotEmpty) {
+      _showError(result.errors.first);
     }
   }
 
-  void _removeTransition() {
-    if (widget.existingTransition != null) {
-      widget.viewModel.removeTransition(widget.existingTransition!.id);
+  void _done() {
+    if (_selectedType != TransitionType.none) {
+      _syncToViewModel(_selectedType, _duration);
     }
     Navigator.of(context).pop();
+  }
+
+  void _removeTransition() {
+    setState(() {
+      _selectedType = TransitionType.none;
+    });
+    _syncToViewModel(TransitionType.none, _duration);
   }
 
   void _showError(String message) {
@@ -114,6 +146,12 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final maxAllowed = _maxAllowedDuration;
+    final leftClip = widget.viewModel.videoClips.where((c) => c.id == widget.leftClipId).firstOrNull;
+    final rightClip = widget.viewModel.videoClips.where((c) => c.id == widget.rightClipId).firstOrNull;
+    final leftTitle = leftClip != null ? leftClip.title : 'Clip A';
+    final rightTitle = rightClip != null ? rightClip.title : 'Clip B';
+
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.surface,
@@ -130,32 +168,66 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.auto_awesome, color: AppColors.primary, size: 20),
-                    SizedBox(width: 8),
-                    Text(
-                      'Transitions',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textPrimary,
-                      ),
+                    const Row(
+                      children: [
+                        Icon(Icons.auto_awesome, color: AppColors.primary, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Transitions',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceLight,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '$leftTitle → $rightTitle',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Max: ${maxAllowed.toStringAsFixed(1)}s',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
                 Row(
                   children: [
-                    if (widget.existingTransition != null)
+                    if (widget.existingTransition != null || _selectedType != TransitionType.none)
                       IconButton(
                         tooltip: 'Remove transition',
                         icon: const Icon(Icons.delete_outline, color: AppColors.error, size: 22),
                         onPressed: _removeTransition,
                       ),
                     IconButton(
-                      tooltip: 'Apply',
+                      tooltip: 'Done',
                       icon: const Icon(Icons.check_circle_rounded, color: AppColors.primary, size: 26),
-                      onPressed: _applyTransition,
+                      onPressed: _done,
                     ),
                   ],
                 ),
@@ -191,11 +263,7 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
                   final isSelected = _selectedType == type;
 
                   return InkWell(
-                    onTap: () {
-                      setState(() {
-                        _selectedType = type;
-                      });
-                    },
+                    onTap: () => _onSelectType(type),
                     borderRadius: BorderRadius.circular(8),
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 180),
@@ -257,7 +325,7 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      '${_duration.toStringAsFixed(1)}s',
+                      '${_duration.toStringAsFixed(2)}s',
                       style: const TextStyle(
                         color: AppColors.primary,
                         fontWeight: FontWeight.bold,
@@ -274,16 +342,14 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
                   trackHeight: 3,
                 ),
                 child: Slider(
-                  value: _duration,
+                  value: _duration.clamp(TransitionRegistry.minDuration, maxAllowed),
                   min: TransitionRegistry.minDuration,
-                  max: TransitionRegistry.maxDuration,
-                  divisions: 29, // 0.1s steps from 0.1 to 3.0
+                  max: maxAllowed > TransitionRegistry.minDuration ? maxAllowed : TransitionRegistry.minDuration + 0.01,
+                  divisions: math.max(1, ((maxAllowed - TransitionRegistry.minDuration) * 10).round()),
                   activeColor: AppColors.primary,
                   inactiveColor: AppColors.surfaceLight,
                   onChanged: (val) {
-                    setState(() {
-                      _duration = double.parse(val.toStringAsFixed(1));
-                    });
+                    _onDurationChanged(double.parse(val.toStringAsFixed(2)));
                   },
                 ),
               ),

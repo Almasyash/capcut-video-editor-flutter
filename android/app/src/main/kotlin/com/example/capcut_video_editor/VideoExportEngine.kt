@@ -1456,8 +1456,10 @@ class VideoExportEngine(private val context: Context) {
                     val leftClip = clips[leftClipIndex]
                     val rightClip = clips[rightClipIndex]
 
-                    val leftLocalMs = ((currentTimeMs - clipStartTimes[leftClipIndex]) * leftClip.speed + leftClip.trimStartMs).toLong()
-                    val rightLocalMs = ((currentTimeMs - clipStartTimes[rightClipIndex]) * rightClip.speed + rightClip.trimStartMs).toLong().coerceAtLeast(rightClip.trimStartMs)
+                    val leftLocalMs = ((currentTimeMs - clipStartTimes[leftClipIndex]) * leftClip.speed + leftClip.trimStartMs)
+                        .toLong().coerceIn(0L, leftClip.originalDurationMs)
+                    val rightLocalMs = ((currentTimeMs - clipStartTimes[rightClipIndex]) * rightClip.speed + rightClip.trimStartMs)
+                        .toLong().coerceIn(0L, rightClip.originalDurationMs)
 
                     // Render Outgoing to FBO A
                     fboA.bind()

@@ -316,4 +316,203 @@ void main() {
       expect(manager.getProgram(TransitionType.fade), isNull);
     });
   });
+
+  group('Phase 8.1 — True CapCut-Style Transition Engine & Overlap Tests', () {
+    test('calculateMaxDuration dynamically clamps duration by clip active lengths and handles', () {
+      // 1. Untrimmed clips with 1.2s and 0.8s active durations
+      const clip1 = VideoClip(
+        id: 'c1',
+        assetId: 'a1',
+        title: 'Clip 1',
+        originalDuration: Duration(seconds: 4),
+        trimStart: Duration.zero,
+        trimEnd: Duration(milliseconds: 1200),
+        previewGradient: [Colors.blue, Colors.green],
+      );
+      const clip2 = VideoClip(
+        id: 'c2',
+        assetId: 'a2',
+        title: 'Clip 2',
+        originalDuration: Duration(seconds: 4),
+        trimStart: Duration.zero,
+        trimEnd: Duration(milliseconds: 800),
+        previewGradient: [Colors.purple, Colors.pink],
+      );
+
+      final maxDurUntrimmed = TransitionValidator.calculateMaxDuration(clip1, clip2);
+      expect(maxDurUntrimmed, 0.8);
+
+      // 2. Trimmed clips with handles (e.g. clip A has 0.6s tail, clip B has 0.8s head)
+      const clipTrimmedA = VideoClip(
+        id: 'cta',
+        assetId: 'a1',
+        title: 'Trimmed A',
+        originalDuration: Duration(milliseconds: 5000),
+        trimStart: Duration(milliseconds: 1000),
+        trimEnd: Duration(milliseconds: 4400), // available tail = 600ms = 0.6s
+        previewGradient: [Colors.blue, Colors.green],
+      );
+      const clipTrimmedB = VideoClip(
+        id: 'ctb',
+        assetId: 'a2',
+        title: 'Trimmed B',
+        originalDuration: Duration(milliseconds: 5000),
+        trimStart: Duration(milliseconds: 800), // available head = 800ms = 0.8s
+        trimEnd: Duration(milliseconds: 4000),
+        previewGradient: [Colors.purple, Colors.pink],
+      );
+
+      final maxDurHandles = TransitionValidator.calculateMaxDuration(clipTrimmedA, clipTrimmedB);
+      // 2.0 * min(0.6, 0.8) = 1.2s
+      expect(maxDurHandles, 1.2);
+
+      // 3. Clamped by adjacent existing transition to prevent overlapping transition windows
+      final existingTrans = [
+        Transition(
+          id: 'trans_prev',
+          type: TransitionType.fade,
+          duration: 1.0, // takes 0.5s on left of clipTrimmedA
+          leftClipId: 'c_prior',
+          rightClipId: 'cta',
+        ),
+      ];
+      final maxDurAdjacent = TransitionValidator.calculateMaxDuration(
+        clipTrimmedA,
+        clipTrimmedB,
+        existingTransitions: existingTrans,
+      );
+      expect(maxDurAdjacent <= 1.2, isTrue);
+    });
+
+    test('timelineToSourceTime accurately computes head and tail source times across transition window', () {
+      const clipA = VideoClip(
+        id: 'cA',
+        assetId: 'aA',
+        title: 'Clip A',
+        originalDuration: Duration(milliseconds: 6000),
+        trimStart: Duration(milliseconds: 1000),
+        trimEnd: Duration(milliseconds: 5000), // 4.0s active
+        speed: 1.0,
+        previewGradient: [Colors.blue, Colors.green],
+      );
+      const clipB = VideoClip(
+        id: 'cB',
+        assetId: 'aB',
+        title: 'Clip B',
+        originalDuration: Duration(milliseconds: 6000),
+        trimStart: Duration(milliseconds: 2000), // 2.0s head handle
+        trimEnd: Duration(milliseconds: 6000), // 4.0s active
+        speed: 1.0,
+        previewGradient: [Colors.purple, Colors.pink],
+      );
+
+      // Cut boundary is at timeline 4.0s. 1.0s transition spans [3.5s, 4.5s]
+      // At 3.5s (transition start):
+      final srcAStart = EditorViewModel.timelineToSourceTime(clipA, 3.5, 0.0);
+      final srcBStart = EditorViewModel.timelineToSourceTime(clipB, 3.5, 4.0);
+      // Clip A is at 1.0s + 3.5s = 4.5s
+      expect(srcAStart, closeTo(4.5, 0.01));
+      // Clip B has 2.0s trimStart - 0.5s = 1.5s (reading head handle!)
+      expect(srcBStart, closeTo(1.5, 0.01));
+
+      // At 4.0s (midpoint / cut):
+      final srcAMid = EditorViewModel.timelineToSourceTime(clipA, 4.0, 0.0);
+      final srcBMid = EditorViewModel.timelineToSourceTime(clipB, 4.0, 4.0);
+      expect(srcAMid, closeTo(5.0, 0.01)); // trimEnd
+      expect(srcBMid, closeTo(2.0, 0.01)); // trimStart
+
+      // At 4.5s (transition end):
+      final srcAEnd = EditorViewModel.timelineToSourceTime(clipA, 4.5, 0.0);
+      final srcBEnd = EditorViewModel.timelineToSourceTime(clipB, 4.5, 4.0);
+      expect(srcAEnd, closeTo(5.5, 0.01)); // reading tail handle!
+      expect(srcBEnd, closeTo(2.5, 0.01));
+    });
+
+    test('EditorViewModel supports boundary selection and dynamic max duration lookup', () {
+      final vm = EditorViewModel();
+      const clip1 = VideoClip(
+        id: 'clip_1',
+        assetId: 'a1',
+        title: 'Clip 1',
+        originalDuration: Duration(seconds: 5),
+        trimStart: Duration.zero,
+        trimEnd: Duration(seconds: 2), // 2.0s
+        previewGradient: [Colors.blue, Colors.green],
+      );
+      const clip2 = VideoClip(
+        id: 'clip_2',
+        assetId: 'a2',
+        title: 'Clip 2',
+        originalDuration: Duration(seconds: 5),
+        trimStart: Duration.zero,
+        trimEnd: Duration(seconds: 1), // 1.0s
+        previewGradient: [Colors.purple, Colors.pink],
+      );
+
+      vm.loadProject(Project(
+        id: 'test_phase8_1',
+        name: 'Phase 8.1 Test',
+        videoClips: [clip1, clip2],
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      ));
+
+      expect(vm.selectedTransitionBoundaryIndex, isNull);
+      vm.selectTransitionBoundary(0);
+      expect(vm.selectedTransitionBoundaryIndex, 0);
+
+      final maxDur = vm.getMaxTransitionDurationForBoundary('clip_1', 'clip_2');
+      expect(maxDur, 1.0); // limited by 1.0s active duration of clip2
+
+      vm.selectTransitionBoundary(null);
+      expect(vm.selectedTransitionBoundaryIndex, isNull);
+    });
+
+    test('ActiveTransitionState provides millisecond source offsets for hardware decoding', () {
+      final vm = EditorViewModel();
+      const clip1 = VideoClip(
+        id: 'c1',
+        assetId: 'a1',
+        title: 'Clip 1',
+        originalDuration: Duration(seconds: 10),
+        trimStart: Duration.zero,
+        trimEnd: Duration(seconds: 4),
+        previewGradient: [Colors.blue, Colors.green],
+      );
+      const clip2 = VideoClip(
+        id: 'c2',
+        assetId: 'a2',
+        title: 'Clip 2',
+        originalDuration: Duration(seconds: 10),
+        trimStart: Duration.zero,
+        trimEnd: Duration(seconds: 4),
+        previewGradient: [Colors.purple, Colors.pink],
+      );
+
+      vm.loadProject(Project(
+        id: 'test_phase8_1_ms',
+        name: 'Phase 8.1 MS',
+        videoClips: [clip1, clip2],
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        transitions: [
+          Transition(
+            id: 't1',
+            type: TransitionType.slideLeft,
+            duration: 1.0,
+            leftClipId: 'c1',
+            rightClipId: 'c2',
+          ),
+        ],
+      ));
+
+      // Seek to transition midpoint (4.0s)
+      vm.seekTo(4.0);
+      final state = vm.activeTransitionAtPlayhead;
+      expect(state, isNotNull);
+      expect(state!.progress, closeTo(0.5, 0.01));
+      expect(state.sourceOffsetMsA, 4000);
+      expect(state.sourceOffsetMsB, 0);
+    });
+  });
 }

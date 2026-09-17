@@ -9,6 +9,7 @@ import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_m
 import 'audio_track_item.dart';
 import 'media_picker_sheet.dart';
 import 'package:capcut_video_editor/domain/models/transition.dart';
+import 'package:capcut_video_editor/domain/enums/transition_type.dart';
 import 'timeline_clip_item.dart';
 import 'timeline_ruler.dart';
 import 'transition_selection_sheet.dart';
@@ -443,16 +444,20 @@ class _TimelineSectionState extends State<TimelineSection> {
               Transition? existingTransition;
               try {
                 existingTransition = viewModel.transitions.firstWhere(
-                  (t) => t.leftClipId == clip.id && t.rightClipId == nextClip.id,
+                  (t) => t.leftClipId == clip.id && t.rightClipId == nextClip.id && t.enabled && t.type != TransitionType.none,
                 );
               } catch (_) {}
+
+              final isSelected = viewModel.selectedTransitionBoundaryIndex == idx;
 
               return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   clipWidget,
                   GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () {
+                      viewModel.selectTransitionBoundary(idx);
                       showModalBottomSheet(
                         context: context,
                         isScrollControlled: true,
@@ -463,40 +468,91 @@ class _TimelineSectionState extends State<TimelineSection> {
                           rightClipId: nextClip.id,
                           existingTransition: existingTransition,
                         ),
-                      );
+                      ).whenComplete(() {
+                        viewModel.selectTransitionBoundary(null);
+                      });
                     },
                     child: Container(
-                      width: 22,
-                      height: 22,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        color: existingTransition != null
-                            ? AppColors.primary
-                            : AppColors.surfaceLight,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: existingTransition != null
-                              ? Colors.white
-                              : AppColors.divider,
-                          width: 1.2,
-                        ),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black45,
-                            blurRadius: 3,
-                            offset: Offset(0, 1),
-                          )
-                        ],
-                      ),
-                      child: Icon(
-                        existingTransition != null
-                            ? Icons.transform_rounded
-                            : Icons.hourglass_empty_rounded,
-                        size: 13,
-                        color: existingTransition != null
-                            ? Colors.black
-                            : AppColors.textMuted,
-                      ),
+                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      alignment: Alignment.center,
+                      child: existingTransition != null
+                          ? Container(
+                              height: 28,
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              margin: const EdgeInsets.symmetric(horizontal: 2),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppColors.primary
+                                    : AppColors.surfaceElevated,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? Colors.white
+                                      : AppColors.primary,
+                                  width: isSelected ? 1.8 : 1.2,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: isSelected
+                                        ? AppColors.primary.withValues(alpha: 0.5)
+                                        : Colors.black45,
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  )
+                                ],
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.auto_awesome,
+                                    size: 13,
+                                    color: isSelected ? Colors.black : AppColors.primary,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '${existingTransition.duration.toStringAsFixed(1)}s',
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: isSelected ? Colors.black : Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : Container(
+                              width: 18,
+                              height: 26,
+                              margin: const EdgeInsets.symmetric(horizontal: 2),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppColors.primary.withValues(alpha: 0.3)
+                                    : AppColors.surfaceElevated,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: isSelected ? AppColors.primary : AppColors.divider,
+                                  width: isSelected ? 1.5 : 1.0,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Colors.black38,
+                                    blurRadius: 2,
+                                    offset: Offset(0, 1),
+                                  )
+                                ],
+                              ),
+                              child: Center(
+                                child: Container(
+                                  width: 2,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? AppColors.primary : AppColors.textMuted,
+                                    borderRadius: BorderRadius.circular(1),
+                                  ),
+                                ),
+                              ),
+                            ),
                     ),
                   ),
                 ],
