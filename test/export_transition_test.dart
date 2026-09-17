@@ -128,7 +128,7 @@ void main() {
       expect(progressValues.last, 1.0);
     });
 
-    test('All 12 TransitionTypes are supported in export without error', () async {
+    test('All 18 TransitionTypes are supported in export without error', () async {
       for (final type in TransitionType.values) {
         final transition = Transition(
           type: type,

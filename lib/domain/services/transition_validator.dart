@@ -60,8 +60,8 @@ class TransitionValidator {
     if (duration < 0.1) {
       errors.add('Transition duration must be >= 0.1s');
     }
-    if (duration > 2.0) {
-      errors.add('Transition duration must be <= 2.0s');
+    if (duration > 3.0) {
+      errors.add('Transition duration must be <= 3.0s');
     }
     
     // 6. usable left duration (consider trim and speed)

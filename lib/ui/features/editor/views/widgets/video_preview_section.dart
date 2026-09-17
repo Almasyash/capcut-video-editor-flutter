@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -528,6 +529,110 @@ class _VideoPreviewSectionState extends State<VideoPreviewSection> {
               child: Opacity(
                 opacity: (1.0 - progress).clamp(0.0, 1.0),
                 child: outgoing,
+              ),
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.wipeUp:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            outgoing,
+            ClipRect(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: progress.clamp(0.0, 1.0),
+                child: incoming,
+              ),
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.wipeDown:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            outgoing,
+            ClipRect(
+              child: Align(
+                alignment: Alignment.topCenter,
+                heightFactor: progress.clamp(0.0, 1.0),
+                child: incoming,
+              ),
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.circle:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            outgoing,
+            ClipOval(
+              clipper: _CircleTransitionClipper(progress.clamp(0.0, 1.0)),
+              child: incoming,
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.radial:
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            outgoing,
+            ClipPath(
+              clipper: _RadialTransitionClipper(progress.clamp(0.0, 1.0)),
+              child: incoming,
+            ),
+          ],
+        );
+        break;
+
+      case TransitionType.blur:
+        final blurSigma = (1.0 - (progress - 0.5).abs() * 2.0) * 15.0;
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            if (blurSigma > 0.1)
+              ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+                child: Opacity(opacity: (1.0 - progress).clamp(0.0, 1.0), child: outgoing),
+              )
+            else
+              Opacity(opacity: (1.0 - progress).clamp(0.0, 1.0), child: outgoing),
+            if (blurSigma > 0.1)
+              ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+                child: Opacity(opacity: progress.clamp(0.0, 1.0), child: incoming),
+              )
+            else
+              Opacity(opacity: progress.clamp(0.0, 1.0), child: incoming),
+          ],
+        );
+        break;
+
+      case TransitionType.pixelate:
+        final peak = (1.0 - (progress - 0.5).abs() * 2.0);
+        effect = Stack(
+          fit: StackFit.expand,
+          children: [
+            Opacity(
+              opacity: (1.0 - progress).clamp(0.0, 1.0),
+              child: Transform.scale(
+                scale: 1.0 + peak * 0.05,
+                child: outgoing,
+              ),
+            ),
+            Opacity(
+              opacity: progress.clamp(0.0, 1.0),
+              child: Transform.scale(
+                scale: 1.0 + peak * 0.05,
+                child: incoming,
               ),
             ),
           ],
@@ -1142,4 +1247,51 @@ class _VhsScanlinePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _CircleTransitionClipper extends CustomClipper<Rect> {
+  final double progress;
+  _CircleTransitionClipper(this.progress);
+
+  @override
+  Rect getClip(Size size) {
+    final maxRadius = math.sqrt(size.width * size.width + size.height * size.height) / 2.0;
+    final radius = maxRadius * progress;
+    final center = Offset(size.width / 2.0, size.height / 2.0);
+    return Rect.fromCircle(center: center, radius: radius);
+  }
+
+  @override
+  bool shouldReclip(_CircleTransitionClipper oldClipper) => oldClipper.progress != progress;
+}
+
+class _RadialTransitionClipper extends CustomClipper<Path> {
+  final double progress;
+  _RadialTransitionClipper(this.progress);
+
+  @override
+  Path getClip(Size size) {
+    final path = Path();
+    if (progress <= 0.0) return path;
+    if (progress >= 1.0) {
+      path.addRect(Offset.zero & size);
+      return path;
+    }
+    final center = Offset(size.width / 2.0, size.height / 2.0);
+    final maxRadius = math.sqrt(size.width * size.width + size.height * size.height);
+    path.moveTo(center.dx, center.dy);
+    path.lineTo(center.dx, center.dy - maxRadius);
+    final sweepAngle = progress * 2.0 * math.pi;
+    path.arcTo(
+      Rect.fromCircle(center: center, radius: maxRadius),
+      -math.pi / 2.0,
+      sweepAngle,
+      false,
+    );
+    path.close();
+    return path;
+  }
+
+  @override
+  bool shouldReclip(_RadialTransitionClipper oldClipper) => oldClipper.progress != progress;
 }

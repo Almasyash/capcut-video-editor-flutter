@@ -23,3 +23,21 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+  shaders:
+    - assets/shaders/transitions/crossfade.frag
+    - assets/shaders/transitions/fade_black.frag
+    - assets/shaders/transitions/fade_white.frag
+    - assets/shaders/transitions/wipe_left.frag
+    - assets/shaders/transitions/wipe_right.frag
+    - assets/shaders/transitions/wipe_up.frag
+    - assets/shaders/transitions/wipe_down.frag
+    - assets/shaders/transitions/slide_left.frag
+    - assets/shaders/transitions/slide_right.frag
+    - assets/shaders/transitions/slide_up.frag
+    - assets/shaders/transitions/slide_down.frag
+    - assets/shaders/transitions/zoom_in.frag
+    - assets/shaders/transitions/zoom_out.frag
+    - assets/shaders/transitions/circle.frag
+    - assets/shaders/transitions/radial.frag
+    - assets/shaders/transitions/blur.frag
+    - assets/shaders/transitions/pixelate.frag

@@ -685,6 +685,65 @@ class VideoExportEngine(private val context: Context) {
                         } else {
                             gl_FragColor = cIn;
                         }
+                    } else if (uType == 12) { // wipeUp
+                        if (vTextureCoord.y < (1.0 - p)) {
+                            gl_FragColor = cOut;
+                        } else {
+                            gl_FragColor = cIn;
+                        }
+                    } else if (uType == 13) { // wipeDown
+                        if (vTextureCoord.y > p) {
+                            gl_FragColor = cOut;
+                        } else {
+                            gl_FragColor = cIn;
+                        }
+                    } else if (uType == 14) { // circle
+                        float dist = length(vTextureCoord - 0.5);
+                        if (dist <= p * 0.7071) {
+                            gl_FragColor = cIn;
+                        } else {
+                            gl_FragColor = cOut;
+                        }
+                    } else if (uType == 15) { // radial
+                        vec2 d = vTextureCoord - 0.5;
+                        float angle = (atan(d.y, d.x) + 3.14159265) / 6.2831853;
+                        if (angle <= p) {
+                            gl_FragColor = cIn;
+                        } else {
+                            gl_FragColor = cOut;
+                        }
+                    } else if (uType == 16) { // blur
+                        float blurAmount = (1.0 - abs(p - 0.5) * 2.0) * 0.015;
+                        vec4 bOut = (
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(-blurAmount, -blurAmount)) +
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(0.0, -blurAmount)) +
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(blurAmount, -blurAmount)) +
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(-blurAmount, 0.0)) +
+                            texture2D(uOutgoingTex, vTextureCoord) +
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(blurAmount, 0.0)) +
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(-blurAmount, blurAmount)) +
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(0.0, blurAmount)) +
+                            texture2D(uOutgoingTex, vTextureCoord + vec2(blurAmount, blurAmount))
+                        ) / 9.0;
+                        vec4 bIn = (
+                            texture2D(uIncomingTex, vTextureCoord + vec2(-blurAmount, -blurAmount)) +
+                            texture2D(uIncomingTex, vTextureCoord + vec2(0.0, -blurAmount)) +
+                            texture2D(uIncomingTex, vTextureCoord + vec2(blurAmount, -blurAmount)) +
+                            texture2D(uIncomingTex, vTextureCoord + vec2(-blurAmount, 0.0)) +
+                            texture2D(uIncomingTex, vTextureCoord) +
+                            texture2D(uIncomingTex, vTextureCoord + vec2(blurAmount, 0.0)) +
+                            texture2D(uIncomingTex, vTextureCoord + vec2(-blurAmount, blurAmount)) +
+                            texture2D(uIncomingTex, vTextureCoord + vec2(0.0, blurAmount)) +
+                            texture2D(uIncomingTex, vTextureCoord + vec2(blurAmount, blurAmount))
+                        ) / 9.0;
+                        gl_FragColor = mix(bOut, bIn, p);
+                    } else if (uType == 17) { // pixelate
+                        float peak = 1.0 - abs(p - 0.5) * 2.0;
+                        float cells = mix(100.0, 15.0, peak);
+                        vec2 steppedUv = floor(vTextureCoord * cells) / cells;
+                        vec4 pOut = texture2D(uOutgoingTex, steppedUv);
+                        vec4 pIn = texture2D(uIncomingTex, steppedUv);
+                        gl_FragColor = mix(pOut, pIn, p);
                     } else {
                         gl_FragColor = p < 0.5 ? cOut : cIn;
                     }
@@ -1345,6 +1404,12 @@ class VideoExportEngine(private val context: Context) {
                 "wipeRight" -> 9
                 "zoomIn" -> 10
                 "zoomOut" -> 11
+                "wipeUp" -> 12
+                "wipeDown" -> 13
+                "circle" -> 14
+                "radial" -> 15
+                "blur" -> 16
+                "pixelate" -> 17
                 else -> 0
             }
         }

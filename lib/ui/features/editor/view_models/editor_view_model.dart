@@ -2798,6 +2798,52 @@ class EditorViewModel extends ChangeNotifier {
     return const TransitionMutationResult(success: true);
   }
 
+  TransitionMutationResult applyTransitionToAll({
+    required TransitionType type,
+    required double duration,
+  }) {
+    if (_videoClips.length < 2) {
+      return const TransitionMutationResult(
+        success: false,
+        errors: ['Need at least 2 clips to apply transitions'],
+      );
+    }
+
+    if (type == TransitionType.none) {
+      _saveSnapshot();
+      _currentProject = _currentProject.copyWith(transitions: []);
+      scheduleAutoSave();
+      notifyListeners();
+      return const TransitionMutationResult(success: true);
+    }
+
+    final candidateTransitions = <Transition>[];
+    for (int i = 0; i < _videoClips.length - 1; i++) {
+      final left = _videoClips[i];
+      final right = _videoClips[i + 1];
+      candidateTransitions.add(
+        Transition(
+          type: type,
+          duration: duration,
+          leftClipId: left.id,
+          rightClipId: right.id,
+        ),
+      );
+    }
+
+    final validator = TransitionValidator(_projectForValidation);
+    final errors = validator.validateAll(candidateTransitions);
+    if (errors.isNotEmpty) {
+      return TransitionMutationResult(success: false, errors: errors);
+    }
+
+    _saveSnapshot();
+    _currentProject = _currentProject.copyWith(transitions: candidateTransitions);
+    scheduleAutoSave();
+    notifyListeners();
+    return const TransitionMutationResult(success: true);
+  }
+
   void _cleanupInvalidTransitions() {
     final validator = TransitionValidator(_projectForValidation);
     final List<Transition> validTransitions = [];
