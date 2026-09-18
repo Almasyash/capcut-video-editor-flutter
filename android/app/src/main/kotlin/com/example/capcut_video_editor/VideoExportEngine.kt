@@ -1549,9 +1549,9 @@ class VideoExportEngine(private val context: Context) {
                 throw RuntimeException("Encoder drain thread never started muxer")
             }
 
-            drainThread.isRunning = false
             drainThread.join(30_000L)
             if (drainThread.isAlive) {
+                drainThread.isRunning = false
                 throw RuntimeException("Encoder drain timed out after 30 seconds")
             }
             drainThread.error?.let { throw RuntimeException("Encoder drain failed: ${it.message}", it) }

@@ -753,6 +753,47 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 }
             }
         }
+
+        val extractReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: android.content.Context?, intent: android.content.Intent?) {
+                val videoPath = intent?.getStringExtra("videoPath") ?: return
+                val outDir = File(filesDir, "extracted_frames").apply { if (!exists()) mkdirs() }
+                val timesUs = longArrayOf(4400000L, 4500000L, 4750000L, 5000000L, 5250000L, 5500000L, 5600000L)
+                val labels = arrayOf(
+                    "phase8_1_1_frame_4400ms_before",
+                    "phase8_1_1_frame_4500ms_00pct",
+                    "phase8_1_1_frame_4750ms_25pct",
+                    "phase8_1_1_frame_5000ms_50pct",
+                    "phase8_1_1_frame_5250ms_75pct",
+                    "phase8_1_1_frame_5500ms_100pct",
+                    "phase8_1_1_frame_5600ms_after"
+                )
+                Thread {
+                    try {
+                        val mmr = MediaMetadataRetriever()
+                        mmr.setDataSource(videoPath)
+                        for (i in timesUs.indices) {
+                            val bmp = mmr.getFrameAtTime(timesUs[i], MediaMetadataRetriever.OPTION_CLOSEST)
+                            if (bmp != null) {
+                                val f = File(outDir, "${labels[i]}.png")
+                                FileOutputStream(f).use { out -> bmp.compress(Bitmap.CompressFormat.PNG, 100, out) }
+                                android.util.Log.i("FrameExtractor", "Extracted ${f.name} size=${f.length()} bytes")
+                            }
+                        }
+                        mmr.release()
+                        android.util.Log.i("FrameExtractor", "ALL_FRAMES_DONE")
+                    } catch (e: Exception) {
+                        android.util.Log.e("FrameExtractor", "Error extracting frames", e)
+                    }
+                }.start()
+            }
+        }
+        val extractFilter = android.content.IntentFilter("com.example.capcut_video_editor.EXTRACT_FRAMES")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(extractReceiver, extractFilter, ContextCompat.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(extractReceiver, extractFilter)
+        }
     }
 
     private fun handleRequestPermissions(result: MethodChannel.Result) {
