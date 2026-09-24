@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:capcut_video_editor/domain/models/keyframe.dart';
+import 'package:capcut_video_editor/domain/models/speed_curve.dart';
+import 'package:capcut_video_editor/domain/models/video_mask.dart';
 
 /// Immutable model representing an individual video segment/clip on the timeline
 class VideoClip {
@@ -12,6 +15,7 @@ class VideoClip {
   final Duration trimStart;
   final Duration trimEnd;
   final double speed;
+  final SpeedCurve? speedCurve;
   final double volume;
   final bool isMuted;
   final double opacity; // 0.0 to 1.0
@@ -22,6 +26,9 @@ class VideoClip {
   final bool isFrozen;
   final List<Color> previewGradient;
   final IconData previewIcon;
+  final List<VideoKeyframe> keyframes;
+  final VideoMask? mask;
+  final BlendMode blendMode;
 
   /// Spatial transformation properties (Free Transform Canvas)
   /// Horizontal position offset relative to canvas center (default 0.0)
@@ -44,6 +51,7 @@ class VideoClip {
     required this.trimStart,
     required this.trimEnd,
     this.speed = 1.0,
+    this.speedCurve,
     this.volume = 1.0,
     this.isMuted = false,
     this.opacity = 1.0,
@@ -58,6 +66,9 @@ class VideoClip {
     this.yPos = 0.0,
     this.scale = 1.0,
     this.rotationAngle = 0.0,
+    this.keyframes = const [],
+    this.mask,
+    this.blendMode = BlendMode.srcOver,
   });
 
   /// Effective playback volume respecting mute state
@@ -66,7 +77,8 @@ class VideoClip {
   /// Effective duration on the timeline after trimming and speed adjustment
   Duration get activeDuration {
     final trimmedMs = (trimEnd.inMilliseconds - trimStart.inMilliseconds).clamp(0, originalDuration.inMilliseconds);
-    final adjustedMs = (trimmedMs / (speed > 0 ? speed : 1.0)).round();
+    final effectiveSpeed = (speedCurve != null) ? speedCurve!.averageSpeed : (speed > 0 ? speed : 1.0);
+    final adjustedMs = (trimmedMs / (effectiveSpeed > 0 ? effectiveSpeed : 1.0)).round();
     return Duration(milliseconds: adjustedMs);
   }
 
@@ -81,6 +93,8 @@ class VideoClip {
     Duration? trimStart,
     Duration? trimEnd,
     double? speed,
+    SpeedCurve? speedCurve,
+    bool clearSpeedCurve = false,
     double? volume,
     bool? isMuted,
     double? opacity,
@@ -95,6 +109,10 @@ class VideoClip {
     double? yPos,
     double? scale,
     double? rotationAngle,
+    List<VideoKeyframe>? keyframes,
+    VideoMask? mask,
+    bool clearMask = false,
+    BlendMode? blendMode,
   }) {
     return VideoClip(
       id: id ?? this.id,
@@ -104,6 +122,7 @@ class VideoClip {
       trimStart: trimStart ?? this.trimStart,
       trimEnd: trimEnd ?? this.trimEnd,
       speed: speed ?? this.speed,
+      speedCurve: clearSpeedCurve ? null : (speedCurve ?? this.speedCurve),
       volume: volume ?? this.volume,
       isMuted: isMuted ?? this.isMuted,
       opacity: opacity ?? this.opacity,
@@ -118,6 +137,9 @@ class VideoClip {
       yPos: yPos ?? this.yPos,
       scale: scale ?? this.scale,
       rotationAngle: rotationAngle ?? this.rotationAngle,
+      keyframes: keyframes ?? this.keyframes,
+      mask: clearMask ? null : (mask ?? this.mask),
+      blendMode: blendMode ?? this.blendMode,
     );
   }
 
@@ -130,6 +152,7 @@ class VideoClip {
       'trimStartMs': trimStart.inMilliseconds,
       'trimEndMs': trimEnd.inMilliseconds,
       'speed': speed,
+      if (speedCurve != null) 'speedCurve': speedCurve!.toJson(),
       'volume': volume,
       'isMuted': isMuted,
       'opacity': opacity,
@@ -142,6 +165,9 @@ class VideoClip {
       'yPos': yPos,
       'scale': scale,
       'rotationAngle': rotationAngle,
+      if (keyframes.isNotEmpty) 'keyframes': keyframes.map((k) => k.toJson()).toList(),
+      if (mask != null) 'mask': mask!.toJson(),
+      'blendMode': blendMode.index,
     };
   }
 
@@ -154,6 +180,9 @@ class VideoClip {
       trimStart: Duration(milliseconds: (json['trimStartMs'] as num?)?.toInt() ?? 0),
       trimEnd: Duration(milliseconds: (json['trimEndMs'] as num?)?.toInt() ?? (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
+      speedCurve: json['speedCurve'] != null
+          ? SpeedCurve.fromJson(json['speedCurve'] as Map<String, dynamic>)
+          : null,
       volume: (json['volume'] as num?)?.toDouble() ?? 1.0,
       isMuted: json['isMuted'] as bool? ?? false,
       opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
@@ -167,6 +196,14 @@ class VideoClip {
       yPos: (json['yPos'] as num?)?.toDouble() ?? 0.0,
       scale: (json['scale'] as num?)?.toDouble() ?? 1.0,
       rotationAngle: (json['rotationAngle'] as num?)?.toDouble() ?? 0.0,
+      keyframes: (json['keyframes'] as List<dynamic>?)
+              ?.map((k) => VideoKeyframe.fromJson(k as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      mask: json['mask'] != null ? VideoMask.fromJson(json['mask'] as Map<String, dynamic>) : null,
+      blendMode: json['blendMode'] != null
+          ? BlendMode.values[(json['blendMode'] as num).toInt().clamp(0, BlendMode.values.length - 1)]
+          : BlendMode.srcOver,
     );
   }
 
@@ -181,6 +218,7 @@ class VideoClip {
           trimStart == other.trimStart &&
           trimEnd == other.trimEnd &&
           speed == other.speed &&
+          speedCurve == other.speedCurve &&
           volume == other.volume &&
           isMuted == other.isMuted &&
           opacity == other.opacity &&
@@ -202,6 +240,7 @@ class VideoClip {
       trimStart.hashCode ^
       trimEnd.hashCode ^
       speed.hashCode ^
+      speedCurve.hashCode ^
       volume.hashCode ^
       isMuted.hashCode ^
       opacity.hashCode ^

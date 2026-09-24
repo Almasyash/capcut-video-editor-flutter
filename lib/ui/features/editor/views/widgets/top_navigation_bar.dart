@@ -83,7 +83,7 @@ class TopNavigationBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surfaceElevated,
         borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
-        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4), width: 1.0),
+        border: Border.all(color: AppColors.primary.withOpacity(0.4), width: 1.0),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -198,7 +198,7 @@ class TopNavigationBar extends StatelessWidget {
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
           onPressed: viewModel.canUndo ? viewModel.undo : null,
-          tooltip: 'Undo',
+          tooltip: 'Undo (Ctrl+Z)',
         ),
         IconButton(
           icon: Icon(
@@ -209,7 +209,7 @@ class TopNavigationBar extends StatelessWidget {
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
           onPressed: viewModel.canRedo ? viewModel.redo : null,
-          tooltip: 'Redo',
+          tooltip: 'Redo (Ctrl+Y / Ctrl+Shift+Z)',
         ),
       ],
     );
@@ -232,7 +232,7 @@ class TopNavigationBar extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
           boxShadow: [
             BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.3),
+              color: AppColors.primary.withOpacity(0.3),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),

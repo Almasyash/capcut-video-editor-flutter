@@ -42,6 +42,8 @@ build/
 **/android/local.properties
 **/android/GeneratedPluginRegistrant.java
 **/android/.cxx/
+**/android/.kotlin/
+.kotlin/
 local.properties
 key.properties
 **/key.properties

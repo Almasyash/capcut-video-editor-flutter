@@ -156,7 +156,7 @@ class Project {
       'activeFilter': activeFilter.toJson(),
       'colorAdjustments': colorAdjustments.toJson(),
       'activeEffect': activeEffect.name,
-      'canvasBackgroundColor': canvasBackgroundColor.toARGB32(),
+      'canvasBackgroundColor': canvasBackgroundColor.value,
       'transitions': transitions.map((tr) => tr.toJson()).toList(),
       'canvasBlurSigma': canvasBlurSigma,
       'playheadPosition': playheadPosition,

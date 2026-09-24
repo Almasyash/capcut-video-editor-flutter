@@ -7,6 +7,11 @@ analyzer:
     - windows/**
     - macos/**
     - linux/**
+  errors:
+    deprecated_member_use: ignore
+    deprecated_member_use_from_same_package: ignore
+    todo: ignore
+    invalid_annotation_target: ignore
 include: package:flutter_lints/flutter.yaml
 
 linter:

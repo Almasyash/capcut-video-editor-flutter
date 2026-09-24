@@ -10,11 +10,13 @@ import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_m
 class MediaPickerSheet extends StatefulWidget {
   final EditorViewModel viewModel;
   final bool isReplacing;
+  final bool asOverlay;
 
   const MediaPickerSheet({
     super.key,
     required this.viewModel,
     this.isReplacing = false,
+    this.asOverlay = false,
   });
 
   @override
@@ -49,7 +51,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
 
     final importedAsset = widget.viewModel.getAssetById(_selectedId!);
     if (importedAsset != null) {
-      if (widget.isReplacing) {
+      if (widget.asOverlay) {
+        widget.viewModel.addOverlayFromMediaAsset(importedAsset);
+      } else if (widget.isReplacing) {
         widget.viewModel.replaceSelectedClip(
           assetId: importedAsset.id,
           title: importedAsset.name,
@@ -132,7 +136,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      widget.isReplacing ? 'Replace Media Clip' : 'Select Media to Add',
+                      widget.asOverlay
+                          ? 'Select Media for PIP Overlay'
+                          : (widget.isReplacing ? 'Replace Media Clip' : 'Select Media to Add'),
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                     ),
                     IconButton(
@@ -152,9 +158,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.12),
+                      color: AppColors.primary.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
-                      border: Border.all(color: AppColors.primary.withValues(alpha: 0.5), width: 1.2),
+                      border: Border.all(color: AppColors.primary.withOpacity(0.5), width: 1.2),
                     ),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -240,7 +246,9 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                         elevation: _selectedId != null ? 3 : 0,
                       ),
                       child: Text(
-                        widget.isReplacing ? 'Replace Selected Clip' : 'Add to Timeline',
+                        widget.asOverlay
+                            ? 'Add as PIP Layer'
+                            : (widget.isReplacing ? 'Replace Selected Clip' : 'Add to Timeline'),
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -333,13 +341,13 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
               color: AppColors.surfaceElevated,
               borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
               border: Border.all(
-                color: isSelected ? AppColors.primary : AppColors.primary.withValues(alpha: 0.4),
+                color: isSelected ? AppColors.primary : AppColors.primary.withOpacity(0.4),
                 width: isSelected ? 2.5 : 1.0,
               ),
               boxShadow: isSelected
                   ? [
                       BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.4),
+                        color: AppColors.primary.withOpacity(0.4),
                         blurRadius: 10,
                         spreadRadius: 1,
                       ),
@@ -370,7 +378,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                     child: Icon(
                       asset.isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
                       size: 36,
-                      color: AppColors.primary.withValues(alpha: 0.8),
+                      color: AppColors.primary.withOpacity(0.8),
                     ),
                   ),
                 Positioned(
@@ -379,7 +387,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.7),
+                      color: Colors.black.withOpacity(0.7),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
@@ -395,7 +403,7 @@ class _MediaPickerSheetState extends State<MediaPickerSheet> with SingleTickerPr
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.65),
+                      color: Colors.black.withOpacity(0.65),
                       borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                     ),
                     child: Row(

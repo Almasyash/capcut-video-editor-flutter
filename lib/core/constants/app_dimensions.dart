@@ -33,5 +33,5 @@ class AppDimensions {
   // Default Zoom Scaling (pixels per second)
   static const double defaultPixelsPerSecond = 50.0;
   static const double minPixelsPerSecond = 20.0;
-  static const double maxPixelsPerSecond = 150.0;
+  static const double maxPixelsPerSecond = 600.0;
 }

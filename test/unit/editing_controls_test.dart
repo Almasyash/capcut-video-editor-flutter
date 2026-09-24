@@ -65,13 +65,13 @@ void main() {
       expect(viewModel.totalDurationInSeconds, 20.0);
     });
 
-    test('Speed is clamped between 0.25x and 4.0x', () {
+    test('Speed is clamped between 0.1x and 100.0x', () {
       viewModel.selectClip(0);
-      viewModel.setClipSpeed(0.1);
-      expect(viewModel.videoClips[0].speed, 0.25);
+      viewModel.setClipSpeed(0.01);
+      expect(viewModel.videoClips[0].speed, 0.1);
 
-      viewModel.setClipSpeed(10.0);
-      expect(viewModel.videoClips[0].speed, 4.0);
+      viewModel.setClipSpeed(200.0);
+      expect(viewModel.videoClips[0].speed, 100.0);
     });
 
     test('Playhead is clamped if duration shortens below current playhead', () {

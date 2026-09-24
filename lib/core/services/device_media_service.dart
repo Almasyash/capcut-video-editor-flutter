@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:capcut_video_editor/domain/enums/export_resolution.dart';
 import 'package:capcut_video_editor/domain/enums/transition_type.dart';
 import 'package:capcut_video_editor/domain/models/export_settings.dart';
@@ -199,6 +200,9 @@ class DeviceMediaService {
 
   /// Requests storage/media permissions using native platform channel
   static Future<bool> requestStoragePermissions() async {
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+      return true;
+    }
     try {
       final granted = await _platform.invokeMethod<bool>('requestPermissions');
       return granted ?? true;
@@ -323,7 +327,7 @@ class DeviceMediaService {
 
       final localPath = asset.localPath;
       final isPhoto = asset.isPhoto;
-      final colorVal = clip.previewGradient.isNotEmpty ? clip.previewGradient.first.toARGB32() : 0xFF00C9FF;
+      final colorVal = clip.previewGradient.isNotEmpty ? clip.previewGradient.first.value : 0xFF00C9FF;
 
       clipsPayload.add({
         'id': clip.id,
@@ -396,8 +400,8 @@ class DeviceMediaService {
         'startTimeMs': text.startTime.inMilliseconds,
         'durationMs': text.effectiveDuration.inMilliseconds,
         'fontSize': text.fontSize,
-        'textColor': text.color.toARGB32(),
-        'backgroundColor': text.backgroundColor?.toARGB32(),
+        'textColor': text.color.value,
+        'backgroundColor': text.backgroundColor?.value,
         'x': text.position.dx,
         'y': text.position.dy,
         'isBold': text.isBold,
@@ -475,6 +479,67 @@ class DeviceMediaService {
 
   /// Imports a Video or Photo from native device storage into a clean [MediaAsset] model
   static Future<MediaAsset?> pickMediaAsset({String type = 'media'}) async {
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+      try {
+        List<String> allowed;
+        if (type == 'photo') {
+          allowed = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif'];
+        } else if (type == 'video') {
+          allowed = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv', 'm4v'];
+        } else {
+          allowed = [
+            'mp4', 'mov', 'avi', 'mkv', 'webm', 'wmv', 'flv', 'm4v',
+            'jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif'
+          ];
+        }
+
+        final pickedResult = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: allowed,
+        );
+
+        if (pickedResult == null || pickedResult.files.isEmpty) {
+          return null;
+        }
+
+        final localPath = pickedResult.files.single.path;
+        if (localPath == null || localPath.trim().isEmpty) return null;
+        final file = File(localPath);
+        if (!file.existsSync()) return null;
+
+        final name = pickedResult.files.single.name;
+        final sizeBytes = file.lengthSync();
+        final ext = pickedResult.files.single.extension?.toLowerCase() ?? '';
+        final isPhoto = ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif'].contains(ext);
+        final assetType = isPhoto ? MediaAssetType.photo : MediaAssetType.video;
+        final duration = isPhoto ? const Duration(seconds: 4) : const Duration(seconds: 10);
+
+        // For Windows videos: extract a thumbnail via Windows Shell API
+        String? thumbnailPath;
+        if (!isPhoto && !kIsWeb && Platform.isWindows) {
+          thumbnailPath = await _extractWindowsThumbnail(localPath);
+        }
+
+        final asset = MediaAsset(
+          id: 'asset_${DateTime.now().millisecondsSinceEpoch}_${name.hashCode.abs()}',
+          type: assetType,
+          name: name,
+          uri: null,
+          localPath: localPath,
+          duration: duration,
+          sizeBytes: sizeBytes,
+          thumbnailPath: isPhoto ? localPath : thumbnailPath,
+          createdAt: DateTime.now(),
+        );
+
+        debugPrint('[DeviceMediaService] Desktop Imported MediaAsset: id=${asset.id}, name=${asset.name}, type=${asset.type}, localPath=${asset.localPath}, thumbnailPath=${asset.thumbnailPath}');
+        return asset;
+      } catch (e) {
+        debugPrint('[DeviceMediaService] Desktop file picking error: $e');
+        return null;
+      }
+    }
+
     try {
       await requestStoragePermissions();
 
@@ -555,6 +620,45 @@ class DeviceMediaService {
 
   /// Imports an Audio track from native device storage into a clean [MediaAsset] model
   static Future<MediaAsset?> pickAudioAsset() async {
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+      try {
+        final pickedResult = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'wma'],
+        );
+
+        if (pickedResult == null || pickedResult.files.isEmpty) {
+          return null;
+        }
+
+        final localPath = pickedResult.files.single.path;
+        if (localPath == null || localPath.trim().isEmpty) return null;
+        final file = File(localPath);
+        if (!file.existsSync()) return null;
+
+        final name = pickedResult.files.single.name;
+        final sizeBytes = file.lengthSync();
+
+        final asset = MediaAsset(
+          id: 'audio_asset_${DateTime.now().millisecondsSinceEpoch}_${name.hashCode.abs()}',
+          type: MediaAssetType.audio,
+          name: name,
+          uri: null,
+          localPath: localPath,
+          duration: const Duration(seconds: 30),
+          sizeBytes: sizeBytes,
+          thumbnailPath: null,
+          createdAt: DateTime.now(),
+        );
+
+        debugPrint('[DeviceMediaService] Desktop Imported Audio: id=${asset.id}, name=${asset.name}, localPath=${asset.localPath}');
+        return asset;
+      } catch (e) {
+        debugPrint('[DeviceMediaService] Desktop audio picking error: $e');
+        return null;
+      }
+    }
+
     try {
       await requestStoragePermissions();
 
@@ -621,6 +725,25 @@ class DeviceMediaService {
 
   /// Launches native system file picker intent (ACTION_GET_CONTENT) with localPath resolution (Legacy compatible)
   static Future<DeviceMediaResult?> pickMediaFromNativeStorage({String type = 'media'}) async {
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+      final asset = await pickMediaAsset(type: type);
+      if (asset == null || asset.localPath == null) return null;
+      final random = math.Random(asset.name.hashCode);
+      final gradient = _vibrantGradients[random.nextInt(_vibrantGradients.length)];
+      final isPhoto = asset.isPhoto;
+      final sizeMb = ((asset.sizeBytes ?? 0) / (1024 * 1024)).ceil();
+      return DeviceMediaResult(
+        fileName: asset.name,
+        filePath: asset.localPath!,
+        fileType: isPhoto ? 'photo' : 'video',
+        estimatedDuration: asset.duration ?? (isPhoto ? const Duration(seconds: 4) : const Duration(seconds: 12)),
+        gradient: gradient,
+        icon: isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
+        fileSizeMb: math.max(1, sizeMb),
+        contentUri: null,
+      );
+    }
+
     try {
       await requestStoragePermissions();
 
@@ -671,6 +794,24 @@ class DeviceMediaService {
 
   /// Launches native system file picker intent to pick actual audio file from device (Legacy compatible)
   static Future<DeviceMediaResult?> pickAudioFromNativeStorage() async {
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
+      final asset = await pickAudioAsset();
+      if (asset == null || asset.localPath == null) return null;
+      final random = math.Random(asset.name.hashCode);
+      final gradient = _vibrantGradients[random.nextInt(_vibrantGradients.length)];
+      final sizeMb = ((asset.sizeBytes ?? 0) / (1024 * 1024)).ceil();
+      return DeviceMediaResult(
+        fileName: asset.name,
+        filePath: asset.localPath!,
+        fileType: 'audio',
+        estimatedDuration: asset.duration ?? const Duration(seconds: 28),
+        gradient: gradient,
+        icon: Icons.music_note_rounded,
+        fileSizeMb: math.max(1, sizeMb),
+        contentUri: null,
+      );
+    }
+
     try {
       await requestStoragePermissions();
 
@@ -793,5 +934,93 @@ class DeviceMediaService {
       {'name': 'Instagram Reels', 'count': 14, 'icon': Icons.video_library_rounded},
       {'name': 'Music Library', 'count': 64, 'icon': Icons.library_music_rounded},
     ];
+  }
+
+  /// Public method to extract a JPEG thumbnail from a video file on Windows
+  static Future<String?> extractWindowsThumbnail(String videoPath) => _extractWindowsThumbnail(videoPath);
+
+  /// Extracts a JPEG thumbnail from a video file on Windows using the Windows Shell API
+  /// (IShellItemImageFactory) via an inline PowerShell script. Returns the output path on success.
+  static Future<String?> _extractWindowsThumbnail(String videoPath) async {
+    try {
+      final tempBase = Platform.environment['TEMP'] ??
+          Platform.environment['TMP'] ??
+          'C:\\Windows\\Temp';
+      final tmpDir = Directory('$tempBase\\capcut_thumbs');
+      if (!tmpDir.existsSync()) tmpDir.createSync(recursive: true);
+
+      final safeId = videoPath.hashCode.abs();
+      final thumbPath = '${tmpDir.path}\\thumb_$safeId.jpg';
+
+      // Return cached thumbnail if it already exists
+      if (File(thumbPath).existsSync() && File(thumbPath).lengthSync() > 0) {
+        return thumbPath;
+      }
+
+      // Check for standalone script first
+      final standaloneScript = File('windows\\extract_thumbnail.ps1');
+      if (standaloneScript.existsSync()) {
+        final res = await Process.run(
+          'powershell',
+          [
+            '-ExecutionPolicy', 'Bypass',
+            '-NonInteractive',
+            '-File', standaloneScript.absolute.path,
+            '-VideoPath', videoPath,
+            '-OutputPath', thumbPath,
+          ],
+          runInShell: true,
+        );
+        if (res.exitCode == 0 && File(thumbPath).existsSync() && File(thumbPath).lengthSync() > 0) {
+          debugPrint('[DeviceMediaService] Windows thumbnail OK (standalone script): $thumbPath');
+          return thumbPath;
+        }
+      }
+
+      // Inline PowerShell to call Windows Shell IShellItemImageFactory
+      final psScript = '''
+\$c=@"
+using System;using System.Drawing;using System.Drawing.Imaging;using System.Runtime.InteropServices;
+public class ShellThumb{
+  [ComImport][Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b")]
+  [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IIF{[PreserveSig]int G([In,MarshalAs(UnmanagedType.Struct)]S s,[In]int f,[Out]out IntPtr h);}
+  [StructLayout(LayoutKind.Sequential)]public struct S{public int x;public int y;public S(int x,int y){this.x=x;this.y=y;}}
+  [DllImport("shell32.dll",CharSet=CharSet.Unicode,PreserveSig=false)]
+  public static extern void SHC([In,MarshalAs(UnmanagedType.LPWStr)]string p,[In]IntPtr b,[In,MarshalAs(UnmanagedType.LPStruct)]Guid r,[Out,MarshalAs(UnmanagedType.Interface)]out IIF f);
+  [DllImport("gdi32.dll")]public static extern bool D(IntPtr h);
+  public static bool E(string v,string o,int w,int h){
+    try{Guid g=new Guid("bcc18b79-ba16-442f-80c4-8a59c30c463b");IIF f;SHC(v,IntPtr.Zero,g,out f);
+    if(f==null)return false;IntPtr hb;int r=f.G(new S(w,h),1,out hb);
+    if(r!=0||hb==IntPtr.Zero)return false;
+    using(var b=System.Drawing.Bitmap.FromHbitmap(hb)){b.Save(o,System.Drawing.Imaging.ImageFormat.Jpeg);}D(hb);return true;}
+    catch{return false;}}}
+"@
+Add-Type -TypeDefinition \$c -ReferencedAssemblies System.Drawing -EA SilentlyContinue
+if([ShellThumb]::E("${videoPath.replaceAll(r'\', r'\\')}","${thumbPath.replaceAll(r'\', r'\\')}",320,180)){Write-Host "OK";exit 0}else{exit 1}
+''';
+
+      final scriptFile = File('${tmpDir.path}\\ext_$safeId.ps1');
+      scriptFile.writeAsStringSync(psScript, flush: true);
+
+      final res = await Process.run(
+        'powershell',
+        ['-ExecutionPolicy', 'Bypass', '-NonInteractive', '-File', scriptFile.path],
+        runInShell: true,
+      );
+
+      // Clean up temp script
+      try { scriptFile.deleteSync(); } catch (_) {}
+
+      if (res.exitCode == 0 && File(thumbPath).existsSync() && File(thumbPath).lengthSync() > 0) {
+        debugPrint('[DeviceMediaService] Windows thumbnail OK: $thumbPath');
+        return thumbPath;
+      }
+      debugPrint('[DeviceMediaService] Windows thumbnail failed (exit=${res.exitCode}): ${res.stderr}');
+      return null;
+    } catch (e) {
+      debugPrint('[DeviceMediaService] _extractWindowsThumbnail error: $e');
+      return null;
+    }
   }
 }

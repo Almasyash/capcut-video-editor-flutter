@@ -1,10 +1,11 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/core/services/asset_library_service.dart';
+import 'package:capcut_video_editor/core/services/audio_waveform_service.dart';
+import 'package:capcut_video_editor/core/services/audio_beat_service.dart';
 import 'package:capcut_video_editor/domain/models/asset.dart';
 import 'package:capcut_video_editor/domain/models/audio_track.dart';
 import 'package:capcut_video_editor/domain/models/media_asset.dart';
@@ -24,9 +25,6 @@ class AudioDrawer extends StatefulWidget {
 
 class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  bool _isRecording = false;
-  int _recordSeconds = 0;
-  Timer? _recordTimer;
   final TextEditingController _sfxSearchController = TextEditingController();
 
   @override
@@ -38,7 +36,6 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
 
   @override
   void dispose() {
-    _recordTimer?.cancel();
     _sfxSearchController.dispose();
     AssetLibraryService.instance.stopPreview();
     _tabController.dispose();
@@ -51,24 +48,35 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
     required String assetId,
     String artist = 'Original Audio',
   }) {
-    final random = math.Random(title.hashCode);
-    final waveform = List.generate(40, (_) => 0.2 + random.nextDouble() * 0.8);
+    final trackDuration = Duration(seconds: durationSec);
+    final waveform = AudioWaveformService.instance.getWaveformSync(
+      cacheKey: '${assetId}_$durationSec',
+      duration: trackDuration,
+    );
+
+    final autoBeats = AudioBeatService.instance.detectBeats(
+      waveformPoints: waveform,
+      duration: trackDuration,
+      sensitivity: BeatSensitivity.strongDownbeats,
+    );
 
     final track = AudioTrack(
       id: 'audio_${DateTime.now().millisecondsSinceEpoch}',
       assetId: assetId,
       title: title,
       artist: artist,
-      duration: Duration(seconds: durationSec),
+      duration: trackDuration,
       startTime: Duration(milliseconds: (widget.viewModel.playheadPosition * 1000).round()),
       waveformPoints: waveform,
+      beats: autoBeats,
+      showBeats: true,
       volume: 0.85,
       speed: 1.0,
     );
 
     widget.viewModel.addAudioTrack(track);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Added track "$title" to timeline!'), duration: const Duration(seconds: 2)),
+      SnackBar(content: Text('Added track "$title" (${autoBeats.length} beats detected) to timeline!'), duration: const Duration(seconds: 2)),
     );
   }
 
@@ -221,28 +229,10 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
   }
 
   void _toggleRecording() {
-    if (_isRecording) {
-      _recordTimer?.cancel();
-      setState(() {
-        _isRecording = false;
-      });
-      final recordedSec = math.max(2, _recordSeconds);
-      _addMusic(
-        'Voiceover Recording (${recordedSec}s)',
-        recordedSec,
-        assetId: 'voiceover_${DateTime.now().millisecondsSinceEpoch}',
-        artist: 'Voice Memo',
-      );
+    if (widget.viewModel.isRecordingVoice) {
+      widget.viewModel.stopVoiceRecording();
     } else {
-      setState(() {
-        _isRecording = true;
-        _recordSeconds = 0;
-      });
-      _recordTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-        setState(() {
-          _recordSeconds++;
-        });
-      });
+      widget.viewModel.startVoiceRecording();
     }
   }
 
@@ -322,9 +312,9 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: AppColors.secondary.withValues(alpha: 0.12),
+                      color: AppColors.secondary.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                      border: Border.all(color: AppColors.secondary.withValues(alpha: 0.4)),
+                      border: Border.all(color: AppColors.secondary.withOpacity(0.4)),
                     ),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -380,7 +370,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.music_off_rounded, color: AppColors.textMuted.withValues(alpha: 0.6), size: 28),
+                                  Icon(Icons.music_off_rounded, color: AppColors.textMuted.withOpacity(0.6), size: 28),
                                   const SizedBox(height: 6),
                                   const Text(
                                     'No music tracks yet',
@@ -411,7 +401,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                                 decoration: BoxDecoration(
                                   color: AppColors.surfaceElevated,
                                   borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                                  border: Border.all(color: AppColors.secondary.withValues(alpha: 0.5), width: 1.2),
+                                  border: Border.all(color: AppColors.secondary.withOpacity(0.5), width: 1.2),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -422,7 +412,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                                         Container(
                                           padding: const EdgeInsets.all(4),
                                           decoration: BoxDecoration(
-                                            color: AppColors.secondary.withValues(alpha: 0.2),
+                                            color: AppColors.secondary.withOpacity(0.2),
                                             borderRadius: BorderRadius.circular(4),
                                           ),
                                           child: const Icon(Icons.music_note_rounded, color: AppColors.secondary, size: 14),
@@ -478,21 +468,21 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                             onTap: _toggleRecording,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
-                              width: _isRecording ? 60 : 50,
-                              height: _isRecording ? 60 : 50,
+                              width: widget.viewModel.isRecordingVoice ? 64 : 52,
+                              height: widget.viewModel.isRecordingVoice ? 64 : 52,
                               decoration: BoxDecoration(
-                                color: _isRecording ? AppColors.error : AppColors.secondary,
+                                color: widget.viewModel.isRecordingVoice ? AppColors.error : AppColors.secondary,
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: (_isRecording ? AppColors.error : AppColors.secondary).withValues(alpha: 0.4),
+                                    color: (widget.viewModel.isRecordingVoice ? AppColors.error : AppColors.secondary).withOpacity(0.4),
                                     blurRadius: 12,
                                     spreadRadius: 2,
                                   ),
                                 ],
                               ),
                               child: Icon(
-                                _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+                                widget.viewModel.isRecordingVoice ? Icons.stop_rounded : Icons.mic_rounded,
                                 color: Colors.white,
                                 size: 28,
                               ),
@@ -500,11 +490,13 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            _isRecording ? 'Recording: ${_recordSeconds}s (Tap to Stop)' : 'Tap Mic to Record Voiceover',
+                            widget.viewModel.isRecordingVoice
+                                ? 'Recording: ${widget.viewModel.currentRecordingSeconds.toStringAsFixed(1)}s (Tap to Stop)'
+                                : 'Tap Mic to Record Voiceover',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: _isRecording ? AppColors.error : AppColors.textSecondary,
+                              color: widget.viewModel.isRecordingVoice ? AppColors.error : AppColors.textSecondary,
                             ),
                           ),
                         ],
@@ -580,7 +572,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                       height: 28,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       decoration: BoxDecoration(
-                        color: onlyDownloaded ? AppColors.primary.withValues(alpha: 0.2) : AppColors.surfaceLight,
+                        color: onlyDownloaded ? AppColors.primary.withOpacity(0.2) : AppColors.surfaceLight,
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
                           color: onlyDownloaded ? AppColors.primary : AppColors.divider,
@@ -670,7 +662,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.search_off_rounded, color: AppColors.textMuted.withValues(alpha: 0.5), size: 24),
+                              Icon(Icons.search_off_rounded, color: AppColors.textMuted.withOpacity(0.5), size: 24),
                               const SizedBox(height: 4),
                               Text(
                                 onlyDownloaded ? 'No downloaded sound effects yet' : 'No sound effects found',
@@ -724,7 +716,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
         color: AppColors.surfaceLight,
         borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
         border: Border.all(
-          color: asset.isDownloaded ? AppColors.primary.withValues(alpha: 0.5) : AppColors.divider,
+          color: asset.isDownloaded ? AppColors.primary.withOpacity(0.5) : AppColors.divider,
           width: asset.isDownloaded ? 1.0 : 0.8,
         ),
       ),
@@ -739,7 +731,7 @@ class _AudioDrawerState extends State<AudioDrawer> with SingleTickerProviderStat
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
-                  color: AppColors.secondary.withValues(alpha: 0.15),
+                  color: AppColors.secondary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(3),
                 ),
                 child: Text(

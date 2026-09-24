@@ -154,7 +154,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
         } catch (e: Exception) {}
     }
 
-    override fun onDestroy() {
+    private fun releaseAllResources() {
         for ((_, holder) in videoPlayers) {
             try {
                 stopVideoPositionUpdates(holder)
@@ -189,7 +189,17 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
         try {
             tts?.stop()
             tts?.shutdown()
+            tts = null
         } catch (e: Exception) {}
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        releaseAllResources()
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    override fun onDestroy() {
+        releaseAllResources()
         super.onDestroy()
     }
 
@@ -228,34 +238,42 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         result.error("FILE_NOT_FOUND", "Video file does not exist at $path", null)
                         return@setMethodCallHandler
                     }
+                    var entry: TextureRegistry.SurfaceTextureEntry? = null
+                    var surface: Surface? = null
+                    var player: MediaPlayer? = null
+                    var textureId: Long? = null
                     try {
-                        val entry: TextureRegistry.SurfaceTextureEntry = flutterEngine.renderer.createSurfaceTexture()
-                        val surfaceTexture: android.graphics.SurfaceTexture = entry.surfaceTexture()
-                        val surface = Surface(surfaceTexture)
-                        val player = MediaPlayer()
-                        player.setSurface(surface)
-                        player.setAudioAttributes(
+                        val createdEntry: TextureRegistry.SurfaceTextureEntry = flutterEngine.renderer.createSurfaceTexture()
+                        entry = createdEntry
+                        val surfaceTexture: android.graphics.SurfaceTexture = createdEntry.surfaceTexture()
+                        val createdSurface = Surface(surfaceTexture)
+                        surface = createdSurface
+                        val createdPlayer = MediaPlayer()
+                        player = createdPlayer
+                        createdPlayer.setSurface(createdSurface)
+                        createdPlayer.setAudioAttributes(
                             AudioAttributes.Builder()
                                 .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
                                 .setUsage(AudioAttributes.USAGE_MEDIA)
                                 .build()
                         )
-                        player.setDataSource(file.absolutePath)
-                        val textureId = entry.id()
-                        val holder = VideoPlayerHolder(player, entry, surface)
-                        videoPlayers[textureId] = holder
+                        createdPlayer.setDataSource(file.absolutePath)
+                        val id = createdEntry.id()
+                        textureId = id
+                        val holder = VideoPlayerHolder(createdPlayer, createdEntry, createdSurface)
+                        videoPlayers[id] = holder
 
-                        player.setOnPreparedListener { mp ->
-                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] ON_PREPARED (video textureId=$textureId, duration=${mp.duration}ms)")
+                        createdPlayer.setOnPreparedListener { mp ->
+                            android.util.Log.d("AUTO_PLAY_TRACE", "[AUTO_PLAY_TRACE] ON_PREPARED (video textureId=$id, duration=${mp.duration}ms)")
                             result.success(mapOf(
-                                "textureId" to textureId,
+                                "textureId" to id,
                                 "durationMs" to mp.duration,
                                 "width" to mp.videoWidth,
                                 "height" to mp.videoHeight
                             ))
                         }
 
-                        player.setOnSeekCompleteListener { mp ->
+                        createdPlayer.setOnSeekCompleteListener { mp ->
                             android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video seek complete at ${mp.currentPosition}ms (pendingSeek=${holder.pendingSeekMs}, pendingPlay=${holder.pendingPlay})")
                             val nextSeek = holder.pendingSeekMs
                             if (nextSeek != null) {
@@ -277,7 +295,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                                     holder.pendingPlay = false
                                     try {
                                         mp.start()
-                                        startVideoPositionUpdates(textureId, holder)
+                                        startVideoPositionUpdates(id, holder)
                                         android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video started after seek at ${mp.currentPosition}ms")
                                     } catch (e: Exception) {}
                                 }
@@ -286,34 +304,42 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                             }
                         }
 
-                        player.setOnCompletionListener { mp ->
-                            android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video MediaPlayer onCompletion (textureId=$textureId, isLooping=${mp.isLooping})")
+                        createdPlayer.setOnCompletionListener { mp ->
+                            android.util.Log.d("SYNC_TRACE", "[SYNC_TRACE] Video MediaPlayer onCompletion (textureId=$id, isLooping=${mp.isLooping})")
                             stopVideoPositionUpdates(holder)
                             holder.pendingPlay = false
                             holder.isSeeking = false
                             holder.pendingSeekMs = null
                             val finalPos = try { mp.duration.toLong() } catch (e: Exception) { 0L }
                             videoPlayerChannel?.invokeMethod("onCompletion", mapOf(
-                                "textureId" to textureId,
+                                "textureId" to id,
                                 "positionMs" to finalPos,
                                 "durationMs" to finalPos
                             ))
                         }
 
-                        player.setOnErrorListener { _, what, extra ->
+                        createdPlayer.setOnErrorListener { _, what, extra ->
                             try {
                                 holder.pendingSeekResult?.error("SEEK_ERROR", "Seek error $what $extra", null)
                                 holder.pendingSeekResult = null
-                                player.release()
-                                surface.release()
-                                entry.release()
-                                videoPlayers.remove(textureId)
+                                createdPlayer.release()
+                                createdSurface.release()
+                                createdEntry.release()
+                                videoPlayers.remove(id)
                             } catch (e: Exception) {}
                             false
                         }
-                        player.isLooping = false
-                        player.prepareAsync()
+                        createdPlayer.isLooping = false
+                        createdPlayer.prepareAsync()
                     } catch (e: Exception) {
+                        try {
+                            if (textureId != null) {
+                                videoPlayers.remove(textureId)
+                            }
+                            player?.release()
+                            surface?.release()
+                            entry?.release()
+                        } catch (cleanupEx: Exception) {}
                         result.error("PLAYER_INIT_ERROR", e.message, null)
                     }
                 }

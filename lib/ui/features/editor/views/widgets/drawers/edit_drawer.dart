@@ -4,14 +4,21 @@ import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
 import 'package:capcut_video_editor/domain/models/transition.dart';
+import 'package:capcut_video_editor/domain/models/video_clip.dart';
+import 'package:capcut_video_editor/domain/models/video_mask.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/transition_selection_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/speed_adjustment_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/mask_adjustment_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/blend_mode_adjustment_sheet.dart';
 
 class EditDrawer extends StatelessWidget {
   final EditorViewModel viewModel;
+  final bool isDesktop;
 
   const EditDrawer({
     super.key,
     required this.viewModel,
+    this.isDesktop = false,
   });
 
   @override
@@ -19,7 +26,7 @@ class EditDrawer extends StatelessWidget {
     final clip = viewModel.selectedClip;
 
     return Container(
-      height: 180,
+      height: isDesktop ? null : 180,
       decoration: const BoxDecoration(
         color: AppColors.surface,
         border: Border(top: BorderSide(color: AppColors.divider, width: 0.8)),
@@ -64,12 +71,31 @@ class EditDrawer extends StatelessWidget {
           ),
 
           if (clip == null)
-            const Expanded(
-              child: Center(
-                child: Text(
-                  'Tap a video clip on the timeline to edit',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-                ),
+            isDesktop
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 36),
+                    child: Center(
+                      child: Text(
+                        'Tap a video clip on the timeline to edit',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      ),
+                    ),
+                  )
+                : const Expanded(
+                    child: Center(
+                      child: Text(
+                        'Tap a video clip on the timeline to edit',
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      ),
+                    ),
+                  )
+          else if (isDesktop)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _buildToolButtons(context, clip),
               ),
             )
           else
@@ -77,104 +103,129 @@ class EditDrawer extends StatelessWidget {
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                children: [
-                  _buildToolButton(
-                    icon: Icons.call_split_rounded,
-                    label: 'Split',
-                    onTap: () => viewModel.splitClipAtPlayhead(),
-                    color: AppColors.primary,
-                  ),
-                  _buildToolButton(
-                    icon: viewModel.isExtractingAudio ? Icons.hourglass_top_rounded : Icons.audiotrack_rounded,
-                    label: viewModel.isExtractingAudio ? 'Extracting...' : 'Extract Audio',
-                    onTap: () => viewModel.extractAudioFromSelectedClip(
-                      onFeedback: (msg) => ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(msg),
-                          duration: const Duration(seconds: 2),
-                          behavior: SnackBarBehavior.floating,
-                          backgroundColor: AppColors.surfaceElevated,
-                        ),
-                      ),
-                    ),
-                    color: AppColors.secondary,
-                  ),
-                  _buildToolButton(
-                    icon: Icons.speed_rounded,
-                    label: 'Speed (${clip.speed}x)',
-                    onTap: () => _showSpeedDialog(context),
-                  ),
-                  _buildToolButton(
-                    icon: clip.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                    label: clip.isMuted ? 'Muted' : 'Volume (${(clip.volume * 100).round()}%)',
-                    onTap: () => _showVolumeDialog(context),
-                    color: clip.isMuted ? AppColors.error : null,
-                  ),
-                  _buildToolButton(
-                    icon: Icons.rotate_right_rounded,
-                    label: 'Rotate (${clip.rotationDegrees}°)',
-                    onTap: viewModel.rotateSelectedClip,
-                  ),
-                  _buildToolButton(
-                    icon: Icons.flip_rounded,
-                    label: 'Flip H',
-                    onTap: viewModel.flipSelectedClipHorizontal,
-                    isActive: clip.flipHorizontal,
-                  ),
-                  _buildToolButton(
-                    icon: Icons.swap_vert_rounded,
-                    label: 'Flip V',
-                    onTap: viewModel.flipSelectedClipVertical,
-                    isActive: clip.flipVertical,
-                  ),
-                  _buildToolButton(
-                    icon: Icons.opacity_rounded,
-                    label: 'Opacity (${(clip.opacity * 100).round()}%)',
-                    onTap: () => _showOpacityDialog(context),
-                  ),
-                  _buildToolButton(
-                    icon: Icons.find_replace_rounded,
-                    label: 'Replace',
-                    onTap: () => _showReplaceModal(context),
-                  ),
-                  _buildToolButton(
-                    icon: Icons.fast_rewind_rounded,
-                    label: 'Reverse',
-                    onTap: viewModel.toggleSelectedClipReverse,
-                    isActive: clip.isReversed,
-                  ),
-                  _buildToolButton(
-                    icon: Icons.ac_unit_rounded,
-                    label: 'Freeze',
-                    onTap: viewModel.toggleSelectedClipFreeze,
-                    isActive: clip.isFrozen,
-                  ),
-                  if (viewModel.selectedClipIndex != null &&
-                      viewModel.selectedClipIndex! < viewModel.videoClips.length - 1)
-                    _buildToolButton(
-                      icon: Icons.transform_rounded,
-                      label: 'Transition',
-                      onTap: () => _showTransitionModal(context),
-                      color: AppColors.primary,
-                    ),
-                  _buildToolButton(
-                    icon: Icons.delete_outline_rounded,
-                    label: 'Delete',
-                    onTap: viewModel.deleteSelectedClip,
-                    color: AppColors.error,
-                  ),
-                  _buildToolButton(
-                    icon: Icons.playlist_remove_rounded,
-                    label: 'Ripple Delete',
-                    onTap: viewModel.rippleDeleteSelectedClip,
-                    color: AppColors.error,
-                  ),
-                ],
+                children: _buildToolButtons(context, clip),
               ),
             ),
         ],
       ),
     );
+  }
+
+  List<Widget> _buildToolButtons(BuildContext context, VideoClip clip) {
+    final speedLabel = clip.speedCurve != null ? 'Curve' : '${clip.speed.toStringAsFixed(1)}x';
+
+    return [
+      _buildToolButton(
+        icon: Icons.call_split_rounded,
+        label: 'Split',
+        onTap: () => viewModel.splitClipAtPlayhead(),
+        color: AppColors.primary,
+      ),
+      _buildToolButton(
+        icon: viewModel.isExtractingAudio ? Icons.hourglass_top_rounded : Icons.audiotrack_rounded,
+        label: viewModel.isExtractingAudio ? 'Extracting...' : 'Extract Audio',
+        onTap: () => viewModel.extractAudioFromSelectedClip(
+          onFeedback: (msg) => ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(msg),
+              duration: const Duration(seconds: 2),
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: AppColors.surfaceElevated,
+            ),
+          ),
+        ),
+        color: AppColors.secondary,
+      ),
+      _buildToolButton(
+        icon: Icons.speed_rounded,
+        label: 'Speed ($speedLabel)',
+        onTap: () => _showSpeedDialog(context),
+      ),
+      _buildToolButton(
+        icon: clip.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+        label: clip.isMuted ? 'Muted' : 'Volume (${(clip.volume * 100).round()}%)',
+        onTap: () => _showVolumeDialog(context),
+        color: clip.isMuted ? AppColors.error : null,
+      ),
+      _buildToolButton(
+        icon: Icons.rotate_right_rounded,
+        label: 'Rotate (${clip.rotationDegrees}°)',
+        onTap: viewModel.rotateSelectedClip,
+      ),
+      _buildToolButton(
+        icon: Icons.flip_rounded,
+        label: 'Flip H',
+        onTap: viewModel.flipSelectedClipHorizontal,
+        isActive: clip.flipHorizontal,
+      ),
+      _buildToolButton(
+        icon: Icons.swap_vert_rounded,
+        label: 'Flip V',
+        onTap: viewModel.flipSelectedClipVertical,
+        isActive: clip.flipVertical,
+      ),
+      _buildToolButton(
+        icon: Icons.opacity_rounded,
+        label: 'Opacity (${(clip.opacity * 100).round()}%)',
+        onTap: () => _showOpacityDialog(context),
+      ),
+      _buildToolButton(
+        icon: Icons.find_replace_rounded,
+        label: 'Replace',
+        onTap: () => _showReplaceModal(context),
+      ),
+      _buildToolButton(
+        icon: Icons.fast_rewind_rounded,
+        label: 'Reverse',
+        onTap: viewModel.toggleSelectedClipReverse,
+        isActive: clip.isReversed,
+      ),
+      _buildToolButton(
+        icon: Icons.ac_unit_rounded,
+        label: 'Freeze',
+        onTap: viewModel.toggleSelectedClipFreeze,
+        isActive: clip.isFrozen,
+      ),
+      _buildToolButton(
+        icon: Icons.diamond_outlined,
+        label: 'Keyframe',
+        onTap: viewModel.toggleKeyframeAtPlayhead,
+        isActive: viewModel.hasKeyframeAtPlayhead,
+        color: AppColors.primary,
+      ),
+      _buildToolButton(
+        icon: Icons.crop_free_rounded,
+        label: 'Mask',
+        onTap: () => _showMaskDialog(context),
+        isActive: clip.mask != null && clip.mask!.type != MaskType.none,
+      ),
+      _buildToolButton(
+        icon: Icons.layers_outlined,
+        label: 'Blending',
+        onTap: () => _showBlendingDialog(context),
+        isActive: clip.blendMode != BlendMode.srcOver,
+      ),
+      if (viewModel.selectedClipIndex != null &&
+          viewModel.selectedClipIndex! < viewModel.videoClips.length - 1)
+        _buildToolButton(
+          icon: Icons.transform_rounded,
+          label: 'Transition',
+          onTap: () => _showTransitionModal(context),
+          color: AppColors.primary,
+        ),
+      _buildToolButton(
+        icon: Icons.delete_outline_rounded,
+        label: 'Delete',
+        onTap: viewModel.deleteSelectedClip,
+        color: AppColors.error,
+      ),
+      _buildToolButton(
+        icon: Icons.playlist_remove_rounded,
+        label: 'Ripple Delete',
+        onTap: viewModel.rippleDeleteSelectedClip,
+        color: AppColors.error,
+      ),
+    ];
   }
 
   Widget _buildToolButton({
@@ -192,10 +243,10 @@ class EditDrawer extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
         child: Container(
-          width: 72,
+          width: isDesktop ? 68 : 72,
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isActive ? AppColors.secondary.withValues(alpha: 0.15) : AppColors.surfaceLight,
+            color: isActive ? AppColors.secondary.withOpacity(0.15) : AppColors.surfaceLight,
             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
             border: Border.all(color: isActive ? AppColors.secondary : AppColors.divider),
           ),
@@ -224,59 +275,7 @@ class EditDrawer extends StatelessWidget {
   void _showSpeedDialog(BuildContext context) {
     final clip = viewModel.selectedClip;
     if (clip == null) return;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppDimensions.radiusMd)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0];
-            return Padding(
-              padding: const EdgeInsets.all(AppDimensions.lg),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Speed Adjustment',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                  ),
-                  const SizedBox(height: 16),
-                    Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: speeds.map((s) {
-                      final isSelected = ((viewModel.selectedClip?.speed ?? 1.0) - s).abs() < 0.05;
-                      return ChoiceChip(
-                        label: Text('${s}x'),
-                        selected: isSelected,
-                        selectedColor: AppColors.primary,
-                        backgroundColor: AppColors.surfaceLight,
-                        labelStyle: TextStyle(
-                          color: isSelected ? Colors.black : Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        onSelected: (selected) {
-                          if (selected) {
-                            viewModel.setClipSpeed(s);
-                            Navigator.of(ctx).pop();
-                          }
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 16),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
+    SpeedAdjustmentSheet.show(context, viewModel);
   }
 
   void _showVolumeDialog(BuildContext context) {
@@ -445,6 +444,24 @@ class EditDrawer extends StatelessWidget {
         rightClipId: rightClip.id,
         existingTransition: existing,
       ),
+    );
+  }
+
+  void _showMaskDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => MaskAdjustmentSheet(viewModel: viewModel),
+    );
+  }
+
+  void _showBlendingDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => BlendModeAdjustmentSheet(viewModel: viewModel),
     );
   }
 }

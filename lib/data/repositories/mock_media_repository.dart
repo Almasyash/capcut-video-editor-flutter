@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 
-/// Provides initial mock media assets for the CapCut timeline demo
+/// Mock media repository strictly restricted to tests, fixtures, and development diagnostics.
+/// Must NOT be used as a fallback in production editor sessions.
 class MockMediaRepository {
   /// Generates initial demo clips for the video track
   static List<VideoClip> getInitialVideoClips() {

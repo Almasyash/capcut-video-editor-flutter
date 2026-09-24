@@ -16,6 +16,12 @@ class AudioTrack {
   final bool isMuted;
   final List<double> waveformPoints;
 
+  /// List of musical beat timestamps (in seconds relative to original audio source)
+  final List<double> beats;
+
+  /// Controls whether beat markers are displayed on the waveform and used for magnetic snapping
+  final bool showBeats;
+
   const AudioTrack({
     required this.id,
     required this.assetId,
@@ -30,6 +36,8 @@ class AudioTrack {
     this.speed = 1.0,
     this.isMuted = false,
     this.waveformPoints = const [],
+    this.beats = const [],
+    this.showBeats = true,
   }) : name = title ?? name ?? 'Audio Track';
 
   String get title => name;
@@ -53,6 +61,26 @@ class AudioTrack {
   double get trimStartInSeconds => trimStart.inMilliseconds / 1000.0;
   double get trimEndInSeconds => effectiveTrimEnd.inMilliseconds / 1000.0;
 
+  /// Returns all beat timestamps that fall within the current [trimStart] and [trimEnd] window,
+  /// mapped to their absolute position on the project timeline (in seconds).
+  List<double> get visibleTimelineBeats {
+    if (!showBeats || beats.isEmpty) return const [];
+    final startSec = trimStartInSeconds;
+    final endSec = trimEndInSeconds;
+    final speedFactor = speed > 0 ? speed : 1.0;
+
+    final visible = <double>[];
+    for (final b in beats) {
+      if (b >= startSec && b <= endSec) {
+        // Offset relative to trimStart, scaled by speed, then shifted by track startTime
+        final relativeSec = (b - startSec) / speedFactor;
+        final timelinePos = startTimeInSeconds + relativeSec;
+        visible.add(timelinePos);
+      }
+    }
+    return visible;
+  }
+
   AudioTrack copyWith({
     String? id,
     String? assetId,
@@ -67,6 +95,8 @@ class AudioTrack {
     double? speed,
     bool? isMuted,
     List<double>? waveformPoints,
+    List<double>? beats,
+    bool? showBeats,
   }) {
     return AudioTrack(
       id: id ?? this.id,
@@ -81,6 +111,8 @@ class AudioTrack {
       speed: speed ?? this.speed,
       isMuted: isMuted ?? this.isMuted,
       waveformPoints: waveformPoints ?? this.waveformPoints,
+      beats: beats ?? this.beats,
+      showBeats: showBeats ?? this.showBeats,
     );
   }
 
@@ -98,6 +130,8 @@ class AudioTrack {
       'speed': speed,
       'isMuted': isMuted,
       'waveformPoints': waveformPoints,
+      'beats': beats,
+      'showBeats': showBeats,
     };
   }
 
@@ -123,6 +157,11 @@ class AudioTrack {
               ?.map((e) => (e as num).toDouble())
               .toList() ??
           const [0.3, 0.5, 0.7, 0.4],
+      beats: (json['beats'] as List<dynamic>?)
+              ?.map((e) => (e as num).toDouble())
+              .toList() ??
+          const [],
+      showBeats: json['showBeats'] as bool? ?? true,
     );
   }
 }

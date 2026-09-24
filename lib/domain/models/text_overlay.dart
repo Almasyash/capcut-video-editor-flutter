@@ -1,6 +1,54 @@
 import 'package:flutter/material.dart';
+import 'package:capcut_video_editor/domain/models/caption_word.dart';
 
-/// Model representing a subtitle / text overlay on the timeline
+/// Animation style for captions and subtitle overlays
+enum TextAnimationType {
+  none,
+  karaoke,   // Word-by-word energetic active highlight & bounce
+  pop,       // Pop-in scale bounce entrance
+  fadeSlide, // Smooth vertical slide & fade
+  typewriter,// Progressive character/word reveal
+  glowPulse, // Radiant rhythmic aura
+}
+
+extension TextAnimationTypeExtension on TextAnimationType {
+  String get displayName {
+    switch (this) {
+      case TextAnimationType.none:
+        return 'None (Static)';
+      case TextAnimationType.karaoke:
+        return 'Karaoke (Bounce)';
+      case TextAnimationType.pop:
+        return 'Pop-in';
+      case TextAnimationType.fadeSlide:
+        return 'Fade Slide';
+      case TextAnimationType.typewriter:
+        return 'Typewriter';
+      case TextAnimationType.glowPulse:
+        return 'Glow Pulse';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case TextAnimationType.none:
+        return Icons.text_fields_rounded;
+      case TextAnimationType.karaoke:
+        return Icons.record_voice_over_rounded;
+      case TextAnimationType.pop:
+        return Icons.open_in_full_rounded;
+      case TextAnimationType.fadeSlide:
+        return Icons.vertical_align_top_rounded;
+      case TextAnimationType.typewriter:
+        return Icons.keyboard_alt_outlined;
+      case TextAnimationType.glowPulse:
+        return Icons.wb_incandescent_outlined;
+    }
+  }
+}
+
+/// Model representing a subtitle / text overlay on the timeline with support for
+/// word-by-word karaoke animations, outline strokes, and styling presets.
 class TextOverlay {
   final String id;
   final String text;
@@ -19,6 +67,11 @@ class TextOverlay {
   final bool isItalic;
   final bool isUnderline;
   final Color? shadowColor;
+  final TextAnimationType animationType;
+  final Color? highlightColor;
+  final double strokeWidth;
+  final Color? strokeColor;
+  final List<CaptionWord> words;
 
   const TextOverlay({
     required this.id,
@@ -39,6 +92,11 @@ class TextOverlay {
     this.isItalic = false,
     this.isUnderline = false,
     this.shadowColor,
+    this.animationType = TextAnimationType.none,
+    this.highlightColor,
+    this.strokeWidth = 0.0,
+    this.strokeColor,
+    this.words = const [],
   }) : textColor = color ?? textColor;
 
   Color get color => textColor;
@@ -59,6 +117,56 @@ class TextOverlay {
   double get trimEndInSeconds => effectiveTrimEnd.inMilliseconds / 1000.0;
   double get endTimeInSeconds => startTimeInSeconds + durationInSeconds;
 
+  /// Returns the zero-based index of the currently active spoken word at the specified
+  /// time offset (in seconds) relative to the start of this caption.
+  int getActiveWordIndex(double elapsedSeconds) {
+    if (elapsedSeconds < 0) return 0;
+
+    // 1. Check explicit word timestamps if populated
+    if (words.isNotEmpty) {
+      for (int i = 0; i < words.length; i++) {
+        final w = words[i];
+        if (elapsedSeconds >= w.startOffsetSec && elapsedSeconds < w.endOffsetSec) {
+          return i;
+        }
+      }
+      if (elapsedSeconds >= words.last.endOffsetSec) {
+        return words.length - 1;
+      }
+      return 0;
+    }
+
+    // 2. Proportional fallback based on split words
+    final wordTokens = text.trim().split(RegExp(r'\s+'));
+    if (wordTokens.isEmpty) return 0;
+    final totalSec = durationInSeconds;
+    if (totalSec <= 0) return 0;
+
+    final progress = (elapsedSeconds / totalSec).clamp(0.0, 0.999);
+    final calculatedIdx = (progress * wordTokens.length).floor();
+    return calculatedIdx.clamp(0, wordTokens.length - 1);
+  }
+
+  /// Returns either explicitly defined words or automatically generates proportional word tokens
+  List<CaptionWord> get effectiveWords {
+    if (words.isNotEmpty) return words;
+
+    final tokens = text.trim().split(RegExp(r'\s+'));
+    if (tokens.isEmpty || (tokens.length == 1 && tokens.first.isEmpty)) {
+      return const [];
+    }
+
+    final totalSec = durationInSeconds;
+    final perWordDuration = totalSec / tokens.length;
+    return List.generate(tokens.length, (i) {
+      return CaptionWord(
+        word: tokens[i],
+        startOffsetSec: i * perWordDuration,
+        durationSec: perWordDuration,
+      );
+    });
+  }
+
   TextOverlay copyWith({
     String? id,
     String? text,
@@ -78,6 +186,11 @@ class TextOverlay {
     bool? isItalic,
     bool? isUnderline,
     Color? shadowColor,
+    TextAnimationType? animationType,
+    Color? highlightColor,
+    double? strokeWidth,
+    Color? strokeColor,
+    List<CaptionWord>? words,
   }) {
     return TextOverlay(
       id: id ?? this.id,
@@ -97,6 +210,11 @@ class TextOverlay {
       isItalic: isItalic ?? this.isItalic,
       isUnderline: isUnderline ?? this.isUnderline,
       shadowColor: shadowColor ?? this.shadowColor,
+      animationType: animationType ?? this.animationType,
+      highlightColor: highlightColor ?? this.highlightColor,
+      strokeWidth: strokeWidth ?? this.strokeWidth,
+      strokeColor: strokeColor ?? this.strokeColor,
+      words: words ?? this.words,
     );
   }
 
@@ -109,17 +227,22 @@ class TextOverlay {
       'trimStartMs': trimStart.inMilliseconds,
       'trimEndMs': trimEnd?.inMilliseconds,
       'speed': speed,
-      'colorValue': textColor.toARGB32(),
+      'colorValue': textColor.value,
       'fontSize': fontSize,
       'posX': position.dx,
       'posY': position.dy,
       'fontFamily': fontFamily,
-      'backgroundColorValue': backgroundColor?.toARGB32(),
+      'backgroundColorValue': backgroundColor?.value,
       'textAlignIndex': textAlign.index,
       'isBold': isBold,
       'isItalic': isItalic,
       'isUnderline': isUnderline,
-      'shadowColorValue': shadowColor?.toARGB32(),
+      'shadowColorValue': shadowColor?.value,
+      'animationType': animationType.name,
+      'highlightColorValue': highlightColor?.value,
+      'strokeWidth': strokeWidth,
+      'strokeColorValue': strokeColor?.value,
+      'words': words.map((w) => w.toJson()).toList(),
     };
   }
 
@@ -128,6 +251,8 @@ class TextOverlay {
     final bgVal = json['backgroundColorValue'] as int?;
     final shadowVal = json['shadowColorValue'] as int?;
     final alignIdx = json['textAlignIndex'] as int?;
+    final hlVal = json['highlightColorValue'] as int?;
+    final strokeVal = json['strokeColorValue'] as int?;
 
     return TextOverlay(
       id: json['id'] as String,
@@ -152,6 +277,17 @@ class TextOverlay {
       isItalic: json['isItalic'] as bool? ?? false,
       isUnderline: json['isUnderline'] as bool? ?? false,
       shadowColor: shadowVal != null ? Color(shadowVal) : null,
+      animationType: TextAnimationType.values.firstWhere(
+        (e) => e.name == json['animationType'],
+        orElse: () => TextAnimationType.none,
+      ),
+      highlightColor: hlVal != null ? Color(hlVal) : null,
+      strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0.0,
+      strokeColor: strokeVal != null ? Color(strokeVal) : null,
+      words: (json['words'] as List?)
+              ?.map((w) => CaptionWord.fromJson(w as Map<String, dynamic>))
+              .toList() ??
+          const [],
     );
   }
 }

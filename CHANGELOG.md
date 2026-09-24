@@ -4,6 +4,19 @@ All notable changes to **Editor FS** are documented in this file.
 
 ---
 
+## [1.1.0] - 2026-09-24
+
+### 🌟 Speed Curves, Keyframes, PIP, Chroma Key, Audio Beats & Captions Suite
+- **Speed Curve Velocity Ramping**: Non-linear speed curves (`Montage`, `Hero`, `Bullet`, `Jump Cut`, `Flash In`, `Flash Out`, `Custom`) with pitch preservation and smooth slow-mo interpolation.
+- **Keyframe Animation System**: CapCut Diamond Control Group UI, 4D property keyframing (Position, Scale, Rotation, Opacity), and easing curve interpolations.
+- **PIP Layering & GPU Chroma Key**: Multi-layer Picture-in-Picture overlay video/photos with green/blue screen removal, color similarity, smoothness, and 12 blend modes.
+- **Auto-Captions & Typography Suite**: Kinetic auto-captions, word-level timestamps, karaoke scale bounce, and glowing stroke outlines.
+- **Audio Intelligence**: Audio beat detection (BPM), 100-bar waveform visualization, and Match Cut snap-to-beat timeline alignment.
+- **Interactive Transform Canvas**: 2D free transform with magnetic guideline snapping, angular locking, and haptic feedback.
+- **Quality & Performance**: 511/511 passing tests, 0 analyzer issues, Flutter 3.24+ compatibility refactoring.
+
+---
+
 ## [1.0.0] - 2026-09-12
 
 ### 🌟 Fresh Public Release Baseline

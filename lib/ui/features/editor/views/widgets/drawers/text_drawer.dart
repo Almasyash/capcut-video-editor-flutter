@@ -3,6 +3,7 @@ import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/auto_captions_sheet.dart';
 
 class TextDrawer extends StatelessWidget {
   final EditorViewModel viewModel;
@@ -246,29 +247,7 @@ class TextDrawer extends StatelessWidget {
   }
 
   void _generateAutoCaptions(BuildContext context) {
-    viewModel.addTextOverlay(
-      const TextOverlay(
-        id: 'auto_cap_1',
-        text: '🔥 Welcome to our CapCut video edit!',
-        startTime: Duration.zero,
-        duration: Duration(seconds: 5),
-        color: AppColors.primary,
-        fontSize: 16.0,
-      ),
-    );
-    viewModel.addTextOverlay(
-      const TextOverlay(
-        id: 'auto_cap_2',
-        text: '✨ Creating amazing content with Flutter',
-        startTime: Duration(seconds: 5),
-        duration: Duration(seconds: 6),
-        color: Colors.white,
-        fontSize: 16.0,
-      ),
-    );
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Generated 2 Auto-Captions on timeline!'), duration: Duration(seconds: 2)),
-    );
+    AutoCaptionsSheet.show(context, viewModel);
   }
 
   @override
@@ -365,7 +344,7 @@ class TextDrawer extends StatelessWidget {
                             color: AppColors.surfaceLight,
                             borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                             border: Border.all(
-                              color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withValues(alpha: 0.5),
+                              color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withOpacity(0.5),
                               width: isSelected ? 2.0 : 1.0,
                             ),
                           ),
@@ -383,6 +362,19 @@ class TextDrawer extends StatelessWidget {
                                   color: item.color,
                                 ),
                               ),
+                              if (item.animationType != TextAnimationType.none)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 2),
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: Text(
+                                    item.animationType.displayName.toUpperCase(),
+                                    style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: AppColors.primary),
+                                  ),
+                                ),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [

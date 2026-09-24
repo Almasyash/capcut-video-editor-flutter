@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:video_player/video_player.dart';
 
 /// Represents a position and lifecycle event emitted from the authoritative native video decoder.
 class VideoPositionEvent {
@@ -113,6 +114,8 @@ class VideoPlaybackService {
   }
 
   final Map<int, VideoPlayerSession> _sessions = {};
+  final Map<int, VideoPlayerController> _windowsControllers = {};
+  VideoPlayerController? getWindowsController(int textureId) => _windowsControllers[textureId];
   VideoPlayerSession? _activeSession;
   VideoPlayerSession? get activeSession => _activeSession;
 
@@ -174,6 +177,71 @@ class VideoPlaybackService {
       return null;
     }
 
+    if (!kIsWeb && Platform.isWindows) {
+      try {
+        final controller = VideoPlayerController.file(File(localPath));
+        await controller.initialize();
+
+        // Windows warm-up: trigger Media Foundation grabber to paint frame 0
+        // into the texture so the viewport is not black while paused at start.
+        try {
+          await controller.play();
+          await Future.delayed(const Duration(milliseconds: 80));
+          await controller.pause();
+          await controller.seekTo(Duration.zero);
+        } catch (_) {
+          // Ignore warm-up failures; playback will still work
+        }
+
+        // ignore: invalid_use_of_visible_for_testing_member
+        final textureId = controller.textureId;
+        final duration = controller.value.duration;
+        final width = controller.value.size.width.toInt();
+        final height = controller.value.size.height.toInt();
+
+        final session = VideoPlayerSession(
+          textureId: textureId,
+          duration: duration,
+          width: width > 0 ? width : 1920,
+          height: height > 0 ? height : 1080,
+          path: localPath,
+        );
+
+        _windowsControllers[textureId] = controller;
+        _sessions[textureId] = session;
+        _activeSession = session;
+
+        controller.addListener(() {
+          if (!_sessions.containsKey(textureId)) return;
+          final currentPos = controller.value.position;
+          session.currentPosition = currentPos;
+          session.isPlaying = controller.value.isPlaying;
+
+          final isCompleted = controller.value.isCompleted ||
+              (duration > Duration.zero && currentPos >= duration);
+
+          final event = VideoPositionEvent(
+            textureId: textureId,
+            position: currentPos,
+            duration: duration,
+            isCompleted: isCompleted,
+          );
+
+          if (isCompleted) {
+            session.isPlaying = false;
+            _completionEventController.add(event);
+          }
+          _positionEventController.add(event);
+        });
+
+        debugPrint('[VideoPlaybackService] Windows initialized session textureId: $textureId ($width x $height, ${duration.inMilliseconds}ms) for $localPath');
+        return session;
+      } catch (e, st) {
+        debugPrint('[VideoPlaybackService] Windows createSession failed for $localPath: $e\n$st');
+        return null;
+      }
+    }
+
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>('init', {
         'path': localPath,
@@ -206,6 +274,19 @@ class VideoPlaybackService {
 
   /// Queries the authoritative native player position
   Future<Duration?> getPosition(int textureId) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers[textureId];
+      if (controller != null) {
+        final pos = controller.value.position;
+        final session = _sessions[textureId];
+        if (session != null) {
+          session.currentPosition = pos;
+        }
+        return pos;
+      }
+      return _sessions[textureId]?.currentPosition;
+    }
+
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>('getPosition', {
         'textureId': textureId,
@@ -227,6 +308,22 @@ class VideoPlaybackService {
 
   /// Starts playback of video frames and native audio track at optional [position].
   Future<void> play(int textureId, {Duration? position}) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers[textureId];
+      if (controller != null) {
+        debugPrint('[AUTO_PLAY_TRACE] Windows VideoPlaybackService.play($textureId, pos=${position?.inMilliseconds}ms)');
+        if (position != null) {
+          await controller.seekTo(position);
+        }
+        await controller.play();
+        final session = _sessions[textureId];
+        if (session != null) {
+          session.isPlaying = true;
+        }
+        return;
+      }
+    }
+
     try {
       debugPrint('[AUTO_PLAY_TRACE] VIDEO START CALLED: VideoPlaybackService.play($textureId, pos=${position?.inMilliseconds}ms)');
       await _channel.invokeMethod('play', {
@@ -244,6 +341,19 @@ class VideoPlaybackService {
 
   /// Pauses playback of video frames and audio track.
   Future<void> pause(int textureId) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers[textureId];
+      if (controller != null) {
+        debugPrint('[AUTO_PLAY_TRACE] Windows VideoPlaybackService.pause($textureId)');
+        await controller.pause();
+        final session = _sessions[textureId];
+        if (session != null) {
+          session.isPlaying = false;
+        }
+        return;
+      }
+    }
+
     try {
       debugPrint('[AUTO_PLAY_TRACE] VideoPlaybackService.pause($textureId)');
       await _channel.invokeMethod('pause', {'textureId': textureId});
@@ -258,6 +368,18 @@ class VideoPlaybackService {
 
   /// Seeks the native decoder to [position].
   Future<void> seekTo(int textureId, Duration position) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers[textureId];
+      if (controller != null) {
+        await controller.seekTo(position);
+        final session = _sessions[textureId];
+        if (session != null) {
+          session.currentPosition = position;
+        }
+        return;
+      }
+    }
+
     try {
       await _channel.invokeMethod('seekTo', {
         'textureId': textureId,
@@ -270,6 +392,14 @@ class VideoPlaybackService {
 
   /// Sets audio playback volume (0.0 to 1.0).
   Future<void> setVolume(int textureId, double volume) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers[textureId];
+      if (controller != null) {
+        await controller.setVolume(volume.clamp(0.0, 1.0));
+        return;
+      }
+    }
+
     try {
       await _channel.invokeMethod('setVolume', {
         'textureId': textureId,
@@ -280,12 +410,20 @@ class VideoPlaybackService {
     }
   }
 
-  /// Sets hardware-accelerated video & audio playback speed (0.25x to 4.0x).
+  /// Sets hardware-accelerated video & audio playback speed (0.1x to 100.0x).
   Future<void> setSpeed(int textureId, double speed) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers[textureId];
+      if (controller != null) {
+        await controller.setPlaybackSpeed(speed.clamp(0.1, 100.0));
+        return;
+      }
+    }
+
     try {
       await _channel.invokeMethod('setSpeed', {
         'textureId': textureId,
-        'speed': speed.clamp(0.25, 4.0),
+        'speed': speed.clamp(0.1, 100.0),
       });
     } catch (e) {
       debugPrint('[VideoPlaybackService] setSpeed failed: $e');
@@ -294,6 +432,14 @@ class VideoPlaybackService {
 
   /// Sets playback looping mode.
   Future<void> setLooping(int textureId, bool looping) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers[textureId];
+      if (controller != null) {
+        await controller.setLooping(looping);
+        return;
+      }
+    }
+
     try {
       await _channel.invokeMethod('setLooping', {
         'textureId': textureId,
@@ -306,6 +452,26 @@ class VideoPlaybackService {
 
   /// Disposes the native player and releases the texture entry.
   Future<void> disposeSession(int textureId) async {
+    if (!kIsWeb && Platform.isWindows) {
+      final controller = _windowsControllers.remove(textureId);
+      if (controller != null) {
+        try {
+          await controller.dispose();
+        } catch (e) {
+          debugPrint('[VideoPlaybackService] controller.dispose failed: $e');
+        }
+      }
+      final session = _sessions.remove(textureId);
+      if (session != null) {
+        session.isDisposed = true;
+      }
+      if (_activeSession?.textureId == textureId) {
+        _activeSession = null;
+      }
+      debugPrint('[VideoPlaybackService] Windows Disposed session textureId: $textureId');
+      return;
+    }
+
     try {
       await _channel.invokeMethod('dispose', {'textureId': textureId});
       final session = _sessions.remove(textureId);

@@ -95,7 +95,7 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
-                              color: isSel ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceElevated,
+                              color: isSel ? AppColors.primary.withOpacity(0.15) : AppColors.surfaceElevated,
                               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                               border: Border.all(
                                 color: isSel ? AppColors.primary : AppColors.divider,
@@ -146,7 +146,7 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             decoration: BoxDecoration(
-                              color: isSel ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceElevated,
+                              color: isSel ? AppColors.primary.withOpacity(0.15) : AppColors.surfaceElevated,
                               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                               border: Border.all(
                                 color: isSel ? AppColors.primary : AppColors.divider,

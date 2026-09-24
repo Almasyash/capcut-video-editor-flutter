@@ -140,9 +140,9 @@ class ClipSpatialTransform {
     final scaleY = (flipVertical ? -1.0 : 1.0) * scale;
 
     return Matrix4.identity()
-      ..translateByDouble(xPos, yPos, 0.0, 1.0)
+      ..translate(xPos, yPos, 0.0)
       ..rotateZ(totalRotation)
-      ..scaleByDouble(scaleX, scaleY, 1.0, 1.0);
+      ..scale(scaleX, scaleY, 1.0);
   }
 
   Map<String, dynamic> toJson() {

@@ -29,7 +29,8 @@ enum EditorCategory {
   stickers('Stickers', Icons.emoji_emotions_outlined),
   effects('Effects', Icons.auto_fix_high_rounded),
   filters('Filters', Icons.photo_filter_rounded),
-  adjust('Adjust', Icons.tune_rounded);
+  adjust('Adjust', Icons.tune_rounded),
+  transitions('Transitions', Icons.transform_rounded);
 
   const EditorCategory(this.label, this.icon);
 

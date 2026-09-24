@@ -269,7 +269,7 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
                       duration: const Duration(milliseconds: 180),
                       width: 76,
                       decoration: BoxDecoration(
-                        color: isSelected ? AppColors.primary.withValues(alpha: 0.15) : AppColors.surfaceLight,
+                        color: isSelected ? AppColors.primary.withOpacity(0.15) : AppColors.surfaceLight,
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
                           color: isSelected ? AppColors.primary : AppColors.divider,
@@ -321,7 +321,7 @@ class _TransitionSelectionSheetState extends State<TransitionSelectionSheet> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withValues(alpha: 0.15),
+                      color: AppColors.primary.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(

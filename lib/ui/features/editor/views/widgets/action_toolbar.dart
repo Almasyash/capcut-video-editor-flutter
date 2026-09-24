@@ -6,6 +6,10 @@ import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_m
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/duplicate_options_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/export_modal_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/speed_adjustment_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/beat_options_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/auto_captions_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/pip_overlay_sheet.dart';
 
 /// Middle Action Toolbar containing Split, Trim Left/Right, Delete, Duplicate (with PIP option),
 /// Speed, Volume, Add Clip (Media Picker), and Export.
@@ -21,6 +25,9 @@ class ActionToolbar extends StatelessWidget {
     final hasSelectedText = viewModel.selectedTextId != null;
     final hasSelectedOverlay = viewModel.selectedOverlay != null;
     final hasAnySelection = hasSelectedClip || hasSelectedAudio || hasSelectedText || hasSelectedOverlay;
+    final canKeyframe = hasSelectedClip || hasSelectedOverlay;
+    final isAtKeyframe = canKeyframe && viewModel.hasKeyframeAtPlayhead;
+    final kfCount = canKeyframe ? viewModel.currentKeyframeCount : 0;
 
     return Container(
       height: AppDimensions.actionToolbarHeight,
@@ -34,8 +41,39 @@ class ActionToolbar extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // Previous Cut / Boundary Jump
+          Tooltip(
+            message: 'Previous Cut / Boundary (Left Arrow)',
+            waitDuration: const Duration(milliseconds: 350),
+            child: InkWell(
+              onTap: viewModel.seekToPreviousBoundary,
+              borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Icon(Icons.skip_previous_rounded, size: 20, color: AppColors.iconDefault),
+              ),
+            ),
+          ),
+          const SizedBox(width: 2),
+
           // 1. Play / Pause Quick Toggle
           _buildPlayPauseButton(),
+
+          const SizedBox(width: 2),
+
+          // Next Cut / Boundary Jump
+          Tooltip(
+            message: 'Next Cut / Boundary (Right Arrow)',
+            waitDuration: const Duration(milliseconds: 350),
+            child: InkWell(
+              onTap: viewModel.seekToNextBoundary,
+              borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: Icon(Icons.skip_next_rounded, size: 20, color: AppColors.iconDefault),
+              ),
+            ),
+          ),
 
           const SizedBox(width: 4),
           const VerticalDivider(color: AppColors.divider, indent: 14, endIndent: 14),
@@ -57,6 +95,7 @@ class ActionToolbar extends StatelessWidget {
                       : (hasSelectedAudio
                           ? 'Split Audio'
                           : (hasSelectedOverlay ? 'Split Overlay' : 'Split')),
+                  tooltip: 'Split at playhead (S)',
                   isPrimary: true,
                   enabled: (hasSelectedClip && viewModel.videoClips.isNotEmpty) ||
                       hasSelectedAudio ||
@@ -101,6 +140,7 @@ class ActionToolbar extends StatelessWidget {
                   context: context,
                   icon: Icons.align_horizontal_left_rounded,
                   label: 'Trim Left',
+                  tooltip: 'Left Cut / Trim head to playhead (Q)',
                   enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
                   onTap: () {
                     if (hasSelectedText) {
@@ -133,6 +173,7 @@ class ActionToolbar extends StatelessWidget {
                   context: context,
                   icon: Icons.align_horizontal_right_rounded,
                   label: 'Trim Right',
+                  tooltip: 'Right Cut / Trim tail to playhead (W)',
                   enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
                   onTap: () {
                     if (hasSelectedText) {
@@ -180,9 +221,15 @@ class ActionToolbar extends StatelessWidget {
                   context: context,
                   icon: Icons.copy_all_rounded,
                   label: 'Duplicate',
-                  enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText,
+                  tooltip: 'Duplicate selected (Ctrl+D)',
+                  enabled: hasSelectedClip || hasSelectedAudio || hasSelectedText || hasSelectedOverlay,
                   onTap: () {
-                    if (hasSelectedText) {
+                    if (hasSelectedOverlay) {
+                      final dup = viewModel.duplicateSelectedOverlay();
+                      if (dup != null) {
+                        _showFeedback(context, '📋 Duplicated PIP layer "${dup.title}"');
+                      }
+                    } else if (hasSelectedText) {
                       final dup = viewModel.duplicateSelectedText();
                       if (dup != null) {
                         _showFeedback(context, '📋 Duplicated text layer "${dup.text}"');
@@ -207,6 +254,7 @@ class ActionToolbar extends StatelessWidget {
                   context: context,
                   icon: Icons.add_photo_alternate_rounded,
                   label: 'Add Clip',
+                  tooltip: 'Add / Import Media (Ctrl+I)',
                   enabled: true,
                   onTap: () {
                     showModalBottomSheet(
@@ -215,6 +263,121 @@ class ActionToolbar extends StatelessWidget {
                       backgroundColor: Colors.transparent,
                       builder: (ctx) => MediaPickerSheet(viewModel: viewModel),
                     );
+                  },
+                ),
+
+                // PIP Overlay (Import Media as Overlay or Open PIP Settings)
+                _buildActionButton(
+                  context: context,
+                  icon: Icons.picture_in_picture_alt_rounded,
+                  label: hasSelectedOverlay ? 'PIP Studio' : 'PIP Overlay',
+                  tooltip: 'Picture-in-Picture layer compositing',
+                  isAccent: hasSelectedOverlay,
+                  enabled: true,
+                  onTap: () {
+                    if (hasSelectedOverlay) {
+                      PipOverlaySheet.show(context, viewModel, initialTab: 0);
+                    } else if (hasSelectedClip) {
+                      viewModel.duplicateSelectedClipAsOverlay();
+                      _showFeedback(context, '✨ Duplicated clip as Picture-in-Picture (PIP) layer');
+                    } else {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (ctx) => MediaPickerSheet(
+                          viewModel: viewModel,
+                          asOverlay: true,
+                        ),
+                      );
+                    }
+                  },
+                ),
+
+                // Chroma Key Action (Appears when Overlay is Selected)
+                if (hasSelectedOverlay)
+                  _buildActionButton(
+                    context: context,
+                    icon: Icons.auto_fix_high_rounded,
+                    label: (viewModel.selectedOverlay?.enableChromaKey ?? false)
+                        ? 'Chroma ON'
+                        : 'Chroma Key',
+                    isAccent: viewModel.selectedOverlay?.enableChromaKey ?? false,
+                    enabled: true,
+                    onTap: () {
+                      PipOverlaySheet.show(context, viewModel, initialTab: 0);
+                    },
+                  ),
+
+                // PIP Blending Action (Appears when Overlay is Selected)
+                if (hasSelectedOverlay)
+                  _buildActionButton(
+                    context: context,
+                    icon: Icons.layers_rounded,
+                    label: viewModel.selectedOverlay?.blendMode != BlendMode.srcOver
+                        ? 'Blend (${viewModel.selectedOverlay!.blendMode.name})'
+                        : 'PIP Blend',
+                    isAccent: viewModel.selectedOverlay?.blendMode != BlendMode.srcOver,
+                    enabled: true,
+                    onTap: () {
+                      PipOverlaySheet.show(context, viewModel, initialTab: 1);
+                    },
+                  ),
+
+                // Overlay Opacity Action (Appears when Overlay is Selected)
+                if (hasSelectedOverlay)
+                  _buildActionButton(
+                    context: context,
+                    icon: Icons.opacity_rounded,
+                    label: 'Opacity (${((viewModel.selectedOverlay?.opacity ?? 1.0) * 100).round()}%)',
+                    enabled: true,
+                    onTap: () {
+                      PipOverlaySheet.show(context, viewModel, initialTab: 2);
+                    },
+                  ),
+
+                // Cut Action
+                _buildActionButton(
+                  context: context,
+                  icon: Icons.content_cut_rounded,
+                  label: 'Cut',
+                  tooltip: 'Cut selected (Ctrl+X)',
+                  enabled: hasAnySelection,
+                  onTap: () {
+                    final success = viewModel.cutSelected();
+                    if (success) {
+                      _showFeedback(context, '✂️ Cut element to clipboard');
+                    }
+                  },
+                ),
+
+                // Copy Action
+                _buildActionButton(
+                  context: context,
+                  icon: Icons.content_copy_rounded,
+                  label: 'Copy',
+                  tooltip: 'Copy selected (Ctrl+C)',
+                  enabled: hasAnySelection,
+                  onTap: () {
+                    final success = viewModel.copySelected();
+                    if (success) {
+                      _showFeedback(context, '📋 Copied element to clipboard');
+                    }
+                  },
+                ),
+
+                // Paste Action
+                _buildActionButton(
+                  context: context,
+                  icon: Icons.content_paste_rounded,
+                  label: 'Paste',
+                  tooltip: 'Paste from clipboard at playhead (Ctrl+V)',
+                  enabled: viewModel.canPaste,
+                  onTap: () {
+                    final success = viewModel.pasteAtPlayhead();
+                    if (success) {
+                      _showFeedback(context, '📥 Pasted element at playhead');
+                    }
                   },
                 ),
 
@@ -233,6 +396,139 @@ class ActionToolbar extends StatelessWidget {
                       viewModel.openDrawer(EditorCategory.edit);
                     }
                   },
+                ),
+
+                // Auto Captions & Subtitle Styling Action
+                _buildActionButton(
+                  context: context,
+                  icon: Icons.subtitles_rounded,
+                  label: hasSelectedText ? 'Captions Style' : 'Auto Captions',
+                  enabled: true,
+                  onTap: () {
+                    AutoCaptionsSheet.show(context, viewModel);
+                  },
+                ),
+
+                // CapCut-style Keyframe Control Group (⯇  ◆+ / ◆-  ⯈)
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 2.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
+                  decoration: BoxDecoration(
+                    color: isAtKeyframe
+                        ? const Color(0xFFFFD600).withOpacity(0.15)
+                        : (kfCount > 0 ? AppColors.surfaceLight : Colors.transparent),
+                    borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                    border: Border.all(
+                      color: isAtKeyframe
+                          ? const Color(0xFFFFD600)
+                          : (kfCount > 0 ? AppColors.divider : Colors.transparent),
+                      width: isAtKeyframe ? 1.0 : 0.6,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Previous Keyframe Arrow (⯇)
+                      if (kfCount > 0)
+                        InkWell(
+                          onTap: (canKeyframe && viewModel.hasPreviousKeyframe)
+                              ? viewModel.jumpToPreviousKeyframe
+                              : null,
+                          borderRadius: BorderRadius.circular(3),
+                          child: Padding(
+                            padding: const EdgeInsets.all(2.0),
+                            child: Icon(
+                              Icons.arrow_left_rounded,
+                              size: 18,
+                              color: (canKeyframe && viewModel.hasPreviousKeyframe)
+                                  ? const Color(0xFFFFD600)
+                                  : AppColors.iconDisabled,
+                            ),
+                          ),
+                        ),
+
+                      // Central Keyframe Button (◆+ / ◆-)
+                      InkWell(
+                        onTap: canKeyframe
+                            ? () {
+                                final wasAtKeyframe = viewModel.hasKeyframeAtPlayhead;
+                                viewModel.toggleKeyframeAtPlayhead();
+                                _showFeedback(
+                                  context,
+                                  wasAtKeyframe
+                                      ? '◆ Keyframe removed'
+                                      : '◆ Keyframe added at current position',
+                                );
+                              }
+                            : null,
+                        borderRadius: BorderRadius.circular(3),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.diamond_rounded,
+                                    size: 16,
+                                    color: !canKeyframe
+                                        ? AppColors.iconDisabled
+                                        : (isAtKeyframe
+                                            ? const Color(0xFFFFD600)
+                                            : (kfCount > 0 ? AppColors.primary : AppColors.iconDefault)),
+                                  ),
+                                  Positioned(
+                                    right: -2,
+                                    bottom: -2,
+                                    child: Icon(
+                                      isAtKeyframe ? Icons.remove : Icons.add,
+                                      size: 9,
+                                      color: isAtKeyframe ? Colors.redAccent : Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                kfCount > 0 ? 'KF ($kfCount)' : 'Keyframe',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: isAtKeyframe ? FontWeight.bold : FontWeight.w500,
+                                  color: !canKeyframe
+                                      ? AppColors.iconDisabled
+                                      : (isAtKeyframe
+                                          ? const Color(0xFFFFD600)
+                                          : (kfCount > 0 ? AppColors.textPrimary : AppColors.textSecondary)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Next Keyframe Arrow (⯈)
+                      if (kfCount > 0)
+                        InkWell(
+                          onTap: (canKeyframe && viewModel.hasNextKeyframe)
+                              ? viewModel.jumpToNextKeyframe
+                              : null,
+                          borderRadius: BorderRadius.circular(3),
+                          child: Padding(
+                            padding: const EdgeInsets.all(2.0),
+                            child: Icon(
+                              Icons.arrow_right_rounded,
+                              size: 18,
+                              color: (canKeyframe && viewModel.hasNextKeyframe)
+                                  ? const Color(0xFFFFD600)
+                                  : AppColors.iconDisabled,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
 
                 // Speed Controller
@@ -268,6 +564,19 @@ class ActionToolbar extends StatelessWidget {
                   onTap: () => _showVolumeDialog(context),
                 ),
 
+                // Match Cut / Beats Action (Audio Track Selected)
+                if (hasSelectedAudio)
+                  _buildActionButton(
+                    context: context,
+                    icon: Icons.graphic_eq_rounded,
+                    label: (viewModel.selectedAudioTrack?.beats.isNotEmpty ?? false)
+                        ? 'Beats (${viewModel.selectedAudioTrack!.beats.length})'
+                        : 'Beats',
+                    isAccent: (viewModel.selectedAudioTrack?.beats.isNotEmpty ?? false),
+                    enabled: true,
+                    onTap: () => BeatOptionsSheet.show(context, viewModel),
+                  ),
+
                 // Delete Action (Context-Aware Normal Delete)
                 _buildActionButton(
                   context: context,
@@ -277,6 +586,7 @@ class ActionToolbar extends StatelessWidget {
                       : (hasSelectedAudio
                           ? 'Delete Audio'
                           : (hasSelectedOverlay ? 'Delete Overlay' : 'Delete')),
+                  tooltip: 'Delete selected (Delete / Backspace)',
                   enabled: hasAnySelection,
                   onTap: () {
                     if (hasSelectedText) {
@@ -301,6 +611,7 @@ class ActionToolbar extends StatelessWidget {
                     context: context,
                     icon: Icons.playlist_remove_rounded,
                     label: 'Ripple Delete',
+                    tooltip: 'Ripple Delete (Shift+Delete)',
                     enabled: hasSelectedClip && viewModel.videoClips.isNotEmpty,
                     onTap: () {
                       final success = viewModel.rippleDeleteSelectedClip();
@@ -337,23 +648,27 @@ class ActionToolbar extends StatelessWidget {
   }
 
   Widget _buildPlayPauseButton() {
-    return InkWell(
-      onTap: viewModel.togglePlayPause,
-      borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: viewModel.isPlaying ? AppColors.secondary.withValues(alpha: 0.2) : AppColors.surfaceElevated,
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: viewModel.isPlaying ? AppColors.secondary : AppColors.divider,
-            width: 1.2,
+    return Tooltip(
+      message: viewModel.isPlaying ? 'Pause (Space)' : 'Play (Space)',
+      waitDuration: const Duration(milliseconds: 350),
+      child: InkWell(
+        onTap: viewModel.togglePlayPause,
+        borderRadius: BorderRadius.circular(AppDimensions.radiusFull),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: viewModel.isPlaying ? AppColors.secondary.withOpacity(0.2) : AppColors.surfaceElevated,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: viewModel.isPlaying ? AppColors.secondary : AppColors.divider,
+              width: 1.2,
+            ),
           ),
-        ),
-        child: Icon(
-          viewModel.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          size: 20,
-          color: viewModel.isPlaying ? AppColors.secondary : AppColors.primary,
+          child: Icon(
+            viewModel.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            size: 20,
+            color: viewModel.isPlaying ? AppColors.secondary : AppColors.primary,
+          ),
         ),
       ),
     );
@@ -367,6 +682,7 @@ class ActionToolbar extends StatelessWidget {
     bool enabled = true,
     bool isPrimary = false,
     bool isAccent = false,
+    String? tooltip,
   }) {
     Color iconColor = enabled ? AppColors.iconDefault : AppColors.iconDisabled;
     Color textColor = enabled ? AppColors.textPrimary : AppColors.textMuted;
@@ -375,40 +691,44 @@ class ActionToolbar extends StatelessWidget {
     if (isPrimary && enabled) {
       iconColor = AppColors.primary;
       textColor = AppColors.primary;
-      bgColor = AppColors.primary.withValues(alpha: 0.12);
+      bgColor = AppColors.primary.withOpacity(0.12);
     } else if (isAccent && enabled) {
       iconColor = AppColors.secondary;
       textColor = AppColors.secondary;
-      bgColor = AppColors.secondary.withValues(alpha: 0.12);
+      bgColor = AppColors.secondary.withOpacity(0.12);
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3.0, vertical: 2.0),
-      child: InkWell(
-        onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(
-            color: bgColor ?? Colors.transparent,
-            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-            border: isPrimary && enabled ? Border.all(color: AppColors.primary.withValues(alpha: 0.4)) : null,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 19, color: iconColor),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10.0,
-                  fontWeight: (isPrimary || isAccent) ? FontWeight.w700 : FontWeight.w500,
-                  color: textColor,
+    return Tooltip(
+      message: tooltip ?? label,
+      waitDuration: const Duration(milliseconds: 350),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3.0, vertical: 2.0),
+        child: InkWell(
+          onTap: enabled ? onTap : null,
+          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: bgColor ?? Colors.transparent,
+              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+              border: isPrimary && enabled ? Border.all(color: AppColors.primary.withOpacity(0.4)) : null,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 19, color: iconColor),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10.0,
+                    fontWeight: (isPrimary || isAccent) ? FontWeight.w700 : FontWeight.w500,
+                    color: textColor,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -435,8 +755,14 @@ class ActionToolbar extends StatelessWidget {
 
     final isAudio = audio != null;
     final isText = text != null;
+
+    if (!isAudio && !isText && clip != null) {
+      SpeedAdjustmentSheet.show(context, viewModel);
+      return;
+    }
+
     final currentSpeed = isText ? text.speed : (isAudio ? audio.speed : clip!.speed);
-    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    final speeds = [0.1, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 50.0];
 
     showModalBottomSheet(
       context: context,
