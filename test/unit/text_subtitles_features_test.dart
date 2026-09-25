@@ -224,7 +224,10 @@ void main() {
 
       // Test clamping
       viewModel.updateTextScale('transform_test', 10.0);
-      expect(viewModel.textOverlays.first.scale, equals(5.0));
+      expect(viewModel.textOverlays.first.scale, equals(4.0));
+
+      viewModel.updateTextScale('transform_test', 0.05);
+      expect(viewModel.textOverlays.first.scale, equals(0.3));
 
       viewModel.updateTextTransform(
         'transform_test',
@@ -271,6 +274,144 @@ void main() {
       expect(find.byIcon(Icons.close_rounded), findsWidgets);
       expect(find.byIcon(Icons.open_in_full_rounded), findsWidgets);
       expect(find.text('Montserrat'), findsWidgets);
+    });
+
+    test('11. Text scale sanitization rejects NaN, Infinity, negative values, and clamps to [0.3, 4.0]', () {
+      expect(TextOverlay.sanitizeScale(double.nan, fallback: 1.5), equals(1.5));
+      expect(TextOverlay.sanitizeScale(double.infinity, fallback: 2.0), equals(2.0));
+      expect(TextOverlay.sanitizeScale(double.negativeInfinity, fallback: 1.0), equals(1.0));
+      expect(TextOverlay.sanitizeScale(-0.5, fallback: 1.2), equals(1.2));
+      expect(TextOverlay.sanitizeScale(0.0, fallback: 1.0), equals(1.0));
+
+      // Clamping within min/max bounds
+      expect(TextOverlay.sanitizeScale(0.1), equals(TextOverlay.minScale));
+      expect(TextOverlay.sanitizeScale(10.0), equals(TextOverlay.maxScale));
+      expect(TextOverlay.sanitizeScale(2.5), equals(2.5));
+    });
+
+    test('12. Text position sanitization rejects NaN, Infinity, and clamps within [0.0, 1.0]', () {
+      final sanitizedNan = TextOverlay.sanitizePosition(
+        const Offset(double.nan, double.infinity),
+        fallback: const Offset(0.5, 0.75),
+      );
+      expect(sanitizedNan, equals(const Offset(0.5, 0.75)));
+
+      final clamped = TextOverlay.sanitizePosition(const Offset(-0.2, 1.4));
+      expect(clamped.dx, equals(0.0));
+      expect(clamped.dy, equals(1.0));
+    });
+
+    test('13. Undo and Redo independently restore text transform gestures', () {
+      const text = TextOverlay(
+        id: 'undo_test',
+        text: 'Undoable Layer',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+        scale: 1.0,
+        position: Offset(0.5, 0.5),
+      );
+      viewModel.addTextOverlay(text);
+
+      final initialPos = viewModel.textOverlays.first.position;
+      final initialScale = viewModel.textOverlays.first.scale;
+
+      // 1. Simulate Move gesture
+      viewModel.updateTextPosition('undo_test', const Offset(0.3, 0.2));
+      viewModel.commitTextTransform('undo_test', oldPosition: initialPos, oldScale: initialScale);
+      expect(viewModel.textOverlays.first.position, equals(const Offset(0.3, 0.2)));
+
+      // 2. Undo Move
+      expect(viewModel.canUndo, isTrue);
+      viewModel.undo();
+      expect(viewModel.textOverlays.first.position, equals(initialPos));
+
+      // 3. Redo Move
+      expect(viewModel.canRedo, isTrue);
+      viewModel.redo();
+      expect(viewModel.textOverlays.first.position, equals(const Offset(0.3, 0.2)));
+
+      // 4. Simulate Resize gesture
+      final movedPos = viewModel.textOverlays.first.position;
+      viewModel.updateTextScale('undo_test', 2.4);
+      viewModel.commitTextTransform('undo_test', oldPosition: movedPos, oldScale: initialScale);
+      expect(viewModel.textOverlays.first.scale, equals(2.4));
+
+      // 5. Undo Resize
+      viewModel.undo();
+      expect(viewModel.textOverlays.first.scale, equals(initialScale));
+      expect(viewModel.textOverlays.first.position, equals(movedPos));
+    });
+
+    test('14. Native export payload maintains export scale and font parity', () async {
+      final now = DateTime.now();
+      final project = Project(
+        id: 'export_parity_proj',
+        name: 'Export Test',
+        createdAt: now,
+        updatedAt: now,
+        textOverlays: const [
+          TextOverlay(
+            id: 'txt_export',
+            text: 'Scaled Subtitle',
+            startTime: Duration.zero,
+            duration: Duration(seconds: 4),
+            fontSize: 24.0,
+            scale: 2.0,
+            fontFamily: 'Montserrat',
+            position: Offset(0.5, 0.8),
+          ),
+        ],
+      );
+
+      // Verify that effective exported font size scales with text.scale
+      final overlay = project.textOverlays.first;
+      final exportedFontSize = overlay.fontSize * overlay.scale;
+      expect(exportedFontSize, equals(48.0));
+      expect(overlay.fontFamily, equals('Montserrat'));
+      expect(overlay.position, equals(const Offset(0.5, 0.8)));
+    });
+
+    testWidgets('15. Tapping canvas background deselects active text overlay', (tester) async {
+      tester.view.physicalSize = const Size(1080, 1920);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      const text = TextOverlay(
+        id: 'desel_test',
+        text: 'Tap to Deselect',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 5),
+      );
+      viewModel.addTextOverlay(text);
+      viewModel.selectText('desel_test');
+      expect(viewModel.selectedTextId, equals('desel_test'));
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: viewModel,
+              builder: (context, _) => VideoPreviewSection(viewModel: viewModel),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      // Deselect text directly
+      viewModel.selectText(null);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      expect(viewModel.selectedTextId, isNull);
+      // Handles should no longer be present
+      expect(find.byIcon(Icons.edit_rounded), findsNothing);
+      expect(find.byIcon(Icons.close_rounded), findsNothing);
+      expect(find.byIcon(Icons.open_in_full_rounded), findsNothing);
     });
   });
 }

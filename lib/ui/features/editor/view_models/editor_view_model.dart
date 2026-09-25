@@ -2751,7 +2751,8 @@ class EditorViewModel extends ChangeNotifier {
   void updateTextPosition(String id, Offset newPos) {
     final index = _textOverlays.indexWhere((t) => t.id == id);
     if (index != -1) {
-      _textOverlays[index] = _textOverlays[index].copyWith(position: newPos);
+      final sanitized = TextOverlay.sanitizePosition(newPos, fallback: _textOverlays[index].position);
+      _textOverlays[index] = _textOverlays[index].copyWith(position: sanitized);
       scheduleAutoSave();
       notifyListeners();
     }
@@ -2760,7 +2761,8 @@ class EditorViewModel extends ChangeNotifier {
   void updateTextScale(String id, double scale) {
     final index = _textOverlays.indexWhere((t) => t.id == id);
     if (index != -1) {
-      _textOverlays[index] = _textOverlays[index].copyWith(scale: scale.clamp(0.2, 5.0));
+      final sanitized = TextOverlay.sanitizeScale(scale, fallback: _textOverlays[index].scale);
+      _textOverlays[index] = _textOverlays[index].copyWith(scale: sanitized);
       scheduleAutoSave();
       notifyListeners();
     }
@@ -2769,13 +2771,53 @@ class EditorViewModel extends ChangeNotifier {
   void updateTextTransform(String id, {Offset? position, double? scale}) {
     final index = _textOverlays.indexWhere((t) => t.id == id);
     if (index != -1) {
-      _textOverlays[index] = _textOverlays[index].copyWith(
-        position: position ?? _textOverlays[index].position,
-        scale: scale != null ? scale.clamp(0.2, 5.0) : _textOverlays[index].scale,
+      final current = _textOverlays[index];
+      final newPos = position != null ? TextOverlay.sanitizePosition(position, fallback: current.position) : current.position;
+      final newScale = scale != null ? TextOverlay.sanitizeScale(scale, fallback: current.scale) : current.scale;
+      _textOverlays[index] = current.copyWith(
+        position: newPos,
+        scale: newScale,
       );
       scheduleAutoSave();
       notifyListeners();
     }
+  }
+
+  /// Commits a completed interactive drag/scale transform gesture into the undo history.
+  /// Exactly ONE undo snapshot is created for the complete gesture interaction.
+  void commitTextTransform(String id, {required Offset oldPosition, required double oldScale}) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    final current = _textOverlays[index];
+    if (current.position == oldPosition && current.scale == oldScale) return;
+
+    final previousOverlays = List<TextOverlay>.from(_textOverlays);
+    previousOverlays[index] = current.copyWith(position: oldPosition, scale: oldScale);
+    _undoStack.add(
+      _EditorSnapshot(
+        clips: List.from(_videoClips),
+        overlayClips: List.from(_overlayClips),
+        stickerOverlays: List.from(_stickerOverlays),
+        textOverlays: previousOverlays,
+        audioTracks: List.from(_audioTracks),
+        transitions: List.from(_currentProject.transitions),
+        selectedIndex: _selectedClipIndex,
+        selectedOverlayIndex: _selectedOverlayIndex,
+        selectedAudioTrackId: _selectedAudioTrackId,
+        selectedTextId: _selectedTextId,
+        selectedStickerId: _selectedStickerId,
+        playheadPosition: _playheadPosition,
+        activeFilter: _activeFilter,
+        colorAdjustments: _colorAdjustments,
+        activeEffect: _activeEffect,
+      ),
+    );
+    _redoStack.clear();
+    if (_undoStack.length > 30) {
+      _undoStack.removeAt(0);
+    }
+    scheduleAutoSave();
+    notifyListeners();
   }
 
   void updateTextContent(String id, String newText) {

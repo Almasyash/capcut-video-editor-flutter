@@ -47,6 +47,10 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
   bool _isPlaying = false;
   double _lastPlayheadPosition = -1.0;
   double _pinchStartTextScale = 1.0;
+  Offset _dragStartTextPos = const Offset(0.5, 0.75);
+  double _startCornerDragScale = 1.0;
+  Offset _startCornerDragPos = Offset.zero;
+  Offset _startCornerTextPos = const Offset(0.5, 0.75);
 
   OverlayEntry? _fullScreenEntry;
   bool get isFullScreen => _fullScreenEntry != null;
@@ -431,10 +435,16 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
 
             // 5. Tap to Play / Pause Gesture Overlay
             GestureDetector(
-              behavior: (viewModel.selectedClipId != null)
+              behavior: (viewModel.selectedClipId != null || viewModel.selectedTextId != null)
                   ? HitTestBehavior.deferToChild
                   : HitTestBehavior.translucent,
-              onTap: (viewModel.selectedClipId != null) ? null : viewModel.togglePlayPause,
+              onTap: () {
+                if (viewModel.selectedTextId != null) {
+                  viewModel.selectText(null);
+                } else if (viewModel.selectedClipId == null) {
+                  viewModel.togglePlayPause();
+                }
+              },
               child: AnimatedOpacity(
                 opacity: viewModel.isPlaying ? 0.0 : 1.0,
                 duration: const Duration(milliseconds: 200),
@@ -1940,20 +1950,31 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
                     onDoubleTap: () => TextDrawer.showAddOrEditModal(context, viewModel, existing: text),
                     onScaleStart: (_) {
                       _pinchStartTextScale = text.scale;
+                      _dragStartTextPos = text.position;
                     },
                     onScaleUpdate: (details) {
                       final safeW = canvasWidth > 0 ? canvasWidth : 360.0;
                       final safeH = canvasHeight > 0 ? canvasHeight : 640.0;
                       if (details.pointerCount > 1) {
                         // Two-finger pinch-to-resize gesture
-                        final targetScale = (_pinchStartTextScale * details.scale).clamp(0.3, 4.0);
+                        final targetScale = _pinchStartTextScale * details.scale;
                         viewModel.updateTextScale(text.id, targetScale);
                       } else {
                         // One-finger translation drag gesture
-                        final newX = (text.position.dx + details.focalPointDelta.dx / safeW).clamp(0.0, 1.0);
-                        final newY = (text.position.dy + details.focalPointDelta.dy / safeH).clamp(0.0, 1.0);
+                        var newX = text.position.dx + details.focalPointDelta.dx / safeW;
+                        var newY = text.position.dy + details.focalPointDelta.dy / safeH;
+                        // Smart center snap with 2% threshold
+                        if ((newX - 0.5).abs() < 0.02) newX = 0.5;
+                        if ((newY - 0.5).abs() < 0.02) newY = 0.5;
                         viewModel.updateTextPosition(text.id, Offset(newX, newY));
                       }
+                    },
+                    onScaleEnd: (_) {
+                      viewModel.commitTextTransform(
+                        text.id,
+                        oldPosition: _dragStartTextPos,
+                        oldScale: _pinchStartTextScale,
+                      );
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1984,79 +2005,111 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
                 if (isSelected) ...[
                   // Top-Left: Edit text & font button
                   Positioned(
-                    top: 4,
-                    left: 4,
+                    top: 0,
+                    left: 0,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () => TextDrawer.showAddOrEditModal(context, viewModel, existing: text),
                       child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.4),
-                              blurRadius: 4,
-                            ),
-                          ],
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        color: Colors.transparent,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.edit_rounded, size: 14, color: Colors.black),
                         ),
-                        child: const Icon(Icons.edit_rounded, size: 14, color: Colors.black),
                       ),
                     ),
                   ),
 
                   // Top-Right: Delete button
                   Positioned(
-                    top: 4,
-                    right: 4,
+                    top: 0,
+                    right: 0,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () => viewModel.removeTextOverlay(text.id),
                       child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: AppColors.error,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.4),
-                              blurRadius: 4,
-                            ),
-                          ],
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        color: Colors.transparent,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.error,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
                         ),
-                        child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
                       ),
                     ),
                   ),
 
                   // Bottom-Right: Corner drag-to-resize handle
                   Positioned(
-                    bottom: 4,
-                    right: 4,
+                    bottom: 0,
+                    right: 0,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
+                      onPanStart: (details) {
+                        _startCornerDragScale = text.scale;
+                        _startCornerDragPos = details.globalPosition;
+                        _startCornerTextPos = text.position;
+                      },
                       onPanUpdate: (details) {
-                        final delta = (details.delta.dx + details.delta.dy) / 120.0;
-                        final newScale = (text.scale + delta).clamp(0.3, 4.0);
+                        final dragDistance = (details.globalPosition.dx - _startCornerDragPos.dx) +
+                            (details.globalPosition.dy - _startCornerDragPos.dy);
+                        final scaleMultiplier = 1.0 + (dragDistance / 180.0);
+                        final newScale = _startCornerDragScale * scaleMultiplier;
                         viewModel.updateTextScale(text.id, newScale);
                       },
+                      onPanEnd: (_) {
+                        viewModel.commitTextTransform(
+                          text.id,
+                          oldPosition: _startCornerTextPos,
+                          oldScale: _startCornerDragScale,
+                        );
+                      },
                       child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.4),
-                              blurRadius: 4,
-                            ),
-                          ],
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        color: Colors.transparent,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
                         ),
-                        child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
                       ),
                     ),
                   ),

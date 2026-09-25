@@ -121,6 +121,27 @@ class TextOverlay {
     this.words = const [],
   }) : textColor = color ?? textColor;
 
+  /// Minimum allowable text scale factor
+  static const double minScale = 0.3;
+
+  /// Maximum allowable text scale factor
+  static const double maxScale = 4.0;
+
+  /// Sanitizes text scale ensuring it is positive, finite, and clamped within safe bounds
+  static double sanitizeScale(double rawScale, {double fallback = 1.0}) {
+    if (rawScale.isNaN || !rawScale.isFinite || rawScale <= 0.0) {
+      return fallback;
+    }
+    return rawScale.clamp(minScale, maxScale);
+  }
+
+  /// Sanitizes normalized text position coordinates ensuring finite numbers within [0.0, 1.0]
+  static Offset sanitizePosition(Offset rawPos, {Offset fallback = const Offset(0.5, 0.75)}) {
+    final dx = (rawPos.dx.isNaN || !rawPos.dx.isFinite) ? fallback.dx : rawPos.dx.clamp(0.0, 1.0);
+    final dy = (rawPos.dy.isNaN || !rawPos.dy.isFinite) ? fallback.dy : rawPos.dy.clamp(0.0, 1.0);
+    return Offset(dx, dy);
+  }
+
   Color get color => textColor;
 
   /// Effective trim end defaulting to duration if trimEnd is not specified
