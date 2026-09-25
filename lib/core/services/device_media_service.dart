@@ -408,6 +408,8 @@ class DeviceMediaService {
         'y': text.position.dy,
         'isBold': text.isBold,
         'isItalic': text.isItalic,
+        'isUnderline': text.isUnderline,
+        'textAlign': text.textAlign.name,
       });
     }
 

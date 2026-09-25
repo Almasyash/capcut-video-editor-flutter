@@ -2738,13 +2738,13 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void updateTextOverlay(TextOverlay overlay) {
-    _saveSnapshot();
+  void updateTextOverlay(TextOverlay overlay, {bool saveSnapshot = true, bool notify = true}) {
+    if (saveSnapshot) _saveSnapshot();
     final index = _textOverlays.indexWhere((t) => t.id == overlay.id);
     if (index != -1) {
       _textOverlays[index] = overlay;
       scheduleAutoSave();
-      notifyListeners();
+      if (notify) notifyListeners();
     }
   }
 

@@ -1272,8 +1272,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 backgroundColor = (map["backgroundColor"] as? Number)?.toInt(),
                 x = (map["x"] as? Number)?.toDouble() ?: 0.5,
                 y = (map["y"] as? Number)?.toDouble() ?: 0.75,
-                isBold = map["isBold"] as? Boolean ?: true,
-                isItalic = map["isItalic"] as? Boolean ?: false
+                isBold = map["isBold"] as? Boolean ?: false,
+                isItalic = map["isItalic"] as? Boolean ?: false,
+                isUnderline = map["isUnderline"] as? Boolean ?: false,
+                textAlign = map["textAlign"] as? String ?: "center",
+                fontFamily = map["fontFamily"] as? String
             )
         }
 

@@ -1907,6 +1907,8 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
               fontFamily: text.fontFamily,
               isBold: text.isBold,
               isItalic: text.isItalic,
+              isUnderline: text.isUnderline,
+              textAlign: text.textAlign,
               isActive: isActive,
               activeGlowColor: activeColor,
             );
@@ -1945,6 +1947,8 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
         fontFamily: text.fontFamily,
         isBold: text.isBold,
         isItalic: text.isItalic,
+        isUnderline: text.isUnderline,
+        textAlign: text.textAlign,
         isActive: false,
       );
     }
@@ -1959,6 +1963,8 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       fontFamily: text.fontFamily,
       isBold: text.isBold,
       isItalic: text.isItalic,
+      isUnderline: text.isUnderline,
+      textAlign: text.textAlign,
       isActive: false,
     );
   }
@@ -1972,36 +1978,49 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     String? fontFamily,
     required bool isBold,
     required bool isItalic,
+    bool isUnderline = false,
+    TextAlign textAlign = TextAlign.center,
     required bool isActive,
     Color? activeGlowColor,
   }) {
     final style = FontHelper.getTextStyle(
       fontSize: fontSize,
       fontFamily: fontFamily,
-      fontWeight: isBold ? FontWeight.w900 : FontWeight.w600,
+      fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
       fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
+      decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
       letterSpacing: 0.5,
     );
 
+    final alignment = textAlign == TextAlign.left
+        ? Alignment.centerLeft
+        : (textAlign == TextAlign.right ? Alignment.centerRight : Alignment.center);
+
     if (strokeWidth > 0.0) {
       return Stack(
-        alignment: Alignment.center,
+        alignment: alignment,
         children: [
           // Background stroke outline
           Text(
             word,
+            textAlign: textAlign,
             style: style.copyWith(
               foreground: Paint()
                 ..style = PaintingStyle.stroke
                 ..strokeWidth = strokeWidth * 2
                 ..color = strokeColor,
+              decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
+              decorationColor: strokeColor,
             ),
           ),
           // Foreground fill text
           Text(
             word,
+            textAlign: textAlign,
             style: style.copyWith(
               color: textColor,
+              decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
+              decorationColor: textColor,
               shadows: isActive && activeGlowColor != null
                   ? [
                       Shadow(
@@ -2018,8 +2037,11 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
 
     return Text(
       word,
+      textAlign: textAlign,
       style: style.copyWith(
         color: textColor,
+        decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
+        decorationColor: textColor,
         shadows: [
           if (isActive && activeGlowColor != null)
             Shadow(

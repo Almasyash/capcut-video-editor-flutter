@@ -98,7 +98,10 @@ data class ExportTextOverlay(
     val x: Double,
     val y: Double,
     val isBold: Boolean,
-    val isItalic: Boolean
+    val isItalic: Boolean,
+    val isUnderline: Boolean = false,
+    val textAlign: String = "center",
+    val fontFamily: String? = null
 )
 
 /**
@@ -1199,28 +1202,40 @@ class VideoExportEngine(private val context: Context) {
             if (overlay.text.isNotBlank()) {
                 try {
                     val scaleFactor = height / 720.0f
+                    val baseTypeface = when (overlay.fontFamily?.lowercase()?.trim()) {
+                        "serif" -> Typeface.SERIF
+                        "sans-serif" -> Typeface.SANS_SERIF
+                        "monospace" -> Typeface.MONOSPACE
+                        else -> Typeface.DEFAULT
+                    }
+                    val typefaceStyle = when {
+                        overlay.isBold && overlay.isItalic -> Typeface.BOLD_ITALIC
+                        overlay.isBold -> Typeface.BOLD
+                        overlay.isItalic -> Typeface.ITALIC
+                        else -> Typeface.NORMAL
+                    }
+
                     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                         color = overlay.textColor
                         textSize = (overlay.fontSize.toFloat() * scaleFactor).coerceAtLeast(18f)
-                        typeface = Typeface.create(
-                            Typeface.DEFAULT,
-                            when {
-                                overlay.isBold && overlay.isItalic -> Typeface.BOLD_ITALIC
-                                overlay.isBold -> Typeface.BOLD
-                                overlay.isItalic -> Typeface.ITALIC
-                                else -> Typeface.NORMAL
-                            }
-                        )
+                        typeface = Typeface.create(baseTypeface, typefaceStyle)
+                        isUnderlineText = overlay.isUnderline
                     }
 
+                    val lines = overlay.text.split("\n")
                     val fontMetrics = paint.fontMetrics
-                    val textW = paint.measureText(overlay.text)
-                    val textH = fontMetrics.descent - fontMetrics.ascent
+                    val lineHeight = fontMetrics.descent - fontMetrics.ascent
+                    var maxLineWidth = 0f
+                    for (line in lines) {
+                        val lw = paint.measureText(line)
+                        if (lw > maxLineWidth) maxLineWidth = lw
+                    }
+                    val totalTextHeight = lineHeight * lines.size
 
                     val padX = (16f * scaleFactor).toInt()
                     val padY = (10f * scaleFactor).toInt()
-                    val bmpW = (textW + padX * 2).toInt().coerceAtLeast(4)
-                    val bmpH = (textH + padY * 2).toInt().coerceAtLeast(4)
+                    val bmpW = (maxLineWidth + padX * 2).toInt().coerceAtLeast(4)
+                    val bmpH = (totalTextHeight + padY * 2).toInt().coerceAtLeast(4)
 
                     val bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
                     val canvas = Canvas(bmp)
@@ -1232,9 +1247,18 @@ class VideoExportEngine(private val context: Context) {
                     val radius = 8f * scaleFactor
                     canvas.drawRoundRect(RectF(0f, 0f, bmpW.toFloat(), bmpH.toFloat()), radius, radius, bgPaint)
 
-                    val drawX = padX.toFloat()
-                    val drawY = padY.toFloat() - fontMetrics.ascent
-                    canvas.drawText(overlay.text, drawX, drawY, paint)
+                    val align = overlay.textAlign.lowercase()
+                    for (i in lines.indices) {
+                        val line = lines[i]
+                        val lw = paint.measureText(line)
+                        val drawX = when (align) {
+                            "left" -> padX.toFloat()
+                            "right" -> padX.toFloat() + (maxLineWidth - lw)
+                            else -> padX.toFloat() + (maxLineWidth - lw) / 2f
+                        }
+                        val drawY = padY.toFloat() - fontMetrics.ascent + (i * lineHeight)
+                        canvas.drawText(line, drawX, drawY, paint)
+                    }
 
                     val texIds = IntArray(1)
                     GLES20.glGenTextures(1, texIds, 0)
