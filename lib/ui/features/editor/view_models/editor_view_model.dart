@@ -2748,27 +2748,37 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
-  void updateTextPosition(String id, Offset newPos) {
+  void updateTextPosition(String id, Offset newPos, {bool notify = true}) {
     final index = _textOverlays.indexWhere((t) => t.id == id);
     if (index != -1) {
       final sanitized = TextOverlay.sanitizePosition(newPos, fallback: _textOverlays[index].position);
       _textOverlays[index] = _textOverlays[index].copyWith(position: sanitized);
-      scheduleAutoSave();
-      notifyListeners();
+      if (notify) {
+        scheduleAutoSave();
+        notifyListeners();
+      }
     }
   }
 
-  void updateTextScale(String id, double scale) {
+  void updateTextScale(String id, double scale, {bool notify = true}) {
     final index = _textOverlays.indexWhere((t) => t.id == id);
     if (index != -1) {
       final sanitized = TextOverlay.sanitizeScale(scale, fallback: _textOverlays[index].scale);
       _textOverlays[index] = _textOverlays[index].copyWith(scale: sanitized);
-      scheduleAutoSave();
-      notifyListeners();
+      if (notify) {
+        scheduleAutoSave();
+        notifyListeners();
+      }
     }
   }
 
-  void updateTextTransform(String id, {Offset? position, double? scale}) {
+  void updateTextTransform(
+    String id, {
+    Offset? position,
+    double? scale,
+    bool notify = true,
+    bool scheduleSave = true,
+  }) {
     final index = _textOverlays.indexWhere((t) => t.id == id);
     if (index != -1) {
       final current = _textOverlays[index];
@@ -2778,8 +2788,8 @@ class EditorViewModel extends ChangeNotifier {
         position: newPos,
         scale: newScale,
       );
-      scheduleAutoSave();
-      notifyListeners();
+      if (scheduleSave) scheduleAutoSave();
+      if (notify) notifyListeners();
     }
   }
 
@@ -4121,6 +4131,55 @@ class EditorViewModel extends ChangeNotifier {
     if (_selectedClipIndex == null) return;
     final clip = _videoClips[_selectedClipIndex!];
     _videoClips[_selectedClipIndex!] = clip.copyWith(clearMask: true);
+    notifyListeners();
+  }
+
+  // ==========================================
+  // CROP AREA & RECTANGULAR MASK
+  // ==========================================
+  bool _isCropModeActive = false;
+  bool get isCropModeActive =>
+      _isCropModeActive || (_selectedClipIndex != null && selectedClip?.mask?.isActive == true);
+
+  Rect _activeCropRect = const Rect.fromLTWH(0.1, 0.1, 0.8, 0.8);
+  Rect get activeCropRect => _activeCropRect;
+
+  void setCropMode(bool active) {
+    _isCropModeActive = active;
+    notifyListeners();
+  }
+
+  void updateCropRect(Rect newRect) {
+    const minSize = 0.1;
+    final clamped = Rect.fromLTRB(
+      newRect.left.clamp(0.0, 1.0 - minSize),
+      newRect.top.clamp(0.0, 1.0 - minSize),
+      newRect.right.clamp(minSize, 1.0),
+      newRect.bottom.clamp(minSize, 1.0),
+    );
+    if (!clamped.left.isFinite || !clamped.top.isFinite || !clamped.right.isFinite || !clamped.bottom.isFinite) return;
+    if (clamped.width < minSize || clamped.height < minSize) return;
+
+    _activeCropRect = clamped;
+
+    if (_selectedClipIndex != null && _selectedClipIndex! >= 0 && _selectedClipIndex! < _videoClips.length) {
+      final clip = _videoClips[_selectedClipIndex!];
+      final w = clamped.width;
+      final h = clamped.height;
+      final size = math.max(w, h);
+      final posX = (clamped.center.dx - 0.5) * 2.0;
+      final posY = (clamped.center.dy - 0.5) * 2.0;
+      _videoClips[_selectedClipIndex!] = clip.copyWith(
+        mask: VideoMask(
+          type: MaskType.rectangle,
+          size: size.clamp(0.1, 2.0),
+          positionX: posX.clamp(-1.0, 1.0),
+          positionY: posY.clamp(-1.0, 1.0),
+          rectWidth: w,
+          rectHeight: h,
+        ),
+      );
+    }
     notifyListeners();
   }
 

@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 
 enum MaskType {
   none,
@@ -58,6 +58,8 @@ class VideoMask {
   final double positionY; // Normalized center Y (-1.0 to 1.0)
   final double rotation; // In degrees (-180 to 180)
   final bool inverted;
+  final double? rectWidth; // Normalized width (0.05 to 1.0) for rectangular crop
+  final double? rectHeight; // Normalized height (0.05 to 1.0) for rectangular crop
 
   const VideoMask({
     this.type = MaskType.none,
@@ -67,6 +69,8 @@ class VideoMask {
     this.positionY = 0.0,
     this.rotation = 0.0,
     this.inverted = false,
+    this.rectWidth,
+    this.rectHeight,
   });
 
   bool get isActive => type != MaskType.none;
@@ -79,6 +83,8 @@ class VideoMask {
     double? positionY,
     double? rotation,
     bool? inverted,
+    double? rectWidth,
+    double? rectHeight,
   }) {
     return VideoMask(
       type: type ?? this.type,
@@ -88,6 +94,8 @@ class VideoMask {
       positionY: positionY ?? this.positionY,
       rotation: rotation ?? this.rotation,
       inverted: inverted ?? this.inverted,
+      rectWidth: rectWidth ?? this.rectWidth,
+      rectHeight: rectHeight ?? this.rectHeight,
     );
   }
 
@@ -99,6 +107,8 @@ class VideoMask {
     'positionY': positionY,
     'rotation': rotation,
     'inverted': inverted,
+    if (rectWidth != null) 'rectWidth': rectWidth,
+    if (rectHeight != null) 'rectHeight': rectHeight,
   };
 
   factory VideoMask.fromJson(Map<String, dynamic> json) {
@@ -113,6 +123,8 @@ class VideoMask {
       positionY: (json['positionY'] as num?)?.toDouble() ?? 0.0,
       rotation: (json['rotation'] as num?)?.toDouble() ?? 0.0,
       inverted: json['inverted'] as bool? ?? false,
+      rectWidth: (json['rectWidth'] as num?)?.toDouble(),
+      rectHeight: (json['rectHeight'] as num?)?.toDouble(),
     );
   }
 }

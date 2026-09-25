@@ -16,6 +16,7 @@ import 'package:capcut_video_editor/domain/models/media_asset.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
+import 'package:capcut_video_editor/domain/enums/interaction_mode.dart';
 import 'package:capcut_video_editor/domain/enums/transition_type.dart';
 import 'package:capcut_video_editor/domain/models/video_effect.dart';
 import 'package:capcut_video_editor/core/services/video_playback_service.dart';
@@ -41,16 +42,12 @@ class VideoPreviewSection extends StatefulWidget {
 class VideoPreviewSectionState extends State<VideoPreviewSection> {
   EditorViewModel get viewModel => widget.viewModel;
 
+  final GlobalKey _canvasKey = GlobalKey();
   VideoPlayerSession? _session;
   String? _loadedPath;
   String? _lastActiveClipId;
   bool _isPlaying = false;
   double _lastPlayheadPosition = -1.0;
-  double _pinchStartTextScale = 1.0;
-  Offset _dragStartTextPos = const Offset(0.5, 0.75);
-  double _startCornerDragScale = 1.0;
-  Offset _startCornerDragPos = Offset.zero;
-  Offset _startCornerTextPos = const Offset(0.5, 0.75);
 
   OverlayEntry? _fullScreenEntry;
   bool get isFullScreen => _fullScreenEntry != null;
@@ -391,6 +388,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     final height = customHeight ?? (width / targetRatio);
 
     return SizedBox(
+      key: _canvasKey,
       width: width,
       height: height,
       child: Container(
@@ -433,14 +431,14 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
             // 4. Active Stickers Overlays
             ...activeStickers.map((sticker) => _buildStickerOverlay(sticker)),
 
-            // 5. Tap to Play / Pause Gesture Overlay
+            // 5. Tap to Play / Pause / Deselect Gesture Overlay
             GestureDetector(
-              behavior: (viewModel.selectedClipId != null || viewModel.selectedTextId != null)
-                  ? HitTestBehavior.deferToChild
-                  : HitTestBehavior.translucent,
+              behavior: HitTestBehavior.translucent,
               onTap: () {
                 if (viewModel.selectedTextId != null) {
                   viewModel.selectText(null);
+                } else if (viewModel.isCropModeActive) {
+                  viewModel.setCropMode(false);
                 } else if (viewModel.selectedClipId == null) {
                   viewModel.togglePlayPause();
                 }
@@ -474,8 +472,18 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
               ),
             ),
 
-            // 6. Active Text / Subtitle Overlays (Positioned on top for drag and interaction)
+            // 6. Active Text / Subtitle Overlays (Positioned on top for direct fluent touch manipulation)
             ...activeTexts.map((text) => _buildTextOverlay(text, canvasWidth: width, canvasHeight: height)),
+
+            // 7. Interactive Crop Area Resize Handles (Priority when crop mode active)
+            if (viewModel.isCropModeActive ||
+                (viewModel.selectedClip?.mask?.isActive == true && viewModel.selectedTextId == null))
+              _CropAreaHandlesOverlay(
+                viewModel: viewModel,
+                canvasWidth: width,
+                canvasHeight: height,
+                canvasKey: _canvasKey,
+              ),
 
             // 7. Top-Left: Badges (Aspect Ratio & Active Filter)
             Positioned(
@@ -1857,294 +1865,16 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
   }) {
     final isSelected = viewModel.selectedTextId == text.id;
     final elapsedSec = viewModel.currentTimeInSeconds - text.startTimeInSeconds;
-    final durationSec = text.durationInSeconds;
-    final remainingSec = (durationSec - elapsedSec).clamp(0.0, double.infinity);
 
-    double animScale = 1.0;
-    double slideY = 0.0;
-    double opacity = 1.0;
-
-    // Entrance & Exit text animations
-    if (text.animationType == TextAnimationType.fade) {
-      if (elapsedSec < 0.35) {
-        opacity = (elapsedSec / 0.35).clamp(0.0, 1.0);
-      } else if (remainingSec < 0.35) {
-        opacity = (remainingSec / 0.35).clamp(0.0, 1.0);
-      }
-    } else if (text.animationType == TextAnimationType.zoom) {
-      if (elapsedSec < 0.35) {
-        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
-        animScale = 0.2 + 0.8 * t;
-        opacity = t;
-      } else if (remainingSec < 0.35) {
-        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
-        animScale = 0.2 + 0.8 * t;
-        opacity = t;
-      }
-    } else if (text.animationType == TextAnimationType.pop) {
-      final t = (elapsedSec / 0.22).clamp(0.0, 1.0);
-      animScale = t < 1.0 ? (0.75 + 0.35 * math.sin(t * math.pi)) : 1.0;
-      if (remainingSec < 0.22) {
-        final rt = (remainingSec / 0.22).clamp(0.0, 1.0);
-        animScale *= rt;
-        opacity = rt;
-      }
-    } else if (text.animationType == TextAnimationType.slideUp) {
-      if (elapsedSec < 0.35) {
-        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
-        slideY = (1.0 - t) * 35.0;
-        opacity = t;
-      } else if (remainingSec < 0.35) {
-        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
-        slideY = -(1.0 - t) * 35.0;
-        opacity = t;
-      }
-    } else if (text.animationType == TextAnimationType.slideDown) {
-      if (elapsedSec < 0.35) {
-        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
-        slideY = -(1.0 - t) * 35.0;
-        opacity = t;
-      } else if (remainingSec < 0.35) {
-        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
-        slideY = (1.0 - t) * 35.0;
-        opacity = t;
-      }
-    } else if (text.animationType == TextAnimationType.fadeSlide) {
-      if (elapsedSec < 0.28) {
-        final t = (elapsedSec / 0.28).clamp(0.0, 1.0);
-        slideY = (1.0 - t) * 16.0;
-        opacity = t;
-      } else if (remainingSec < 0.28) {
-        final t = (remainingSec / 0.28).clamp(0.0, 1.0);
-        slideY = -(1.0 - t) * 16.0;
-        opacity = t;
-      }
-    } else if (text.animationType == TextAnimationType.glowPulse) {
-      animScale = 1.0 + 0.04 * math.sin(elapsedSec * 6.0);
-    }
-
-    // Combine user scale and animation scale
-    final effScale = (text.scale) * animScale;
-
-    return Align(
-      alignment: FractionalOffset(
-        text.position.dx.clamp(0.0, 1.0),
-        text.position.dy.clamp(0.0, 1.0),
-      ),
-      child: Transform.translate(
-        offset: Offset(0, slideY),
-        child: Transform.scale(
-          scale: effScale,
-          child: Opacity(
-            opacity: opacity.clamp(0.0, 1.0),
-            child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.center,
-              children: [
-                // 1. Text Content with Drag and Pinch Gesture
-                Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => viewModel.selectText(text.id),
-                    onDoubleTap: () => TextDrawer.showAddOrEditModal(context, viewModel, existing: text),
-                    onScaleStart: (_) {
-                      _pinchStartTextScale = text.scale;
-                      _dragStartTextPos = text.position;
-                    },
-                    onScaleUpdate: (details) {
-                      final safeW = canvasWidth > 0 ? canvasWidth : 360.0;
-                      final safeH = canvasHeight > 0 ? canvasHeight : 640.0;
-                      if (details.pointerCount > 1) {
-                        // Two-finger pinch-to-resize gesture
-                        final targetScale = _pinchStartTextScale * details.scale;
-                        viewModel.updateTextScale(text.id, targetScale);
-                      } else {
-                        // One-finger translation drag gesture
-                        var newX = text.position.dx + details.focalPointDelta.dx / safeW;
-                        var newY = text.position.dy + details.focalPointDelta.dy / safeH;
-                        // Smart center snap with 2% threshold
-                        if ((newX - 0.5).abs() < 0.02) newX = 0.5;
-                        if ((newY - 0.5).abs() < 0.02) newY = 0.5;
-                        viewModel.updateTextPosition(text.id, Offset(newX, newY));
-                      }
-                    },
-                    onScaleEnd: (_) {
-                      viewModel.commitTextTransform(
-                        text.id,
-                        oldPosition: _dragStartTextPos,
-                        oldScale: _pinchStartTextScale,
-                      );
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: text.backgroundColor ??
-                            (text.strokeWidth > 0 ? Colors.transparent : Colors.black.withOpacity(0.65)),
-                        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                        border: Border.all(
-                          color: isSelected ? AppColors.primary : Colors.transparent,
-                          width: isSelected ? 2.0 : 0.0,
-                        ),
-                        boxShadow: isSelected
-                            ? [
-                                BoxShadow(
-                                  color: AppColors.primary.withOpacity(0.4),
-                                  blurRadius: 8,
-                                  spreadRadius: 1,
-                                )
-                              ]
-                            : null,
-                      ),
-                      child: _buildCaptionContent(text, elapsedSec),
-                    ),
-                  ),
-                ),
-
-                // 2. Interactive Bounding Box Handles (Sibling layers, on top of gesture arena)
-                if (isSelected) ...[
-                  // Top-Left: Edit text & font button
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => TextDrawer.showAddOrEditModal(context, viewModel, existing: text),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        alignment: Alignment.center,
-                        color: Colors.transparent,
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                          child: const Icon(Icons.edit_rounded, size: 14, color: Colors.black),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Top-Right: Delete button
-                  Positioned(
-                    top: 0,
-                    right: 0,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => viewModel.removeTextOverlay(text.id),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        alignment: Alignment.center,
-                        color: Colors.transparent,
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: AppColors.error,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                          child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Bottom-Right: Corner drag-to-resize handle
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onPanStart: (details) {
-                        _startCornerDragScale = text.scale;
-                        _startCornerDragPos = details.globalPosition;
-                        _startCornerTextPos = text.position;
-                      },
-                      onPanUpdate: (details) {
-                        final dragDistance = (details.globalPosition.dx - _startCornerDragPos.dx) +
-                            (details.globalPosition.dy - _startCornerDragPos.dy);
-                        final scaleMultiplier = 1.0 + (dragDistance / 180.0);
-                        final newScale = _startCornerDragScale * scaleMultiplier;
-                        viewModel.updateTextScale(text.id, newScale);
-                      },
-                      onPanEnd: (_) {
-                        viewModel.commitTextTransform(
-                          text.id,
-                          oldPosition: _startCornerTextPos,
-                          oldScale: _startCornerDragScale,
-                        );
-                      },
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        alignment: Alignment.center,
-                        color: Colors.transparent,
-                        child: Container(
-                          width: 28,
-                          height: 28,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary,
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.4),
-                                blurRadius: 4,
-                              ),
-                            ],
-                          ),
-                          child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Bottom-Left: Font family indicator badge
-                  if (text.fontFamily != null)
-                    Positioned(
-                      bottom: 4,
-                      left: 6,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.85),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: AppColors.primary.withOpacity(0.7),
-                            width: 0.8,
-                          ),
-                        ),
-                        child: Text(
-                          text.fontFamily!,
-                          style: const TextStyle(
-                            fontSize: 9,
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
+    return InteractiveTextOverlayWidget(
+      key: ValueKey('text_ov_${text.id}'),
+      text: text,
+      isSelected: isSelected,
+      viewModel: viewModel,
+      canvasWidth: canvasWidth,
+      canvasHeight: canvasHeight,
+      canvasKey: _canvasKey,
+      captionChild: _buildCaptionContent(text, elapsedSec),
     );
   }
 
@@ -2410,6 +2140,850 @@ class RenderCanvasBlendLayer extends RenderProxyBox {
   }
 }
 
+/// CapCut-like Interactive Text Overlay Widget with Fluent Touch Direct Manipulation.
+///
+/// Provides:
+/// - Immediate 1:1 translation with center snapping (zero slop delay)
+/// - Direct two-finger pinch-to-zoom scaling on the text body with focal point tracking
+/// - Seamless pointer count transitions (1 -> 2 and 2 -> 1 without jumps)
+/// - Explicit corner resize handle for secondary control
+/// - Isolated local rebuild path (zero global app or timeline rebuilds during gestures)
+/// - Single undo snapshot commit on gesture completion
+class InteractiveTextOverlayWidget extends StatefulWidget {
+  final TextOverlay text;
+  final bool isSelected;
+  final EditorViewModel viewModel;
+  final double canvasWidth;
+  final double canvasHeight;
+  final GlobalKey canvasKey;
+  final Widget captionChild;
+
+  const InteractiveTextOverlayWidget({
+    super.key,
+    required this.text,
+    required this.isSelected,
+    required this.viewModel,
+    required this.canvasWidth,
+    required this.canvasHeight,
+    required this.canvasKey,
+    required this.captionChild,
+  });
+
+  @override
+  State<InteractiveTextOverlayWidget> createState() => _InteractiveTextOverlayWidgetState();
+}
+
+class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWidget> {
+  late Offset _livePosition;
+  late double _liveScale;
+  bool _isGestureActive = false;
+
+  final Map<int, Offset> _activePointers = {}; // pointerId -> global screen position
+  InteractionMode _mode = InteractionMode.none;
+
+  // 1-Finger translation baseline
+  Offset _dragStartPointerNorm = Offset.zero;
+  Offset _dragStartTextPos = Offset.zero;
+
+  // Gesture snapshot baseline for single undo commit
+  Offset _gestureStartTextPos = Offset.zero;
+  double _gestureStartTextScale = 1.0;
+
+  // 2-Finger pinch zoom baseline
+  double _initialPinchDistance = 1.0;
+  double _initialPinchScale = 1.0;
+  Offset _initialFocalPoint = Offset.zero;
+  Offset _initialPinchTextPos = Offset.zero;
+
+  // Corner resize handle baseline
+  Offset _startCornerDragPos = Offset.zero;
+  double _startCornerDragScale = 1.0;
+  Offset _startCornerTextPos = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _livePosition = widget.text.position;
+    _liveScale = widget.text.scale;
+  }
+
+  @override
+  void didUpdateWidget(covariant InteractiveTextOverlayWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isGestureActive) {
+      if (widget.text.position != _livePosition || widget.text.scale != _liveScale) {
+        _livePosition = widget.text.position;
+        _liveScale = widget.text.scale;
+      }
+    }
+  }
+
+  Offset _getCanvasLocal(Offset globalPos) {
+    final renderBox = widget.canvasKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      return renderBox.globalToLocal(globalPos);
+    }
+    return globalPos;
+  }
+
+  Offset _getNormalizedCanvasPos(Offset globalPos) {
+    final local = _getCanvasLocal(globalPos);
+    final w = widget.canvasWidth > 0 ? widget.canvasWidth : 360.0;
+    final h = widget.canvasHeight > 0 ? widget.canvasHeight : 640.0;
+    return Offset(local.dx / w, local.dy / h);
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (widget.viewModel.isCropModeActive && widget.viewModel.selectedTextId == null) {
+      return;
+    }
+
+    if (!widget.isSelected) {
+      widget.viewModel.selectText(widget.text.id);
+    }
+
+    _activePointers[event.pointer] = event.position;
+
+    if (!_isGestureActive) {
+      _isGestureActive = true;
+      _gestureStartTextPos = _livePosition;
+      _gestureStartTextScale = _liveScale;
+    }
+
+    final canvasNorm = _getNormalizedCanvasPos(event.position);
+
+    if (_activePointers.length == 1) {
+      _mode = InteractionMode.textMove;
+      _dragStartPointerNorm = canvasNorm;
+      _dragStartTextPos = _livePosition;
+    } else if (_activePointers.length >= 2) {
+      _mode = InteractionMode.textPinch;
+      final entries = _activePointers.values.toList();
+      final p1 = _getCanvasLocal(entries[0]);
+      final p2 = _getCanvasLocal(entries[1]);
+      final dist = (p1 - p2).distance;
+
+      _initialPinchDistance = dist > 5.0 ? dist : 5.0;
+      _initialPinchScale = _liveScale;
+      _initialFocalPoint = (p1 + p2) / 2.0;
+      _initialPinchTextPos = _livePosition;
+    }
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (!_activePointers.containsKey(event.pointer)) return;
+    _activePointers[event.pointer] = event.position;
+
+    final w = widget.canvasWidth > 0 ? widget.canvasWidth : 360.0;
+    final h = widget.canvasHeight > 0 ? widget.canvasHeight : 640.0;
+
+    if (_mode == InteractionMode.textMove && _activePointers.length == 1) {
+      final currentNorm = _getNormalizedCanvasPos(event.position);
+      final delta = currentNorm - _dragStartPointerNorm;
+      var targetX = _dragStartTextPos.dx + delta.dx;
+      var targetY = _dragStartTextPos.dy + delta.dy;
+
+      // Gentle center snap with 1.8% threshold
+      if ((targetX - 0.5).abs() < 0.018) targetX = 0.5;
+      if ((targetY - 0.5).abs() < 0.018) targetY = 0.5;
+
+      targetX = targetX.clamp(0.0, 1.0);
+      targetY = targetY.clamp(0.0, 1.0);
+
+      setState(() {
+        _livePosition = TextOverlay.sanitizePosition(
+          Offset(targetX, targetY),
+          fallback: _livePosition,
+        );
+      });
+    } else if (_mode == InteractionMode.textPinch && _activePointers.length >= 2) {
+      final entries = _activePointers.values.toList();
+      final p1 = _getCanvasLocal(entries[0]);
+      final p2 = _getCanvasLocal(entries[1]);
+      final currentDist = (p1 - p2).distance;
+
+      if (_initialPinchDistance > 1.0 && !currentDist.isNaN && !currentDist.isInfinite && currentDist > 0.0) {
+        final scaleFactor = currentDist / _initialPinchDistance;
+        final rawScale = _initialPinchScale * scaleFactor;
+        final newScale = TextOverlay.sanitizeScale(rawScale, fallback: _liveScale);
+
+        final currentFocal = (p1 + p2) / 2.0;
+        final focalDelta = currentFocal - _initialFocalPoint;
+        final normFocalDelta = Offset(focalDelta.dx / w, focalDelta.dy / h);
+        final newPos = TextOverlay.sanitizePosition(
+          _initialPinchTextPos + normFocalDelta,
+          fallback: _livePosition,
+        );
+
+        setState(() {
+          _liveScale = newScale;
+          _livePosition = newPos;
+        });
+      }
+    }
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    _activePointers.remove(event.pointer);
+
+    if (_activePointers.length == 1) {
+      _mode = InteractionMode.textMove;
+      final remainingGlobal = _activePointers.values.first;
+      _dragStartPointerNorm = _getNormalizedCanvasPos(remainingGlobal);
+      _dragStartTextPos = _livePosition;
+    } else if (_activePointers.isEmpty) {
+      _finalizeGesture();
+    }
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _activePointers.remove(event.pointer);
+    if (_activePointers.isEmpty) {
+      _finalizeGesture();
+    }
+  }
+
+  void _finalizeGesture() {
+    _mode = InteractionMode.none;
+    _isGestureActive = false;
+
+    widget.viewModel.updateTextTransform(
+      widget.text.id,
+      position: _livePosition,
+      scale: _liveScale,
+    );
+    widget.viewModel.commitTextTransform(
+      widget.text.id,
+      oldPosition: _gestureStartTextPos,
+      oldScale: _gestureStartTextScale,
+    );
+  }
+
+  void _handleCornerPanStart(DragStartDetails details) {
+    _mode = InteractionMode.textResize;
+    _isGestureActive = true;
+    _startCornerDragPos = details.globalPosition;
+    _startCornerDragScale = _liveScale;
+    _startCornerTextPos = _livePosition;
+    _gestureStartTextPos = _livePosition;
+    _gestureStartTextScale = _liveScale;
+  }
+
+  void _handleCornerPanUpdate(DragUpdateDetails details) {
+    final dragDistance = (details.globalPosition.dx - _startCornerDragPos.dx) +
+        (details.globalPosition.dy - _startCornerDragPos.dy);
+    final scaleMultiplier = 1.0 + (dragDistance / 180.0);
+    final rawScale = _startCornerDragScale * scaleMultiplier;
+    final newScale = TextOverlay.sanitizeScale(rawScale, fallback: _liveScale);
+    setState(() {
+      _liveScale = newScale;
+    });
+  }
+
+  void _handleCornerPanEnd(DragEndDetails details) {
+    _mode = InteractionMode.none;
+    _isGestureActive = false;
+    widget.viewModel.updateTextTransform(
+      widget.text.id,
+      position: _livePosition,
+      scale: _liveScale,
+    );
+    widget.viewModel.commitTextTransform(
+      widget.text.id,
+      oldPosition: _startCornerTextPos,
+      oldScale: _startCornerDragScale,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final text = widget.text;
+    final isSelected = widget.isSelected;
+    final elapsedSec = widget.viewModel.currentTimeInSeconds - text.startTimeInSeconds;
+    final durationSec = text.durationInSeconds;
+    final remainingSec = (durationSec - elapsedSec).clamp(0.0, double.infinity);
+
+    double animScale = 1.0;
+    double slideY = 0.0;
+    double opacity = 1.0;
+
+    if (text.animationType == TextAnimationType.fade) {
+      if (elapsedSec < 0.35) {
+        opacity = (elapsedSec / 0.35).clamp(0.0, 1.0);
+      } else if (remainingSec < 0.35) {
+        opacity = (remainingSec / 0.35).clamp(0.0, 1.0);
+      }
+    } else if (text.animationType == TextAnimationType.zoom) {
+      if (elapsedSec < 0.35) {
+        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+        animScale = 0.2 + 0.8 * t;
+        opacity = t;
+      } else if (remainingSec < 0.35) {
+        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+        animScale = 0.2 + 0.8 * t;
+        opacity = t;
+      }
+    } else if (text.animationType == TextAnimationType.pop) {
+      final t = (elapsedSec / 0.22).clamp(0.0, 1.0);
+      animScale = t < 1.0 ? (0.75 + 0.35 * math.sin(t * math.pi)) : 1.0;
+      if (remainingSec < 0.22) {
+        final rt = (remainingSec / 0.22).clamp(0.0, 1.0);
+        animScale *= rt;
+        opacity = rt;
+      }
+    } else if (text.animationType == TextAnimationType.slideUp) {
+      if (elapsedSec < 0.35) {
+        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+        slideY = (1.0 - t) * 35.0;
+        opacity = t;
+      } else if (remainingSec < 0.35) {
+        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+        slideY = -(1.0 - t) * 35.0;
+        opacity = t;
+      }
+    } else if (text.animationType == TextAnimationType.slideDown) {
+      if (elapsedSec < 0.35) {
+        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+        slideY = -(1.0 - t) * 35.0;
+        opacity = t;
+      } else if (remainingSec < 0.35) {
+        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+        slideY = (1.0 - t) * 35.0;
+        opacity = t;
+      }
+    } else if (text.animationType == TextAnimationType.fadeSlide) {
+      if (elapsedSec < 0.28) {
+        final t = (elapsedSec / 0.28).clamp(0.0, 1.0);
+        slideY = (1.0 - t) * 16.0;
+        opacity = t;
+      } else if (remainingSec < 0.28) {
+        final t = (remainingSec / 0.28).clamp(0.0, 1.0);
+        slideY = -(1.0 - t) * 16.0;
+        opacity = t;
+      }
+    } else if (text.animationType == TextAnimationType.glowPulse) {
+      animScale = 1.0 + 0.04 * math.sin(elapsedSec * 6.0);
+    }
+
+    final effScale = _liveScale * animScale;
+
+    final posX = _livePosition.dx.clamp(0.0, 1.0) * widget.canvasWidth;
+    final posY = _livePosition.dy.clamp(0.0, 1.0) * widget.canvasHeight;
+
+    return Positioned(
+      left: posX,
+      top: posY,
+      child: FractionalTranslation(
+        translation: const Offset(-0.5, -0.5),
+        child: Transform.translate(
+        offset: Offset(0, slideY),
+        child: Transform.scale(
+          scale: effScale,
+          child: Opacity(
+            opacity: opacity.clamp(0.0, 1.0),
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                // 1. Text Content with 1-finger Move and direct 2-finger Pinch
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Listener(
+                    behavior: HitTestBehavior.opaque,
+                    onPointerDown: _handlePointerDown,
+                    onPointerMove: _handlePointerMove,
+                    onPointerUp: _handlePointerUp,
+                    onPointerCancel: _handlePointerCancel,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        if (!isSelected) {
+                          widget.viewModel.selectText(text.id);
+                        }
+                      },
+                      onDoubleTap: () =>
+                          TextDrawer.showAddOrEditModal(context, widget.viewModel, existing: text),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: text.backgroundColor ??
+                              (text.strokeWidth > 0 ? Colors.transparent : Colors.black.withOpacity(0.65)),
+                          borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                          border: Border.all(
+                            color: isSelected ? AppColors.primary : Colors.transparent,
+                            width: isSelected ? 2.0 : 0.0,
+                          ),
+                          boxShadow: isSelected
+                              ? [
+                                  BoxShadow(
+                                    color: AppColors.primary.withOpacity(0.4),
+                                    blurRadius: 8,
+                                    spreadRadius: 1,
+                                  )
+                                ]
+                              : null,
+                        ),
+                        child: RepaintBoundary(
+                          child: widget.captionChild,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // 2. Interactive Bounding Box Handles (when selected)
+                if (isSelected) ...[
+                  // Top-Left: Edit text & font button
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => TextDrawer.showAddOrEditModal(context, widget.viewModel, existing: text),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        color: Colors.transparent,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.edit_rounded, size: 14, color: Colors.black),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Top-Right: Delete button
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => widget.viewModel.removeTextOverlay(text.id),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        color: Colors.transparent,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.error,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom-Right: Corner drag-to-resize handle (Retained for explicit resize control)
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanStart: _handleCornerPanStart,
+                      onPanUpdate: _handleCornerPanUpdate,
+                      onPanEnd: _handleCornerPanEnd,
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        color: Colors.transparent,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom-Left: Font family indicator badge
+                  if (text.fontFamily != null)
+                    Positioned(
+                      bottom: 4,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.85),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: AppColors.primary.withOpacity(0.7),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Text(
+                          text.fontFamily!,
+                          style: const TextStyle(
+                            fontSize: 9,
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+}
+
+/// Interactive Crop Area Touch Handles Overlay for direct manipulation of video masks.
+class _CropAreaHandlesOverlay extends StatefulWidget {
+  final EditorViewModel viewModel;
+  final double canvasWidth;
+  final double canvasHeight;
+  final GlobalKey canvasKey;
+
+  const _CropAreaHandlesOverlay({
+    required this.viewModel,
+    required this.canvasWidth,
+    required this.canvasHeight,
+    required this.canvasKey,
+  });
+
+  @override
+  State<_CropAreaHandlesOverlay> createState() => _CropAreaHandlesOverlayState();
+}
+
+class _CropAreaHandlesOverlayState extends State<_CropAreaHandlesOverlay> {
+  late Rect _liveRect;
+  bool _isDragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _liveRect = widget.viewModel.activeCropRect;
+  }
+
+  @override
+  void didUpdateWidget(covariant _CropAreaHandlesOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isDragging) {
+      _liveRect = widget.viewModel.activeCropRect;
+    }
+  }
+
+  void _onHandlePanStart() {
+    _isDragging = true;
+  }
+
+  void _onHandlePanEnd() {
+    _isDragging = false;
+    widget.viewModel.updateCropRect(_liveRect);
+  }
+
+  void _updateDelta({
+    double? dLeft,
+    double? dTop,
+    double? dRight,
+    double? dBottom,
+  }) {
+    const minSize = 0.1;
+    final w = widget.canvasWidth > 0 ? widget.canvasWidth : 360.0;
+    final h = widget.canvasHeight > 0 ? widget.canvasHeight : 640.0;
+
+    var newL = _liveRect.left + (dLeft != null ? dLeft / w : 0.0);
+    var newT = _liveRect.top + (dTop != null ? dTop / h : 0.0);
+    var newR = _liveRect.right + (dRight != null ? dRight / w : 0.0);
+    var newB = _liveRect.bottom + (dBottom != null ? dBottom / h : 0.0);
+
+    if (dLeft != null) newL = newL.clamp(0.0, newR - minSize);
+    if (dRight != null) newR = newR.clamp(newL + minSize, 1.0);
+    if (dTop != null) newT = newT.clamp(0.0, newB - minSize);
+    if (dBottom != null) newB = newB.clamp(newT + minSize, 1.0);
+
+    final clamped = Rect.fromLTRB(newL, newT, newR, newB);
+    if (clamped.left.isFinite && clamped.top.isFinite && clamped.right.isFinite && clamped.bottom.isFinite) {
+      setState(() {
+        _liveRect = clamped;
+      });
+      widget.viewModel.updateCropRect(clamped);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget.canvasWidth > 0 ? widget.canvasWidth : 360.0;
+    final h = widget.canvasHeight > 0 ? widget.canvasHeight : 640.0;
+
+    final leftPx = _liveRect.left * w;
+    final topPx = _liveRect.top * h;
+    final widthPx = _liveRect.width * w;
+    final heightPx = _liveRect.height * h;
+    final rightPx = leftPx + widthPx;
+    final bottomPx = topPx + heightPx;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Bounding box border
+        Positioned(
+          left: leftPx,
+          top: topPx,
+          width: widthPx,
+          height: heightPx,
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColors.primary, width: 2.0),
+              ),
+            ),
+          ),
+        ),
+
+        // Left Edge Handle
+        Positioned(
+          left: leftPx - 18,
+          top: topPx + (heightPx / 2) - 20,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dLeft: d.delta.dx),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 36,
+              height: 40,
+              alignment: Alignment.center,
+              child: Container(
+                width: 6,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Right Edge Handle
+        Positioned(
+          left: rightPx - 18,
+          top: topPx + (heightPx / 2) - 20,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dRight: d.delta.dx),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 36,
+              height: 40,
+              alignment: Alignment.center,
+              child: Container(
+                width: 6,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Top Edge Handle
+        Positioned(
+          left: leftPx + (widthPx / 2) - 20,
+          top: topPx - 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dTop: d.delta.dy),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 40,
+              height: 36,
+              alignment: Alignment.center,
+              child: Container(
+                width: 24,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Bottom Edge Handle
+        Positioned(
+          left: leftPx + (widthPx / 2) - 20,
+          top: bottomPx - 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dBottom: d.delta.dy),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 40,
+              height: 36,
+              alignment: Alignment.center,
+              child: Container(
+                width: 24,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Top-Left Corner Handle
+        Positioned(
+          left: leftPx - 18,
+          top: topPx - 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dLeft: d.delta.dx, dTop: d.delta.dy),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              child: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(2),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Top-Right Corner Handle
+        Positioned(
+          left: rightPx - 18,
+          top: topPx - 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dRight: d.delta.dx, dTop: d.delta.dy),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              child: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(2),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Bottom-Left Corner Handle
+        Positioned(
+          left: leftPx - 18,
+          top: bottomPx - 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dLeft: d.delta.dx, dBottom: d.delta.dy),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              child: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(2),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // Bottom-Right Corner Handle
+        Positioned(
+          left: rightPx - 18,
+          top: bottomPx - 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onHandlePanStart(),
+            onPanUpdate: (d) => _updateDelta(dRight: d.delta.dx, dBottom: d.delta.dy),
+            onPanEnd: (_) => _onHandlePanEnd(),
+            child: Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              child: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(2),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class MaskPathClipper extends CustomClipper<Path> {
   final VideoMask mask;
 
@@ -2418,9 +2992,12 @@ class MaskPathClipper extends CustomClipper<Path> {
   @override
   Path getClip(Size size) {
     final Path path = Path();
-    final center = Offset(size.width / 2, size.height / 2);
-    final w = size.width * mask.size;
-    final h = size.height * mask.size;
+    final center = Offset(
+      size.width / 2 + (mask.positionX * size.width / 2),
+      size.height / 2 + (mask.positionY * size.height / 2),
+    );
+    final w = size.width * (mask.rectWidth ?? mask.size);
+    final h = size.height * (mask.rectHeight ?? mask.size);
 
     switch (mask.type) {
       case MaskType.none:
@@ -2493,5 +3070,10 @@ class MaskPathClipper extends CustomClipper<Path> {
       oldClipper.mask.type != mask.type ||
       oldClipper.mask.size != mask.size ||
       oldClipper.mask.feather != mask.feather ||
-      oldClipper.mask.inverted != mask.inverted;
+      oldClipper.mask.positionX != mask.positionX ||
+      oldClipper.mask.positionY != mask.positionY ||
+      oldClipper.mask.rotation != mask.rotation ||
+      oldClipper.mask.inverted != mask.inverted ||
+      oldClipper.mask.rectWidth != mask.rectWidth ||
+      oldClipper.mask.rectHeight != mask.rectHeight;
 }
