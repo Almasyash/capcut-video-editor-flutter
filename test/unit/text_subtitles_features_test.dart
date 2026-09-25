@@ -5,14 +5,19 @@ import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_m
 import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/action_toolbar.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
+import 'package:capcut_video_editor/core/utils/font_helper.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_preview_section.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   group('Text & Subtitles Enhanced Features Suite', () {
     late EditorViewModel viewModel;
 
     setUp(() {
+      GoogleFonts.config.allowRuntimeFetching = false;
       viewModel = EditorViewModel();
       viewModel.loadProject(
         Project(
@@ -158,6 +163,114 @@ void main() {
       expect(find.text('Add Text'), findsOneWidget);
       expect(find.text('Text Animation'), findsOneWidget);
       expect(find.text('Auto Captions'), findsNothing);
+    });
+
+    test('7. FontHelper resolves genuine font styles and graceful fallbacks', () {
+      final robotoStyle = FontHelper.getTextStyle(
+        fontFamily: 'Roboto',
+        fontSize: 20.0,
+        color: Colors.white,
+      );
+      expect(robotoStyle.fontSize, equals(20.0));
+      expect(robotoStyle.color, equals(Colors.white));
+
+      final monoStyle = FontHelper.getTextStyle(
+        fontFamily: 'monospace',
+        fontSize: 16.0,
+      );
+      expect(monoStyle.fontFamily, equals('monospace'));
+
+      final defaultStyle = FontHelper.getTextStyle(
+        fontFamily: null,
+        fontSize: 18.0,
+      );
+      expect(defaultStyle.fontSize, equals(18.0));
+      expect(FontHelper.availableFonts.isNotEmpty, isTrue);
+    });
+
+    test('8. TextOverlay scale persists in copyWith, toJson, and fromJson', () {
+      const overlay = TextOverlay(
+        id: 'scale_test',
+        text: 'Scaling Title',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 5),
+        scale: 1.75,
+      );
+      expect(overlay.scale, equals(1.75));
+
+      final copied = overlay.copyWith(scale: 2.5);
+      expect(copied.scale, equals(2.5));
+
+      final json = copied.toJson();
+      expect(json['scale'], equals(2.5));
+
+      final deserialized = TextOverlay.fromJson(json);
+      expect(deserialized.scale, equals(2.5));
+    });
+
+    test('9. EditorViewModel updates text scale and transform within clamped limits', () {
+      const text = TextOverlay(
+        id: 'transform_test',
+        text: 'Transform Me',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+        scale: 1.0,
+        position: Offset(0.5, 0.5),
+      );
+      viewModel.addTextOverlay(text);
+
+      viewModel.updateTextScale('transform_test', 1.8);
+      expect(viewModel.textOverlays.first.scale, equals(1.8));
+
+      // Test clamping
+      viewModel.updateTextScale('transform_test', 10.0);
+      expect(viewModel.textOverlays.first.scale, equals(5.0));
+
+      viewModel.updateTextTransform(
+        'transform_test',
+        position: const Offset(0.2, 0.3),
+        scale: 1.5,
+      );
+      expect(viewModel.textOverlays.first.position, equals(const Offset(0.2, 0.3)));
+      expect(viewModel.textOverlays.first.scale, equals(1.5));
+    });
+
+    testWidgets('10. VideoPreviewSection renders interactive bounding box and transform handles when selected', (tester) async {
+      tester.view.physicalSize = const Size(1080, 1920);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+
+      const text = TextOverlay(
+        id: 'preview_ctrl_text',
+        text: 'Editable Layer',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 5),
+        fontFamily: 'Montserrat',
+      );
+      viewModel.addTextOverlay(text);
+      viewModel.selectText('preview_ctrl_text');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VideoPreviewSection(viewModel: viewModel),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 350));
+
+      // Verify text rendered
+      expect(find.text('Editable Layer'), findsWidgets);
+
+      // Verify corner control handles: Edit, Delete, Resize, and Font badge
+      expect(find.byIcon(Icons.edit_rounded), findsWidgets);
+      expect(find.byIcon(Icons.close_rounded), findsWidgets);
+      expect(find.byIcon(Icons.open_in_full_rounded), findsWidgets);
+      expect(find.text('Montserrat'), findsWidgets);
     });
   });
 }

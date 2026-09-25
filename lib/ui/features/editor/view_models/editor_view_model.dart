@@ -2757,6 +2757,27 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
+  void updateTextScale(String id, double scale) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index != -1) {
+      _textOverlays[index] = _textOverlays[index].copyWith(scale: scale.clamp(0.2, 5.0));
+      scheduleAutoSave();
+      notifyListeners();
+    }
+  }
+
+  void updateTextTransform(String id, {Offset? position, double? scale}) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index != -1) {
+      _textOverlays[index] = _textOverlays[index].copyWith(
+        position: position ?? _textOverlays[index].position,
+        scale: scale != null ? scale.clamp(0.2, 5.0) : _textOverlays[index].scale,
+      );
+      scheduleAutoSave();
+      notifyListeners();
+    }
+  }
+
   void updateTextContent(String id, String newText) {
     final index = _textOverlays.indexWhere((t) => t.id == id);
     if (index != -1) {

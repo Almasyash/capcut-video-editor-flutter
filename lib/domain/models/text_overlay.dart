@@ -91,6 +91,7 @@ class TextOverlay {
   final Color? highlightColor;
   final double strokeWidth;
   final Color? strokeColor;
+  final double scale;
   final List<CaptionWord> words;
 
   const TextOverlay({
@@ -116,6 +117,7 @@ class TextOverlay {
     this.highlightColor,
     this.strokeWidth = 0.0,
     this.strokeColor,
+    this.scale = 1.0,
     this.words = const [],
   }) : textColor = color ?? textColor;
 
@@ -210,6 +212,7 @@ class TextOverlay {
     Color? highlightColor,
     double? strokeWidth,
     Color? strokeColor,
+    double? scale,
     List<CaptionWord>? words,
   }) {
     return TextOverlay(
@@ -234,6 +237,7 @@ class TextOverlay {
       highlightColor: highlightColor ?? this.highlightColor,
       strokeWidth: strokeWidth ?? this.strokeWidth,
       strokeColor: strokeColor ?? this.strokeColor,
+      scale: scale ?? this.scale,
       words: words ?? this.words,
     );
   }
@@ -262,6 +266,7 @@ class TextOverlay {
       'highlightColorValue': highlightColor?.value,
       'strokeWidth': strokeWidth,
       'strokeColorValue': strokeColor?.value,
+      'scale': scale,
       'words': words.map((w) => w.toJson()).toList(),
     };
   }
@@ -304,6 +309,7 @@ class TextOverlay {
       highlightColor: hlVal != null ? Color(hlVal) : null,
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0.0,
       strokeColor: strokeVal != null ? Color(strokeVal) : null,
+      scale: (json['scale'] as num?)?.toDouble() ?? 1.0,
       words: (json['words'] as List?)
               ?.map((w) => CaptionWord.fromJson(w as Map<String, dynamic>))
               .toList() ??

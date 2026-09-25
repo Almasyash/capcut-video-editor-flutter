@@ -23,6 +23,8 @@ import 'package:capcut_video_editor/domain/models/clip_spatial_transform.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/interactive_transform_canvas.dart';
 import 'package:capcut_video_editor/core/utils/chroma_key_helper.dart';
+import 'package:capcut_video_editor/core/utils/font_helper.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
 
 /// Top Video Preview Screen containing the live video canvas, aspect-ratio viewport,
 /// color grading LUT filters, adjustments, Picture-in-Picture (PIP) layers,
@@ -44,6 +46,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
   String? _lastActiveClipId;
   bool _isPlaying = false;
   double _lastPlayheadPosition = -1.0;
+  double _pinchStartTextScale = 1.0;
 
   OverlayEntry? _fullScreenEntry;
   bool get isFullScreen => _fullScreenEntry != null;
@@ -1847,7 +1850,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     final durationSec = text.durationInSeconds;
     final remainingSec = (durationSec - elapsedSec).clamp(0.0, double.infinity);
 
-    double scale = 1.0;
+    double animScale = 1.0;
     double slideY = 0.0;
     double opacity = 1.0;
 
@@ -1861,19 +1864,19 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     } else if (text.animationType == TextAnimationType.zoom) {
       if (elapsedSec < 0.35) {
         final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
-        scale = 0.2 + 0.8 * t;
+        animScale = 0.2 + 0.8 * t;
         opacity = t;
       } else if (remainingSec < 0.35) {
         final t = (remainingSec / 0.35).clamp(0.0, 1.0);
-        scale = 0.2 + 0.8 * t;
+        animScale = 0.2 + 0.8 * t;
         opacity = t;
       }
     } else if (text.animationType == TextAnimationType.pop) {
       final t = (elapsedSec / 0.22).clamp(0.0, 1.0);
-      scale = t < 1.0 ? (0.75 + 0.35 * math.sin(t * math.pi)) : 1.0;
+      animScale = t < 1.0 ? (0.75 + 0.35 * math.sin(t * math.pi)) : 1.0;
       if (remainingSec < 0.22) {
         final rt = (remainingSec / 0.22).clamp(0.0, 1.0);
-        scale *= rt;
+        animScale *= rt;
         opacity = rt;
       }
     } else if (text.animationType == TextAnimationType.slideUp) {
@@ -1907,8 +1910,11 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
         opacity = t;
       }
     } else if (text.animationType == TextAnimationType.glowPulse) {
-      scale = 1.0 + 0.04 * math.sin(elapsedSec * 6.0);
+      animScale = 1.0 + 0.04 * math.sin(elapsedSec * 6.0);
     }
+
+    // Combine user scale and animation scale
+    final effScale = (text.scale) * animScale;
 
     return Align(
       alignment: FractionalOffset(
@@ -1918,62 +1924,170 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       child: Transform.translate(
         offset: Offset(0, slideY),
         child: Transform.scale(
-          scale: scale,
+          scale: effScale,
           child: Opacity(
             opacity: opacity.clamp(0.0, 1.0),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => viewModel.selectText(text.id),
-              onPanUpdate: (details) {
-                final safeW = canvasWidth > 0 ? canvasWidth : 360.0;
-                final safeH = canvasHeight > 0 ? canvasHeight : 640.0;
-                final newX = (text.position.dx + details.delta.dx / safeW).clamp(0.0, 1.0);
-                final newY = (text.position.dy + details.delta.dy / safeH).clamp(0.0, 1.0);
-                viewModel.updateTextPosition(text.id, Offset(newX, newY));
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: text.backgroundColor ??
-                      (text.strokeWidth > 0 ? Colors.transparent : Colors.black.withOpacity(0.65)),
-                  borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                  border: Border.all(
-                    color: isSelected ? AppColors.primary : Colors.transparent,
-                    width: isSelected ? 2.0 : 0.0,
+            child: Stack(
+              clipBehavior: Clip.none,
+              alignment: Alignment.center,
+              children: [
+                // 1. Text Content with Drag and Pinch Gesture
+                Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => viewModel.selectText(text.id),
+                    onDoubleTap: () => TextDrawer.showAddOrEditModal(context, viewModel, existing: text),
+                    onScaleStart: (_) {
+                      _pinchStartTextScale = text.scale;
+                    },
+                    onScaleUpdate: (details) {
+                      final safeW = canvasWidth > 0 ? canvasWidth : 360.0;
+                      final safeH = canvasHeight > 0 ? canvasHeight : 640.0;
+                      if (details.pointerCount > 1) {
+                        // Two-finger pinch-to-resize gesture
+                        final targetScale = (_pinchStartTextScale * details.scale).clamp(0.3, 4.0);
+                        viewModel.updateTextScale(text.id, targetScale);
+                      } else {
+                        // One-finger translation drag gesture
+                        final newX = (text.position.dx + details.focalPointDelta.dx / safeW).clamp(0.0, 1.0);
+                        final newY = (text.position.dy + details.focalPointDelta.dy / safeH).clamp(0.0, 1.0);
+                        viewModel.updateTextPosition(text.id, Offset(newX, newY));
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: text.backgroundColor ??
+                            (text.strokeWidth > 0 ? Colors.transparent : Colors.black.withOpacity(0.65)),
+                        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                        border: Border.all(
+                          color: isSelected ? AppColors.primary : Colors.transparent,
+                          width: isSelected ? 2.0 : 0.0,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: AppColors.primary.withOpacity(0.4),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                )
+                              ]
+                            : null,
+                      ),
+                      child: _buildCaptionContent(text, elapsedSec),
+                    ),
                   ),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: AppColors.primary.withOpacity(0.4),
-                            blurRadius: 8,
-                            spreadRadius: 1,
-                          )
-                        ]
-                      : null,
                 ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    _buildCaptionContent(text, elapsedSec),
-                    if (isSelected)
-                      Positioned(
-                        top: -14,
-                        right: -14,
-                        child: GestureDetector(
-                          onTap: () => viewModel.removeTextOverlay(text.id),
-                          child: Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: const BoxDecoration(
-                              color: AppColors.error,
-                              shape: BoxShape.circle,
+
+                // 2. Interactive Bounding Box Handles (Sibling layers, on top of gesture arena)
+                if (isSelected) ...[
+                  // Top-Left: Edit text & font button
+                  Positioned(
+                    top: 4,
+                    left: 4,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => TextDrawer.showAddOrEditModal(context, viewModel, existing: text),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 4,
                             ),
-                            child: const Icon(Icons.close, size: 12, color: Colors.white),
+                          ],
+                        ),
+                        child: const Icon(Icons.edit_rounded, size: 14, color: Colors.black),
+                      ),
+                    ),
+                  ),
+
+                  // Top-Right: Delete button
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => viewModel.removeTextOverlay(text.id),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: AppColors.error,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom-Right: Corner drag-to-resize handle
+                  Positioned(
+                    bottom: 4,
+                    right: 4,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onPanUpdate: (details) {
+                        final delta = (details.delta.dx + details.delta.dy) / 120.0;
+                        final newScale = (text.scale + delta).clamp(0.3, 4.0);
+                        viewModel.updateTextScale(text.id, newScale);
+                      },
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.4),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
+                      ),
+                    ),
+                  ),
+
+                  // Bottom-Left: Font family indicator badge
+                  if (text.fontFamily != null)
+                    Positioned(
+                      bottom: 4,
+                      left: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.85),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: AppColors.primary.withOpacity(0.7),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Text(
+                          text.fontFamily!,
+                          style: const TextStyle(
+                            fontSize: 9,
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ),
-                  ],
-                ),
-              ),
+                    ),
+                ],
+              ],
             ),
           ),
         ),
@@ -2078,7 +2192,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     required bool isActive,
     Color? activeGlowColor,
   }) {
-    final style = TextStyle(
+    final style = FontHelper.getTextStyle(
       fontSize: fontSize,
       fontFamily: fontFamily,
       fontWeight: isBold ? FontWeight.w900 : FontWeight.w600,

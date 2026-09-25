@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
+import 'package:capcut_video_editor/core/utils/font_helper.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/text_animation_sheet.dart';
@@ -13,20 +14,18 @@ class TextDrawer extends StatelessWidget {
     required this.viewModel,
   });
 
-  static const _availableFonts = [
-    (label: 'Default', family: null),
-    (label: 'Roboto', family: 'Roboto'),
-    (label: 'Montserrat', family: 'Montserrat'),
-    (label: 'Oswald', family: 'Oswald'),
-    (label: 'Bebas Neue', family: 'Bebas Neue'),
-    (label: 'Playfair', family: 'Playfair Display'),
-    (label: 'Pacifico', family: 'Pacifico'),
-    (label: 'Monospace', family: 'monospace'),
-    (label: 'Serif', family: 'serif'),
-    (label: 'Sans-Serif', family: 'sans-serif'),
-  ];
+  static const _availableFonts = FontHelper.availableFonts;
 
   void _showAddTextModal(BuildContext context, {TextOverlay? existing}) {
+    showAddOrEditModal(context, viewModel, existing: existing);
+  }
+
+  /// Displays the full Add / Edit Text Layer modal with real-time typography font rendering
+  static void showAddOrEditModal(
+    BuildContext context,
+    EditorViewModel viewModel, {
+    TextOverlay? existing,
+  }) {
     final controller = TextEditingController(text: existing?.text ?? '');
     Color selectedColor = existing?.color ?? Colors.white;
     double fontSize = existing?.fontSize ?? 22.0;
@@ -137,7 +136,7 @@ class TextDrawer extends StatelessWidget {
                               alignment: Alignment.center,
                               child: Text(
                                 fontItem.label,
-                                style: TextStyle(
+                                style: FontHelper.getTextStyle(
                                   fontFamily: fontItem.family,
                                   fontSize: 12,
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
@@ -154,7 +153,7 @@ class TextDrawer extends StatelessWidget {
                       controller: controller,
                       autofocus: true,
                       textAlign: textAlign,
-                      style: TextStyle(
+                      style: FontHelper.getTextStyle(
                         fontSize: fontSize,
                         fontFamily: selectedFontFamily,
                         color: selectedColor,
@@ -435,7 +434,8 @@ class TextDrawer extends StatelessWidget {
                                 item.text,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
+                                style: FontHelper.getTextStyle(
+                                  fontFamily: item.fontFamily,
                                   fontSize: 11,
                                   fontWeight: item.isBold ? FontWeight.w900 : FontWeight.bold,
                                   color: item.color,
