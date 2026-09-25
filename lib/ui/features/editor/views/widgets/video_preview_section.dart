@@ -462,7 +462,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
             ),
 
             // 6. Active Text / Subtitle Overlays (Positioned on top for drag and interaction)
-            ...activeTexts.map((text) => _buildTextOverlay(text)),
+            ...activeTexts.map((text) => _buildTextOverlay(text, canvasWidth: width, canvasHeight: height)),
 
             // 7. Top-Left: Badges (Aspect Ratio & Active Filter)
             Positioned(
@@ -1837,29 +1837,83 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     }
   }
 
-  Widget _buildTextOverlay(TextOverlay text) {
+  Widget _buildTextOverlay(
+    TextOverlay text, {
+    double canvasWidth = 360.0,
+    double canvasHeight = 640.0,
+  }) {
     final isSelected = viewModel.selectedTextId == text.id;
     final elapsedSec = viewModel.currentTimeInSeconds - text.startTimeInSeconds;
+    final durationSec = text.durationInSeconds;
+    final remainingSec = (durationSec - elapsedSec).clamp(0.0, double.infinity);
 
     double scale = 1.0;
     double slideY = 0.0;
     double opacity = 1.0;
 
-    if (text.animationType == TextAnimationType.pop) {
+    // Entrance & Exit text animations
+    if (text.animationType == TextAnimationType.fade) {
+      if (elapsedSec < 0.35) {
+        opacity = (elapsedSec / 0.35).clamp(0.0, 1.0);
+      } else if (remainingSec < 0.35) {
+        opacity = (remainingSec / 0.35).clamp(0.0, 1.0);
+      }
+    } else if (text.animationType == TextAnimationType.zoom) {
+      if (elapsedSec < 0.35) {
+        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+        scale = 0.2 + 0.8 * t;
+        opacity = t;
+      } else if (remainingSec < 0.35) {
+        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+        scale = 0.2 + 0.8 * t;
+        opacity = t;
+      }
+    } else if (text.animationType == TextAnimationType.pop) {
       final t = (elapsedSec / 0.22).clamp(0.0, 1.0);
       scale = t < 1.0 ? (0.75 + 0.35 * math.sin(t * math.pi)) : 1.0;
+      if (remainingSec < 0.22) {
+        final rt = (remainingSec / 0.22).clamp(0.0, 1.0);
+        scale *= rt;
+        opacity = rt;
+      }
+    } else if (text.animationType == TextAnimationType.slideUp) {
+      if (elapsedSec < 0.35) {
+        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+        slideY = (1.0 - t) * 35.0;
+        opacity = t;
+      } else if (remainingSec < 0.35) {
+        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+        slideY = -(1.0 - t) * 35.0;
+        opacity = t;
+      }
+    } else if (text.animationType == TextAnimationType.slideDown) {
+      if (elapsedSec < 0.35) {
+        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+        slideY = -(1.0 - t) * 35.0;
+        opacity = t;
+      } else if (remainingSec < 0.35) {
+        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+        slideY = (1.0 - t) * 35.0;
+        opacity = t;
+      }
     } else if (text.animationType == TextAnimationType.fadeSlide) {
-      final t = (elapsedSec / 0.28).clamp(0.0, 1.0);
-      slideY = (1.0 - t) * 12.0;
-      opacity = t;
+      if (elapsedSec < 0.28) {
+        final t = (elapsedSec / 0.28).clamp(0.0, 1.0);
+        slideY = (1.0 - t) * 16.0;
+        opacity = t;
+      } else if (remainingSec < 0.28) {
+        final t = (remainingSec / 0.28).clamp(0.0, 1.0);
+        slideY = -(1.0 - t) * 16.0;
+        opacity = t;
+      }
     } else if (text.animationType == TextAnimationType.glowPulse) {
       scale = 1.0 + 0.04 * math.sin(elapsedSec * 6.0);
     }
 
     return Align(
       alignment: FractionalOffset(
-        text.position.dx.clamp(0.05, 0.95),
-        text.position.dy.clamp(0.05, 0.95),
+        text.position.dx.clamp(0.0, 1.0),
+        text.position.dy.clamp(0.0, 1.0),
       ),
       child: Transform.translate(
         offset: Offset(0, slideY),
@@ -1871,13 +1925,14 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
               behavior: HitTestBehavior.opaque,
               onTap: () => viewModel.selectText(text.id),
               onPanUpdate: (details) {
-                final newX = (text.position.dx + details.delta.dx / 300.0).clamp(0.05, 0.95);
-                final newY = (text.position.dy + details.delta.dy / 400.0).clamp(0.05, 0.95);
+                final safeW = canvasWidth > 0 ? canvasWidth : 360.0;
+                final safeH = canvasHeight > 0 ? canvasHeight : 640.0;
+                final newX = (text.position.dx + details.delta.dx / safeW).clamp(0.0, 1.0);
+                final newY = (text.position.dy + details.delta.dy / safeH).clamp(0.0, 1.0);
                 viewModel.updateTextPosition(text.id, Offset(newX, newY));
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                margin: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   color: text.backgroundColor ??
                       (text.strokeWidth > 0 ? Colors.transparent : Colors.black.withOpacity(0.65)),

@@ -8,8 +8,9 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/export_moda
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/speed_adjustment_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/beat_options_sheet.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/auto_captions_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/pip_overlay_sheet.dart';
+import 'package:capcut_video_editor/domain/models/text_overlay.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/text_animation_sheet.dart';
 
 /// Middle Action Toolbar containing Split, Trim Left/Right, Delete, Duplicate (with PIP option),
 /// Speed, Volume, Add Clip (Media Picker), and Export.
@@ -398,14 +399,16 @@ class ActionToolbar extends StatelessWidget {
                   },
                 ),
 
-                // Auto Captions & Subtitle Styling Action
+                // Text Animation Action (Replaces Auto Captions)
                 _buildActionButton(
                   context: context,
-                  icon: Icons.subtitles_rounded,
-                  label: hasSelectedText ? 'Captions Style' : 'Auto Captions',
+                  icon: Icons.animation_rounded,
+                  label: 'Text Animation',
+                  tooltip: 'Text Animation (Fade, Zoom, Pop, Slide)',
+                  isAccent: hasSelectedText && viewModel.selectedTextOverlay?.animationType != TextAnimationType.none,
                   enabled: true,
                   onTap: () {
-                    AutoCaptionsSheet.show(context, viewModel);
+                    TextAnimationSheet.show(context, viewModel);
                   },
                 ),
 

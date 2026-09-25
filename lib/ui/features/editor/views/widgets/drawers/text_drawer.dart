@@ -3,7 +3,7 @@ import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
-import 'package:capcut_video_editor/ui/features/editor/views/widgets/auto_captions_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/text_animation_sheet.dart';
 
 class TextDrawer extends StatelessWidget {
   final EditorViewModel viewModel;
@@ -12,6 +12,19 @@ class TextDrawer extends StatelessWidget {
     super.key,
     required this.viewModel,
   });
+
+  static const _availableFonts = [
+    (label: 'Default', family: null),
+    (label: 'Roboto', family: 'Roboto'),
+    (label: 'Montserrat', family: 'Montserrat'),
+    (label: 'Oswald', family: 'Oswald'),
+    (label: 'Bebas Neue', family: 'Bebas Neue'),
+    (label: 'Playfair', family: 'Playfair Display'),
+    (label: 'Pacifico', family: 'Pacifico'),
+    (label: 'Monospace', family: 'monospace'),
+    (label: 'Serif', family: 'serif'),
+    (label: 'Sans-Serif', family: 'sans-serif'),
+  ];
 
   void _showAddTextModal(BuildContext context, {TextOverlay? existing}) {
     final controller = TextEditingController(text: existing?.text ?? '');
@@ -22,6 +35,7 @@ class TextDrawer extends StatelessWidget {
     bool isItalic = existing?.isItalic ?? false;
     bool isUnderline = existing?.isUnderline ?? false;
     Color? backgroundColor = existing?.backgroundColor;
+    String? selectedFontFamily = existing?.fontFamily;
 
     showModalBottomSheet(
       context: context,
@@ -69,13 +83,80 @@ class TextDrawer extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
+
+                    // Font Selection Menu right below header
+                    Row(
+                      children: [
+                        const Icon(Icons.font_download_rounded, size: 14, color: AppColors.primary),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Font Family:',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textMuted),
+                        ),
+                        if (selectedFontFamily != null) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              selectedFontFamily!,
+                              style: const TextStyle(fontSize: 10, color: AppColors.primary, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 36,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _availableFonts.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 6),
+                        itemBuilder: (context, fontIdx) {
+                          final fontItem = _availableFonts[fontIdx];
+                          final isSelected = (fontItem.family == null && selectedFontFamily == null) ||
+                              (fontItem.family != null && fontItem.family == selectedFontFamily);
+                          return InkWell(
+                            onTap: () => setModalState(() => selectedFontFamily = fontItem.family),
+                            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isSelected ? AppColors.primary : AppColors.surfaceLight,
+                                borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                                border: Border.all(
+                                  color: isSelected ? AppColors.primary : AppColors.divider,
+                                  width: isSelected ? 1.5 : 0.8,
+                                ),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                fontItem.label,
+                                style: TextStyle(
+                                  fontFamily: fontItem.family,
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                  color: isSelected ? Colors.black : Colors.white,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: controller,
                       autofocus: true,
                       textAlign: textAlign,
                       style: TextStyle(
                         fontSize: fontSize,
+                        fontFamily: selectedFontFamily,
                         color: selectedColor,
                         fontWeight: isBold ? FontWeight.w900 : FontWeight.w600,
                         fontStyle: isItalic ? FontStyle.italic : FontStyle.normal,
@@ -207,6 +288,7 @@ class TextDrawer extends StatelessWidget {
                                   isItalic: isItalic,
                                   isUnderline: isUnderline,
                                   backgroundColor: backgroundColor,
+                                  fontFamily: selectedFontFamily,
                                 ),
                               );
                             } else {
@@ -224,6 +306,7 @@ class TextDrawer extends StatelessWidget {
                                   isItalic: isItalic,
                                   isUnderline: isUnderline,
                                   backgroundColor: backgroundColor,
+                                  fontFamily: selectedFontFamily,
                                 ),
                               );
                             }
@@ -244,10 +327,6 @@ class TextDrawer extends StatelessWidget {
         );
       },
     );
-  }
-
-  void _generateAutoCaptions(BuildContext context) {
-    AutoCaptionsSheet.show(context, viewModel);
   }
 
   @override
@@ -310,13 +389,13 @@ class TextDrawer extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: OutlinedButton.icon(
-                    icon: const Icon(Icons.auto_awesome_rounded, size: 16, color: AppColors.secondary),
-                    label: const Text('Auto Captions', style: TextStyle(color: AppColors.secondary)),
+                    icon: const Icon(Icons.animation_rounded, size: 16, color: AppColors.secondary),
+                    label: const Text('Text Animation', style: TextStyle(color: AppColors.secondary)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppColors.secondary),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
-                    onPressed: () => _generateAutoCaptions(context),
+                    onPressed: () => TextAnimationSheet.show(context, viewModel),
                   ),
                 ),
               ],
@@ -378,6 +457,14 @@ class TextDrawer extends StatelessWidget {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
+                                  InkWell(
+                                    onTap: () {
+                                      viewModel.selectText(item.id);
+                                      TextAnimationSheet.show(context, viewModel);
+                                    },
+                                    child: const Icon(Icons.animation_rounded, size: 16, color: AppColors.secondary),
+                                  ),
+                                  const SizedBox(width: 8),
                                   InkWell(
                                     onTap: () => _showAddTextModal(context, existing: item),
                                     child: const Icon(Icons.edit_rounded, size: 16, color: AppColors.primary),

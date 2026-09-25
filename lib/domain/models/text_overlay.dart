@@ -4,10 +4,14 @@ import 'package:capcut_video_editor/domain/models/caption_word.dart';
 /// Animation style for captions and subtitle overlays
 enum TextAnimationType {
   none,
-  karaoke,   // Word-by-word energetic active highlight & bounce
+  fade,      // Smooth fade in & fade out transition
+  zoom,      // Dynamic scale zoom-in entrance & zoom-out exit
   pop,       // Pop-in scale bounce entrance
+  slideUp,   // Smooth vertical slide up entrance & exit
+  slideDown, // Smooth vertical slide down entrance & exit
   fadeSlide, // Smooth vertical slide & fade
   typewriter,// Progressive character/word reveal
+  karaoke,   // Word-by-word energetic active highlight & bounce
   glowPulse, // Radiant rhythmic aura
 }
 
@@ -16,14 +20,22 @@ extension TextAnimationTypeExtension on TextAnimationType {
     switch (this) {
       case TextAnimationType.none:
         return 'None (Static)';
-      case TextAnimationType.karaoke:
-        return 'Karaoke (Bounce)';
+      case TextAnimationType.fade:
+        return 'Fade In/Out';
+      case TextAnimationType.zoom:
+        return 'Zoom Scale';
       case TextAnimationType.pop:
-        return 'Pop-in';
+        return 'Pop-in (Bounce)';
+      case TextAnimationType.slideUp:
+        return 'Slide Up';
+      case TextAnimationType.slideDown:
+        return 'Slide Down';
       case TextAnimationType.fadeSlide:
         return 'Fade Slide';
       case TextAnimationType.typewriter:
         return 'Typewriter';
+      case TextAnimationType.karaoke:
+        return 'Karaoke (Bounce)';
       case TextAnimationType.glowPulse:
         return 'Glow Pulse';
     }
@@ -33,14 +45,22 @@ extension TextAnimationTypeExtension on TextAnimationType {
     switch (this) {
       case TextAnimationType.none:
         return Icons.text_fields_rounded;
-      case TextAnimationType.karaoke:
-        return Icons.record_voice_over_rounded;
+      case TextAnimationType.fade:
+        return Icons.opacity_rounded;
+      case TextAnimationType.zoom:
+        return Icons.zoom_in_rounded;
       case TextAnimationType.pop:
         return Icons.open_in_full_rounded;
+      case TextAnimationType.slideUp:
+        return Icons.arrow_upward_rounded;
+      case TextAnimationType.slideDown:
+        return Icons.arrow_downward_rounded;
       case TextAnimationType.fadeSlide:
         return Icons.vertical_align_top_rounded;
       case TextAnimationType.typewriter:
         return Icons.keyboard_alt_outlined;
+      case TextAnimationType.karaoke:
+        return Icons.record_voice_over_rounded;
       case TextAnimationType.glowPulse:
         return Icons.wb_incandescent_outlined;
     }
