@@ -59,6 +59,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
   void _exitFullScreen() {
     _fullScreenEntry?.remove();
     _fullScreenEntry = null;
+    widget.viewModel.refreshTimelineLayout();
     if (mounted) setState(() {});
   }
 
@@ -74,7 +75,13 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
   void didUpdateWidget(covariant VideoPreviewSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     _syncPlayerWithModel();
-    _fullScreenEntry?.markNeedsBuild();
+    if (_fullScreenEntry != null && _fullScreenEntry!.mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _fullScreenEntry != null && _fullScreenEntry!.mounted) {
+          _fullScreenEntry?.markNeedsBuild();
+        }
+      });
+    }
   }
 
   @override
@@ -631,25 +638,32 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.75),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.white24, width: 0.8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.videocam_rounded, size: 14, color: AppColors.primary),
-                                const SizedBox(width: 6),
-                                Text(
-                                  '${viewModel.aspectRatio.label} • Fullscreen Mode',
-                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                ),
-                              ],
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.75),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.white24, width: 0.8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.videocam_rounded, size: 14, color: AppColors.primary),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      '${viewModel.aspectRatio.label} • Fullscreen Mode',
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
+                          const SizedBox(width: 8),
                           InkWell(
                             borderRadius: BorderRadius.circular(8),
                             onTap: _exitFullScreen,

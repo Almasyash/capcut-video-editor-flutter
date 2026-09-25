@@ -835,6 +835,14 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Forces a complete rebuild and relayout of timeline elements and playhead tracking.
+  /// Typically called when returning from full-screen preview or viewport transitions.
+  void refreshTimelineLayout() {
+    _autoSelectActiveClip();
+    _syncAudioPlayback(forceSeek: true);
+    notifyListeners();
+  }
+
   /// Synchronizes audio playback with master playhead, respecting track trims, speed, and volume
   void _syncAudioPlayback({bool forceSeek = false, bool isStartingPlay = false}) {
     if (_audioTracks.isEmpty) {
@@ -1610,7 +1618,9 @@ class EditorViewModel extends ChangeNotifier {
   void updateSelectedOverlayBlendMode(BlendMode blendMode) {
     if (_selectedOverlayIndex == null ||
         _selectedOverlayIndex! < 0 ||
-        _selectedOverlayIndex! >= _overlayClips.length) return;
+        _selectedOverlayIndex! >= _overlayClips.length) {
+      return;
+    }
     _saveSnapshot();
     _overlayClips[_selectedOverlayIndex!] = _overlayClips[_selectedOverlayIndex!].copyWith(
       blendMode: blendMode,
@@ -1622,7 +1632,9 @@ class EditorViewModel extends ChangeNotifier {
   void updateSelectedOverlayOpacity(double opacity) {
     if (_selectedOverlayIndex == null ||
         _selectedOverlayIndex! < 0 ||
-        _selectedOverlayIndex! >= _overlayClips.length) return;
+        _selectedOverlayIndex! >= _overlayClips.length) {
+      return;
+    }
     _saveSnapshot();
     _overlayClips[_selectedOverlayIndex!] = _overlayClips[_selectedOverlayIndex!].copyWith(
       opacity: opacity.clamp(0.0, 1.0),
@@ -1640,7 +1652,9 @@ class EditorViewModel extends ChangeNotifier {
   }) {
     if (_selectedOverlayIndex == null ||
         _selectedOverlayIndex! < 0 ||
-        _selectedOverlayIndex! >= _overlayClips.length) return;
+        _selectedOverlayIndex! >= _overlayClips.length) {
+      return;
+    }
     _saveSnapshot();
     _overlayClips[_selectedOverlayIndex!] = _overlayClips[_selectedOverlayIndex!].copyWith(
       enableChromaKey: enable,
@@ -1656,7 +1670,9 @@ class EditorViewModel extends ChangeNotifier {
   void updateSelectedOverlayMask(VideoMask? mask) {
     if (_selectedOverlayIndex == null ||
         _selectedOverlayIndex! < 0 ||
-        _selectedOverlayIndex! >= _overlayClips.length) return;
+        _selectedOverlayIndex! >= _overlayClips.length) {
+      return;
+    }
     _saveSnapshot();
     _overlayClips[_selectedOverlayIndex!] = _overlayClips[_selectedOverlayIndex!].copyWith(
       mask: mask,

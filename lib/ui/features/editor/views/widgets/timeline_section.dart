@@ -58,6 +58,16 @@ class _TimelineSectionState extends State<TimelineSection> {
   }
 
   @override
+  void didUpdateWidget(covariant TimelineSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.viewModel != widget.viewModel) {
+      oldWidget.viewModel.removeListener(_onViewModelChanged);
+      widget.viewModel.addListener(_onViewModelChanged);
+    }
+    _onViewModelChanged();
+  }
+
+  @override
   void dispose() {
     widget.viewModel.removeListener(_onViewModelChanged);
     _horizontalScrollController.removeListener(_syncRulerScroll);
@@ -70,10 +80,11 @@ class _TimelineSectionState extends State<TimelineSection> {
 
   void _syncRulerScroll() {
     if (_rulerScrollController.hasClients && _horizontalScrollController.hasClients) {
-      if (_rulerScrollController.offset != _horizontalScrollController.offset) {
-        _rulerScrollController.jumpTo(
-          _horizontalScrollController.offset.clamp(0.0, _rulerScrollController.position.maxScrollExtent),
-        );
+      if (_rulerScrollController.position.hasContentDimensions && _horizontalScrollController.position.hasContentDimensions) {
+        final targetOffset = _horizontalScrollController.offset.clamp(0.0, _rulerScrollController.position.maxScrollExtent);
+        if ((_rulerScrollController.offset - targetOffset).abs() > 0.5) {
+          _rulerScrollController.jumpTo(targetOffset);
+        }
       }
     }
   }
@@ -90,9 +101,11 @@ class _TimelineSectionState extends State<TimelineSection> {
       if (vm.isPlaying || (vm.playheadPosition - _lastSyncedPlayhead).abs() > 0.001) {
         _lastSyncedPlayhead = vm.playheadPosition;
         final targetScroll = vm.playheadPosition * vm.pixelsPerSecond;
-        _horizontalScrollController.jumpTo(
-          targetScroll.clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-        );
+        if (_horizontalScrollController.position.hasContentDimensions) {
+          _horizontalScrollController.jumpTo(
+            targetScroll.clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+          );
+        }
       }
     }
 
@@ -100,6 +113,21 @@ class _TimelineSectionState extends State<TimelineSection> {
     _checkAndAutoScrollToNewLayer(vm);
 
     setState(() {});
+
+    // 3. Post-frame verification to ensure timeline and ruler accurately reflect restored layout bounds
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_isUserScrollingHorizontal && _horizontalScrollController.hasClients) {
+        if (_horizontalScrollController.position.hasContentDimensions) {
+          final targetScroll = widget.viewModel.playheadPosition * widget.viewModel.pixelsPerSecond;
+          final clamped = targetScroll.clamp(0.0, _horizontalScrollController.position.maxScrollExtent);
+          if ((_horizontalScrollController.offset - clamped).abs() > 0.5) {
+            _horizontalScrollController.jumpTo(clamped);
+          }
+        }
+      }
+      _syncRulerScroll();
+    });
   }
 
   void _checkAndAutoScrollToNewLayer(EditorViewModel vm) {
@@ -176,12 +204,17 @@ class _TimelineSectionState extends State<TimelineSection> {
         : 5.0 * viewModel.pixelsPerSecond;
     double rawVideoTrackWidth = 0.0;
     for (int i = 0; i < viewModel.videoClips.length; i++) {
-      rawVideoTrackWidth += viewModel.videoClips[i].durationInSeconds * viewModel.pixelsPerSecond;
+      rawVideoTrackWidth += viewModel.videoClips[i].durationInSeconds * viewModel.pixelsPerSecond + 4.0;
       if (i < viewModel.videoClips.length - 1) {
-        rawVideoTrackWidth += 40.0;
+        final clip = viewModel.videoClips[i];
+        final nextClip = viewModel.videoClips[i + 1];
+        final hasTrans = viewModel.transitions.any(
+          (t) => t.leftClipId == clip.id && t.rightClipId == nextClip.id && t.enabled && t.type != TransitionType.none,
+        );
+        rawVideoTrackWidth += hasTrans ? 84.0 : 44.0;
       }
     }
-    rawVideoTrackWidth += 60.0;
+    rawVideoTrackWidth += 120.0;
     final totalTrackWidth = math.max(baseTrackWidth, rawVideoTrackWidth);
 
     return Container(
@@ -540,210 +573,214 @@ class _TimelineSectionState extends State<TimelineSection> {
     double runningStart = 0.0;
     return SizedBox(
       height: AppDimensions.videoTrackHeight,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const NeverScrollableScrollPhysics(),
+      child: OverflowBox(
+        alignment: Alignment.centerLeft,
+        minWidth: 0.0,
+        maxWidth: double.infinity,
+        minHeight: AppDimensions.videoTrackHeight,
+        maxHeight: AppDimensions.videoTrackHeight,
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-          ...viewModel.videoClips.asMap().entries.map((entry) {
-            final idx = entry.key;
-            final clip = entry.value;
-            final clipStart = runningStart;
-            runningStart += clip.durationInSeconds;
-            final isSelected = viewModel.selectedClipIndex == idx;
+            for (int idx = 0; idx < viewModel.videoClips.length; idx++) ...[
+              Builder(
+                key: ValueKey('main_track_clip_builder_${viewModel.videoClips[idx].id}'),
+                builder: (ctx) {
+                  final clip = viewModel.videoClips[idx];
+                  final clipStart = runningStart;
+                  runningStart += clip.durationInSeconds;
+                  final isSelected = viewModel.selectedClipIndex == idx;
+                  final asset = viewModel.getAssetById(clip.assetId);
 
-            final asset = viewModel.getAssetById(clip.assetId);
-            final clipWidget = TimelineClipItem(
-              key: ValueKey(clip.id),
-              clip: clip,
-              localPath: asset?.localPath,
-              thumbnailPath: asset?.thumbnailPath,
-              isPhoto: asset?.isPhoto ?? false,
-              index: idx,
-              isSelected: isSelected,
-              pixelsPerSecond: viewModel.pixelsPerSecond,
-              clipStartTime: clipStart,
-              currentPlayheadTime: viewModel.currentTimeInSeconds,
-              onKeyframeTap: (kf) {
-                if (viewModel.isPlaying) viewModel.pause();
-                final targetTime = (clipStart + kf.timeInSeconds).clamp(0.0, viewModel.totalDurationInSeconds);
-                viewModel.seekTo(targetTime);
-                if (_horizontalScrollController.hasClients) {
-                  _horizontalScrollController.jumpTo(
-                    (targetTime * viewModel.pixelsPerSecond)
-                        .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                  );
-                }
-              },
-              onTap: () => viewModel.selectClip(idx),
-              onTapDown: (details) {
-                if (viewModel.isPlaying) viewModel.pause();
-                viewModel.selectClip(idx);
-                final offsetInClip = details.localPosition.dx / viewModel.pixelsPerSecond;
-                final targetTime = (clipStart + offsetInClip).clamp(0.0, viewModel.totalDurationInSeconds);
-                viewModel.seekTo(targetTime);
-                if (_horizontalScrollController.hasClients) {
-                  _horizontalScrollController.jumpTo(
-                    (targetTime * viewModel.pixelsPerSecond)
-                        .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                  );
-                }
-              },
-              onTrimChanged: (newStart, newEnd) {
-                viewModel.updateClipTrim(idx, newStart, newEnd);
-              },
-            );
-
-            if (idx < viewModel.videoClips.length - 1) {
-              final nextClip = viewModel.videoClips[idx + 1];
-              Transition? existingTransition;
-              try {
-                existingTransition = viewModel.transitions.firstWhere(
-                  (t) => t.leftClipId == clip.id && t.rightClipId == nextClip.id && t.enabled && t.type != TransitionType.none,
-                );
-              } catch (_) {}
-
-              final isSelected = viewModel.selectedTransitionBoundaryIndex == idx;
-
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  clipWidget,
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      viewModel.selectTransitionBoundary(idx);
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        backgroundColor: Colors.transparent,
-                        builder: (ctx) => TransitionSelectionSheet(
-                          viewModel: viewModel,
-                          leftClipId: clip.id,
-                          rightClipId: nextClip.id,
-                          existingTransition: existingTransition,
-                        ),
-                      ).whenComplete(() {
-                        viewModel.selectTransitionBoundary(null);
-                      });
+                  return TimelineClipItem(
+                    key: ValueKey(clip.id),
+                    clip: clip,
+                    localPath: asset?.localPath,
+                    thumbnailPath: asset?.thumbnailPath,
+                    isPhoto: asset?.isPhoto ?? false,
+                    index: idx,
+                    isSelected: isSelected,
+                    pixelsPerSecond: viewModel.pixelsPerSecond,
+                    clipStartTime: clipStart,
+                    currentPlayheadTime: viewModel.currentTimeInSeconds,
+                    onKeyframeTap: (kf) {
+                      if (viewModel.isPlaying) viewModel.pause();
+                      final targetTime = (clipStart + kf.timeInSeconds).clamp(0.0, viewModel.totalDurationInSeconds);
+                      viewModel.seekTo(targetTime);
+                      if (_horizontalScrollController.hasClients) {
+                        _horizontalScrollController.jumpTo(
+                          (targetTime * viewModel.pixelsPerSecond)
+                              .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+                        );
+                      }
                     },
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                      alignment: Alignment.center,
-                      child: existingTransition != null
-                          ? Container(
-                              height: 28,
-                              padding: const EdgeInsets.symmetric(horizontal: 6),
-                              margin: const EdgeInsets.symmetric(horizontal: 2),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : AppColors.surfaceElevated,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : AppColors.primary,
-                                  width: isSelected ? 1.8 : 1.2,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: isSelected
-                                        ? AppColors.primary.withOpacity(0.5)
-                                        : Colors.black45,
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 1),
-                                  )
-                                ],
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.auto_awesome,
-                                    size: 13,
-                                    color: isSelected ? Colors.black : AppColors.primary,
-                                  ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '${existingTransition.duration.toStringAsFixed(1)}s',
-                                    style: TextStyle(
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.bold,
-                                      color: isSelected ? Colors.black : Colors.white,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : Container(
-                              width: 18,
-                              height: 26,
-                              margin: const EdgeInsets.symmetric(horizontal: 2),
-                              decoration: BoxDecoration(
-                                color: isSelected
-                                    ? AppColors.primary.withOpacity(0.3)
-                                    : AppColors.surfaceElevated,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: isSelected ? AppColors.primary : AppColors.divider,
-                                  width: isSelected ? 1.5 : 1.0,
-                                ),
-                                boxShadow: const [
-                                  BoxShadow(
-                                    color: Colors.black38,
-                                    blurRadius: 2,
-                                    offset: Offset(0, 1),
-                                  )
-                                ],
-                              ),
-                              child: Center(
-                                child: Container(
-                                  width: 2,
-                                  height: 12,
-                                  decoration: BoxDecoration(
-                                    color: isSelected ? AppColors.primary : AppColors.textMuted,
-                                    borderRadius: BorderRadius.circular(1),
-                                  ),
-                                ),
-                              ),
-                            ),
+                    onTap: () => viewModel.selectClip(idx),
+                    onTapDown: (details) {
+                      if (viewModel.isPlaying) viewModel.pause();
+                      viewModel.selectClip(idx);
+                      final offsetInClip = details.localPosition.dx / viewModel.pixelsPerSecond;
+                      final targetTime = (clipStart + offsetInClip).clamp(0.0, viewModel.totalDurationInSeconds);
+                      viewModel.seekTo(targetTime);
+                      if (_horizontalScrollController.hasClients) {
+                        _horizontalScrollController.jumpTo(
+                          (targetTime * viewModel.pixelsPerSecond)
+                              .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+                        );
+                      }
+                    },
+                    onTrimChanged: (newStart, newEnd) {
+                      viewModel.updateClipTrim(idx, newStart, newEnd);
+                    },
+                  );
+                },
+              ),
+              if (idx < viewModel.videoClips.length - 1)
+                _buildTransitionButton(viewModel, idx),
+            ],
+
+            // + Add Clip Button on Timeline
+            Container(
+              key: const ValueKey('timeline_add_clip_button'),
+              height: AppDimensions.videoTrackHeight,
+              width: 44,
+              margin: const EdgeInsets.only(left: 4),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceElevated,
+                borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                border: Border.all(color: AppColors.divider),
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.add_photo_alternate_rounded, color: AppColors.primary, size: 22),
+                onPressed: () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (ctx) => MediaPickerSheet(viewModel: viewModel),
+                  );
+                },
+                tooltip: 'Add Media from Gallery or Device',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransitionButton(EditorViewModel viewModel, int idx) {
+    final clip = viewModel.videoClips[idx];
+    final nextClip = viewModel.videoClips[idx + 1];
+    Transition? existingTransition;
+    try {
+      existingTransition = viewModel.transitions.firstWhere(
+        (t) => t.leftClipId == clip.id && t.rightClipId == nextClip.id && t.enabled && t.type != TransitionType.none,
+      );
+    } catch (_) {}
+
+    final isSelected = viewModel.selectedTransitionBoundaryIndex == idx;
+
+    return GestureDetector(
+      key: ValueKey('transition_boundary_${clip.id}_${nextClip.id}'),
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        viewModel.selectTransitionBoundary(idx);
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (ctx) => TransitionSelectionSheet(
+            viewModel: viewModel,
+            leftClipId: clip.id,
+            rightClipId: nextClip.id,
+            existingTransition: existingTransition,
+          ),
+        ).whenComplete(() {
+          viewModel.selectTransitionBoundary(null);
+        });
+      },
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        alignment: Alignment.center,
+        child: existingTransition != null
+            ? Container(
+                height: 28,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppColors.primary
+                      : AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: isSelected
+                        ? Colors.white
+                        : AppColors.primary,
+                    width: isSelected ? 1.8 : 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isSelected
+                          ? AppColors.primary.withOpacity(0.5)
+                          : Colors.black45,
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    )
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.auto_awesome,
+                      size: 13,
+                      color: isSelected ? Colors.black : AppColors.primary,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      '${existingTransition.duration.toStringAsFixed(1)}s',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected ? Colors.black : Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : Container(
+                width: 18,
+                height: 26,
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppColors.primary.withOpacity(0.3)
+                      : AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: isSelected ? AppColors.primary : AppColors.divider,
+                    width: isSelected ? 1.5 : 1.0,
+                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Colors.black38,
+                      blurRadius: 2,
+                      offset: Offset(0, 1),
+                    )
+                  ],
+                ),
+                child: Center(
+                  child: Container(
+                    width: 2,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.primary : AppColors.textMuted,
+                      borderRadius: BorderRadius.circular(1),
                     ),
                   ),
-                ],
-              );
-            }
-
-            return clipWidget;
-          }),
-
-          // + Add Clip Button on Timeline
-          Container(
-            height: AppDimensions.videoTrackHeight,
-            width: 44,
-            margin: const EdgeInsets.only(left: 4),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-              border: Border.all(color: AppColors.divider),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.add_photo_alternate_rounded, color: AppColors.primary, size: 22),
-              onPressed: () {
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (ctx) => MediaPickerSheet(viewModel: viewModel),
-                );
-              },
-              tooltip: 'Add Media from Gallery or Device',
-            ),
-          ),
-        ],
+                ),
+              ),
       ),
-    ),
     );
   }
 
