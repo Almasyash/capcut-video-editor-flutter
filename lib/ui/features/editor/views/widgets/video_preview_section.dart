@@ -1941,7 +1941,8 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
 
     if (text.animationType == TextAnimationType.typewriter) {
       final totalLen = text.text.length;
-      final progress = (elapsedSec / text.durationInSeconds).clamp(0.0, 1.0);
+      final safeDur = text.durationInSeconds > 0 ? text.durationInSeconds : 1.0;
+      final progress = (elapsedSec / safeDur).clamp(0.0, 1.0);
       final visibleChars = (progress * totalLen).ceil().clamp(0, totalLen);
       final displayText = text.text.substring(0, visibleChars);
       return _buildStrokedWord(
@@ -2502,57 +2503,62 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
     double slideY = 0.0;
     double opacity = 1.0;
 
-    if (text.animationType == TextAnimationType.fade) {
-      if (elapsedSec < 0.35) {
-        opacity = (elapsedSec / 0.35).clamp(0.0, 1.0);
-      } else if (remainingSec < 0.35) {
-        opacity = (remainingSec / 0.35).clamp(0.0, 1.0);
+    // Dynamically scale entrance/exit windows to fit within layer duration
+    final transWindow = math.min(0.35, durationSec / 2.0);
+    final popWindow = math.min(0.22, durationSec / 2.0);
+    final fadeSlideWindow = math.min(0.28, durationSec / 2.0);
+
+    if (text.animationType == TextAnimationType.fade && transWindow > 0.0) {
+      if (elapsedSec < transWindow) {
+        opacity = (elapsedSec / transWindow).clamp(0.0, 1.0);
+      } else if (remainingSec < transWindow) {
+        opacity = (remainingSec / transWindow).clamp(0.0, 1.0);
       }
-    } else if (text.animationType == TextAnimationType.zoom) {
-      if (elapsedSec < 0.35) {
-        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+    } else if (text.animationType == TextAnimationType.zoom && transWindow > 0.0) {
+      if (elapsedSec < transWindow) {
+        final t = (elapsedSec / transWindow).clamp(0.0, 1.0);
         animScale = 0.2 + 0.8 * t;
         opacity = t;
-      } else if (remainingSec < 0.35) {
-        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+      } else if (remainingSec < transWindow) {
+        final t = (remainingSec / transWindow).clamp(0.0, 1.0);
         animScale = 0.2 + 0.8 * t;
         opacity = t;
       }
-    } else if (text.animationType == TextAnimationType.pop) {
-      final t = (elapsedSec / 0.22).clamp(0.0, 1.0);
+    } else if (text.animationType == TextAnimationType.pop && popWindow > 0.0) {
+      final t = (elapsedSec / popWindow).clamp(0.0, 1.0);
       animScale = t < 1.0 ? (0.75 + 0.35 * math.sin(t * math.pi)) : 1.0;
-      if (remainingSec < 0.22) {
-        final rt = (remainingSec / 0.22).clamp(0.0, 1.0);
+      if (remainingSec < popWindow) {
+        final rt = (remainingSec / popWindow).clamp(0.0, 1.0);
         animScale *= rt;
         opacity = rt;
       }
-    } else if (text.animationType == TextAnimationType.slideUp) {
-      if (elapsedSec < 0.35) {
-        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+    } else if (text.animationType == TextAnimationType.slideUp && transWindow > 0.0) {
+      if (elapsedSec < transWindow) {
+        final t = (elapsedSec / transWindow).clamp(0.0, 1.0);
         slideY = (1.0 - t) * 35.0;
         opacity = t;
-      } else if (remainingSec < 0.35) {
-        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+      } else if (remainingSec < transWindow) {
+        final t = (remainingSec / transWindow).clamp(0.0, 1.0);
         slideY = -(1.0 - t) * 35.0;
         opacity = t;
       }
-    } else if (text.animationType == TextAnimationType.slideDown) {
-      if (elapsedSec < 0.35) {
-        final t = (elapsedSec / 0.35).clamp(0.0, 1.0);
+    } else if (text.animationType == TextAnimationType.slideDown && transWindow > 0.0) {
+      if (elapsedSec < transWindow) {
+        final t = (elapsedSec / transWindow).clamp(0.0, 1.0);
         slideY = -(1.0 - t) * 35.0;
         opacity = t;
-      } else if (remainingSec < 0.35) {
-        final t = (remainingSec / 0.35).clamp(0.0, 1.0);
+      } else if (remainingSec < transWindow) {
+        final t = (remainingSec / transWindow).clamp(0.0, 1.0);
         slideY = (1.0 - t) * 35.0;
         opacity = t;
       }
-    } else if (text.animationType == TextAnimationType.fadeSlide) {
-      if (elapsedSec < 0.28) {
-        final t = (elapsedSec / 0.28).clamp(0.0, 1.0);
+    } else if (text.animationType == TextAnimationType.fadeSlide && fadeSlideWindow > 0.0) {
+      if (elapsedSec < fadeSlideWindow) {
+        final t = (elapsedSec / fadeSlideWindow).clamp(0.0, 1.0);
         slideY = (1.0 - t) * 16.0;
         opacity = t;
-      } else if (remainingSec < 0.28) {
-        final t = (remainingSec / 0.28).clamp(0.0, 1.0);
+      } else if (remainingSec < fadeSlideWindow) {
+        final t = (remainingSec / fadeSlideWindow).clamp(0.0, 1.0);
         slideY = -(1.0 - t) * 16.0;
         opacity = t;
       }

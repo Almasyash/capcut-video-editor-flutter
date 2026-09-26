@@ -40,23 +40,55 @@ class TimelineTextTrackItem extends StatefulWidget {
 
 class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
   double _dragStartGlobalX = 0.0;
+  double _dragStartScrollOffset = 0.0;
   Duration _initialStart = Duration.zero;
   Duration _initialDuration = Duration.zero;
   bool _isDraggingLeft = false;
   bool _isDraggingRight = false;
   bool _isDraggingBody = false;
 
+  void _checkAutoScroll(double globalX) {
+    final sc = widget.scrollController;
+    if (sc == null || !sc.hasClients) return;
+    final screenWidth = MediaQuery.of(context).size.width;
+    const edgeMargin = 44.0;
+    final maxScroll = sc.position.maxScrollExtent;
+    final currentOffset = sc.offset;
+
+    if (globalX > screenWidth - edgeMargin && currentOffset < maxScroll) {
+      final intensity = ((globalX - (screenWidth - edgeMargin)) / edgeMargin).clamp(0.0, 1.0);
+      final scrollStep = 8.0 + 16.0 * intensity;
+      final newOffset = (currentOffset + scrollStep).clamp(0.0, maxScroll);
+      sc.jumpTo(newOffset);
+    } else if (globalX < edgeMargin && currentOffset > 0.0) {
+      final intensity = ((edgeMargin - globalX) / edgeMargin).clamp(0.0, 1.0);
+      final scrollStep = 8.0 + 16.0 * intensity;
+      final newOffset = (currentOffset - scrollStep).clamp(0.0, maxScroll);
+      sc.jumpTo(newOffset);
+    }
+  }
+
   void _onLeftHandleDragStart(DragStartDetails details) {
     _isDraggingLeft = true;
     _dragStartGlobalX = details.globalPosition.dx;
+    _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
+        ? widget.scrollController!.offset
+        : 0.0;
     _initialStart = widget.text.startTime;
     _initialDuration = widget.text.duration;
   }
 
   void _onLeftHandleDragUpdate(DragUpdateDetails details) {
     if (!_isDraggingLeft) return;
+    _checkAutoScroll(details.globalPosition.dx);
+
     final pps = widget.viewModel.pixelsPerSecond;
-    final deltaSec = (details.globalPosition.dx - _dragStartGlobalX) / pps;
+    final currentScrollOffset = (widget.scrollController?.hasClients == true)
+        ? widget.scrollController!.offset
+        : 0.0;
+    final deltaPx = (details.globalPosition.dx - _dragStartGlobalX) +
+        (currentScrollOffset - _dragStartScrollOffset);
+    final deltaSec = deltaPx / pps;
     final initialStartSec = _initialStart.inMilliseconds / 1000.0;
     final initialDurSec = _initialDuration.inMilliseconds / 1000.0;
     final initialEndSec = initialStartSec + initialDurSec;
@@ -99,14 +131,24 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
   void _onRightHandleDragStart(DragStartDetails details) {
     _isDraggingRight = true;
     _dragStartGlobalX = details.globalPosition.dx;
+    _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
+        ? widget.scrollController!.offset
+        : 0.0;
     _initialStart = widget.text.startTime;
     _initialDuration = widget.text.duration;
   }
 
   void _onRightHandleDragUpdate(DragUpdateDetails details) {
     if (!_isDraggingRight) return;
+    _checkAutoScroll(details.globalPosition.dx);
+
     final pps = widget.viewModel.pixelsPerSecond;
-    final deltaSec = (details.globalPosition.dx - _dragStartGlobalX) / pps;
+    final currentScrollOffset = (widget.scrollController?.hasClients == true)
+        ? widget.scrollController!.offset
+        : 0.0;
+    final deltaPx = (details.globalPosition.dx - _dragStartGlobalX) +
+        (currentScrollOffset - _dragStartScrollOffset);
+    final deltaSec = deltaPx / pps;
     final maxProjectDuration = TimelineTextTrackItem.getMaxProjectDuration(widget.viewModel, widget.text);
     final initialStartSec = _initialStart.inMilliseconds / 1000.0;
     final initialDurSec = _initialDuration.inMilliseconds / 1000.0;
@@ -149,14 +191,24 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
   void _onBodyDragStart(DragStartDetails details) {
     _isDraggingBody = true;
     _dragStartGlobalX = details.globalPosition.dx;
+    _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
+        ? widget.scrollController!.offset
+        : 0.0;
     _initialStart = widget.text.startTime;
     _initialDuration = widget.text.duration;
   }
 
   void _onBodyDragUpdate(DragUpdateDetails details) {
     if (!_isDraggingBody) return;
+    _checkAutoScroll(details.globalPosition.dx);
+
     final pps = widget.viewModel.pixelsPerSecond;
-    final deltaSec = (details.globalPosition.dx - _dragStartGlobalX) / pps;
+    final currentScrollOffset = (widget.scrollController?.hasClients == true)
+        ? widget.scrollController!.offset
+        : 0.0;
+    final deltaPx = (details.globalPosition.dx - _dragStartGlobalX) +
+        (currentScrollOffset - _dragStartScrollOffset);
+    final deltaSec = deltaPx / pps;
     final maxProjectDuration = TimelineTextTrackItem.getMaxProjectDuration(widget.viewModel, widget.text);
     final initialStartSec = _initialStart.inMilliseconds / 1000.0;
     final initialDurSec = _initialDuration.inMilliseconds / 1000.0;

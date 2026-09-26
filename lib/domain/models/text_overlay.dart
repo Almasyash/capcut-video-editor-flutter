@@ -149,11 +149,12 @@ class TextOverlay {
   /// Effective trim end defaulting to duration if trimEnd is not specified
   Duration get effectiveTrimEnd => trimEnd ?? duration;
 
-  /// Effective duration taking trimming and playback speed into account
+  /// Effective duration taking trimming into account.
+  /// Decoupled from playback speed/animation duration so timeline authority
+  /// belongs strictly to the user / layer model.
   Duration get effectiveDuration {
     final rawMs = effectiveTrimEnd.inMilliseconds - trimStart.inMilliseconds;
-    final safeSpeed = speed > 0 ? speed : 1.0;
-    return Duration(milliseconds: (rawMs / safeSpeed).round());
+    return Duration(milliseconds: rawMs > 0 ? rawMs : 0);
   }
 
   double get startTimeInSeconds => startTime.inMilliseconds / 1000.0;
@@ -164,18 +165,27 @@ class TextOverlay {
 
   /// Returns the zero-based index of the currently active spoken word at the specified
   /// time offset (in seconds) relative to the start of this caption.
+  /// Dynamically maps word timestamps proportionally over the full active duration.
   int getActiveWordIndex(double elapsedSeconds) {
     if (elapsedSeconds < 0) return 0;
 
-    // 1. Check explicit word timestamps if populated
+    // 1. Check explicit word timestamps if populated (proportionally scaled)
     if (words.isNotEmpty) {
+      final originalTotalSec = words.last.endOffsetSec;
+      final currentDur = durationInSeconds;
+      final scaleFactor = (originalTotalSec > 0 && currentDur > 0)
+          ? (currentDur / originalTotalSec)
+          : 1.0;
+
       for (int i = 0; i < words.length; i++) {
         final w = words[i];
-        if (elapsedSeconds >= w.startOffsetSec && elapsedSeconds < w.endOffsetSec) {
+        final start = w.startOffsetSec * scaleFactor;
+        final end = w.endOffsetSec * scaleFactor;
+        if (elapsedSeconds >= start && elapsedSeconds < end) {
           return i;
         }
       }
-      if (elapsedSeconds >= words.last.endOffsetSec) {
+      if (elapsedSeconds >= originalTotalSec * scaleFactor) {
         return words.length - 1;
       }
       return 0;
@@ -192,9 +202,21 @@ class TextOverlay {
     return calculatedIdx.clamp(0, wordTokens.length - 1);
   }
 
-  /// Returns either explicitly defined words or automatically generates proportional word tokens
+  /// Returns either explicitly defined words (proportionally scaled to current duration)
+  /// or automatically generates proportional word tokens over the full active duration.
   List<CaptionWord> get effectiveWords {
-    if (words.isNotEmpty) return words;
+    if (words.isNotEmpty) {
+      final originalTotalSec = words.last.endOffsetSec;
+      final currentDur = durationInSeconds;
+      if (originalTotalSec > 0 && currentDur > 0 && (currentDur - originalTotalSec).abs() > 0.01) {
+        final scaleFactor = currentDur / originalTotalSec;
+        return words.map((w) => w.copyWith(
+          startOffsetSec: w.startOffsetSec * scaleFactor,
+          durationSec: w.durationSec * scaleFactor,
+        )).toList();
+      }
+      return words;
+    }
 
     final tokens = text.trim().split(RegExp(r'\s+'));
     if (tokens.isEmpty || (tokens.length == 1 && tokens.first.isEmpty)) {
@@ -202,7 +224,7 @@ class TextOverlay {
     }
 
     final totalSec = durationInSeconds;
-    final perWordDuration = totalSec / tokens.length;
+    final perWordDuration = totalSec > 0 ? (totalSec / tokens.length) : 0.4;
     return List.generate(tokens.length, (i) {
       return CaptionWord(
         word: tokens[i],

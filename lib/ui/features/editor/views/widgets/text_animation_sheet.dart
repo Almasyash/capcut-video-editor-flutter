@@ -51,6 +51,7 @@ class _TextAnimationSheetState extends State<TextAnimationSheet> with SingleTick
 
     _currentAnimation = text?.animationType ?? TextAnimationType.fade;
     _highlightColor = text?.highlightColor ?? const Color(0xFFFFEB3B);
+    _animationSpeed = text?.speed ?? 1.0;
   }
 
   @override

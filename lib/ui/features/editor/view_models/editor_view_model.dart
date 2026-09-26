@@ -3016,8 +3016,8 @@ class EditorViewModel extends ChangeNotifier {
     _textOverlays[index] = _textOverlays[index].copyWith(
       startTime: newStart,
       duration: newDuration,
-      trimStart: trimStart,
-      trimEnd: trimEnd,
+      trimStart: trimStart ?? _textOverlays[index].trimStart,
+      trimEnd: trimEnd ?? newDuration,
     );
     scheduleAutoSave();
     if (notify) {
@@ -3049,7 +3049,7 @@ class EditorViewModel extends ChangeNotifier {
       startTime: oldStart,
       duration: oldDuration,
       trimStart: oldTrimStart ?? current.trimStart,
-      trimEnd: oldTrimEnd ?? current.trimEnd,
+      trimEnd: oldTrimEnd ?? oldDuration,
     );
     _undoStack.add(
       _EditorSnapshot(
