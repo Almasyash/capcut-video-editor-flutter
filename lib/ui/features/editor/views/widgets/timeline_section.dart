@@ -12,6 +12,7 @@ import 'package:capcut_video_editor/domain/models/transition.dart';
 import 'package:capcut_video_editor/domain/enums/transition_type.dart';
 import 'timeline_clip_item.dart';
 import 'timeline_ruler.dart';
+import 'timeline_text_track_item.dart';
 import 'transition_selection_sheet.dart';
 
 /// CapCut-style Multi-Layer Interactive Timeline with universal vertical layer scrolling,
@@ -1000,109 +1001,14 @@ class _TimelineSectionState extends State<TimelineSection> {
                 top: 2,
                 bottom: 2,
                 width: width,
-                child: GestureDetector(
-                  onTap: () => viewModel.selectText(text.id),
-                  onTapDown: (details) {
-                    if (viewModel.isPlaying) viewModel.pause();
-                    viewModel.selectText(text.id);
-                    final targetTime = (text.startTimeInSeconds + (details.localPosition.dx / viewModel.pixelsPerSecond))
-                        .clamp(0.0, viewModel.totalDurationInSeconds);
-                    viewModel.seekTo(targetTime);
-                    if (_horizontalScrollController.hasClients) {
-                      _horizontalScrollController.jumpTo(
-                        (targetTime * viewModel.pixelsPerSecond)
-                            .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                      );
-                    }
-                  },
-                  onHorizontalDragUpdate: (details) {
-                    final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
-                    final newStartSec = math.max(0.0, text.startTimeInSeconds + deltaSec);
-                    viewModel.updateTextOverlayTiming(
-                      text.id,
-                      Duration(milliseconds: (newStartSec * 1000).round()),
-                      text.duration,
-                    );
-                  },
-                  child: Container(
-                    clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(
-                      color: AppColors.textTrackBg,
-                      borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                      border: Border.all(
-                        color: isSelected ? AppColors.accentPurple : AppColors.textTrackAccent.withOpacity(0.5),
-                        width: isSelected ? 2.0 : 1.0,
-                      ),
-                    ),
-                    child: Stack(
-                      children: [
-                        Center(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.title_rounded, size: 12, color: AppColors.textTrackAccent),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  text.text,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: text.color,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isSelected) ...[
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            child: _buildHandle(
-                              isLeft: true,
-                              color: AppColors.accentPurple,
-                              onDrag: (dx) {
-                                final deltaSec = dx / viewModel.pixelsPerSecond;
-                                final curStart = text.startTimeInSeconds;
-                                final curDur = text.durationInSeconds;
-                                final newStart = math.max(0.0, curStart + deltaSec);
-                                final newDur = curDur - (newStart - curStart);
-                                if (newDur >= 0.3) {
-                                  viewModel.updateTextOverlayTiming(
-                                    text.id,
-                                    Duration(milliseconds: (newStart * 1000).round()),
-                                    Duration(milliseconds: (newDur * 1000).round()),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                          Positioned(
-                            right: 0,
-                            top: 0,
-                            bottom: 0,
-                            child: _buildHandle(
-                              isLeft: false,
-                              color: AppColors.accentPurple,
-                              onDrag: (dx) {
-                                final deltaSec = dx / viewModel.pixelsPerSecond;
-                                final newDur = math.max(0.3, text.durationInSeconds + deltaSec);
-                                viewModel.updateTextOverlayTiming(
-                                  text.id,
-                                  text.startTime,
-                                  Duration(milliseconds: (newDur * 1000).round()),
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                child: TimelineTextTrackItem(
+                  key: ValueKey(text.id),
+                  text: text,
+                  isSelected: isSelected,
+                  width: width,
+                  startOffset: startOffset,
+                  viewModel: viewModel,
+                  scrollController: _horizontalScrollController,
                 ),
               ),
             ],

@@ -2602,22 +2602,12 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
                         width: _liveBoxWidth,
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
-                          color: text.backgroundColor ??
-                              (text.strokeWidth > 0 ? Colors.transparent : Colors.black.withOpacity(0.65)),
+                          color: text.backgroundColor ?? Colors.transparent,
                           borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
                           border: Border.all(
                             color: isSelected ? AppColors.primary : Colors.transparent,
                             width: isSelected ? 2.0 : 0.0,
                           ),
-                          boxShadow: isSelected
-                              ? [
-                                  BoxShadow(
-                                    color: AppColors.primary.withOpacity(0.4),
-                                    blurRadius: 8,
-                                    spreadRadius: 1,
-                                  )
-                                ]
-                              : null,
                         ),
                         child: RepaintBoundary(
                           child: widget.captionChild,
