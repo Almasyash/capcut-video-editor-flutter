@@ -410,6 +410,7 @@ class DeviceMediaService {
         'isItalic': text.isItalic,
         'isUnderline': text.isUnderline,
         'textAlign': text.textAlign.name,
+        'boxWidth': text.getEffectiveBoxWidth(targetWidth.toDouble()) * text.scale,
       });
     }
 

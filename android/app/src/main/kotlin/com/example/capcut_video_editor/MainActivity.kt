@@ -1276,7 +1276,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 isItalic = map["isItalic"] as? Boolean ?: false,
                 isUnderline = map["isUnderline"] as? Boolean ?: false,
                 textAlign = map["textAlign"] as? String ?: "center",
-                fontFamily = map["fontFamily"] as? String
+                fontFamily = map["fontFamily"] as? String,
+                boxWidth = (map["boxWidth"] as? Number)?.toDouble()
             )
         }
 

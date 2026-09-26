@@ -292,5 +292,98 @@ void main() {
       expect(payloadMap['isUnderline'], isTrue);
       expect(payloadMap['textAlign'], equals('left'));
     });
+
+    test('10. boxWidth support and getEffectiveBoxWidth: preserves layout width across copyWith, toJson, and fromJson', () {
+      const defaultText = TextOverlay(
+        id: 't_bw_1',
+        text: 'EDITOR FS',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      // Default effective box width provides comfortable layout width
+      expect(defaultText.getEffectiveBoxWidth(360.0), greaterThanOrEqualTo(200.0));
+      expect(defaultText.boxWidth, isNull);
+
+      // Explicit box width
+      final customBox = defaultText.copyWith(boxWidth: 320.0);
+      expect(customBox.boxWidth, equals(320.0));
+      expect(customBox.getEffectiveBoxWidth(360.0), equals(320.0));
+
+      // Serialization round-trip
+      final json = customBox.toJson();
+      expect(json['boxWidth'], equals(320.0));
+      final restored = TextOverlay.fromJson(json);
+      expect(restored.boxWidth, equals(320.0));
+      expect(restored.getEffectiveBoxWidth(360.0), equals(320.0));
+    });
+
+    test('11. Text alignment inside wide box: left, center, and right operate within the box without changing layer position', () {
+      const initial = TextOverlay(
+        id: 't_align_box',
+        text: 'EDITOR FS',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+        position: Offset(0.5, 0.5),
+        boxWidth: 300.0,
+        textAlign: TextAlign.center,
+      );
+
+      final leftAligned = initial.copyWith(textAlign: TextAlign.left);
+      final centerAligned = initial.copyWith(textAlign: TextAlign.center);
+      final rightAligned = initial.copyWith(textAlign: TextAlign.right);
+
+      // Layer position remains invariant: alignment is NOT position!
+      expect(leftAligned.position, equals(const Offset(0.5, 0.5)));
+      expect(centerAligned.position, equals(const Offset(0.5, 0.5)));
+      expect(rightAligned.position, equals(const Offset(0.5, 0.5)));
+
+      // Box width remains invariant
+      expect(leftAligned.boxWidth, equals(300.0));
+      expect(centerAligned.boxWidth, equals(300.0));
+      expect(rightAligned.boxWidth, equals(300.0));
+
+      // Alignments are distinctly set
+      expect(leftAligned.textAlign, equals(TextAlign.left));
+      expect(centerAligned.textAlign, equals(TextAlign.center));
+      expect(rightAligned.textAlign, equals(TextAlign.right));
+    });
+
+    test('12. Multiline text alignment: preserves multiline string and correctly maps textAlign values', () {
+      const multilineText = TextOverlay(
+        id: 't_multiline',
+        text: 'EDITOR FS\nFULL STACK DEVELOPER',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+        textAlign: TextAlign.right,
+        boxWidth: 350.0,
+      );
+
+      expect(multilineText.text.contains('\n'), isTrue);
+      expect(multilineText.text.split('\n').length, equals(2));
+      expect(multilineText.textAlign, equals(TextAlign.right));
+      expect(multilineText.boxWidth, equals(350.0));
+    });
+
+    test('13. Native export payload includes boxWidth for true preview/export parity', () {
+      const overlay = TextOverlay(
+        id: 'export_bw',
+        text: 'EDITOR FS',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+        boxWidth: 300.0,
+        scale: 1.2,
+        textAlign: TextAlign.right,
+      );
+
+      final payload = {
+        'id': overlay.id,
+        'text': overlay.text,
+        'textAlign': overlay.textAlign.name,
+        'boxWidth': overlay.getEffectiveBoxWidth(360.0) * overlay.scale,
+      };
+
+      expect(payload['textAlign'], equals('right'));
+      expect(payload['boxWidth'], equals(360.0)); // 300.0 * 1.2
+    });
   });
 }

@@ -101,7 +101,8 @@ data class ExportTextOverlay(
     val isItalic: Boolean,
     val isUnderline: Boolean = false,
     val textAlign: String = "center",
-    val fontFamily: String? = null
+    val fontFamily: String? = null,
+    val boxWidth: Double? = null
 )
 
 /**
@@ -1234,8 +1235,14 @@ class VideoExportEngine(private val context: Context) {
 
                     val padX = (16f * scaleFactor).toInt()
                     val padY = (10f * scaleFactor).toInt()
-                    val bmpW = (maxLineWidth + padX * 2).toInt().coerceAtLeast(4)
+                    val targetBoxW = if (overlay.boxWidth != null && overlay.boxWidth > 0) {
+                        (overlay.boxWidth.toFloat() * scaleFactor).coerceAtLeast(maxLineWidth + padX * 2)
+                    } else {
+                        maxLineWidth + padX * 2
+                    }
+                    val bmpW = targetBoxW.toInt().coerceAtLeast(4)
                     val bmpH = (totalTextHeight + padY * 2).toInt().coerceAtLeast(4)
+                    val availableW = bmpW - padX * 2
 
                     val bmp = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
                     val canvas = Canvas(bmp)
@@ -1253,8 +1260,8 @@ class VideoExportEngine(private val context: Context) {
                         val lw = paint.measureText(line)
                         val drawX = when (align) {
                             "left" -> padX.toFloat()
-                            "right" -> padX.toFloat() + (maxLineWidth - lw)
-                            else -> padX.toFloat() + (maxLineWidth - lw) / 2f
+                            "right" -> padX.toFloat() + (availableW - lw)
+                            else -> padX.toFloat() + (availableW - lw) / 2f
                         }
                         val drawY = padY.toFloat() - fontMetrics.ascent + (i * lineHeight)
                         canvas.drawText(line, drawX, drawY, paint)

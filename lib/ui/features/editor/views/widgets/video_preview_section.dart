@@ -1883,52 +1883,58 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       final words = text.effectiveWords;
       if (words.isNotEmpty) {
         final activeIdx = text.getActiveWordIndex(elapsedSec);
+        final wrapAlignment = text.textAlign == TextAlign.left
+            ? WrapAlignment.start
+            : (text.textAlign == TextAlign.right ? WrapAlignment.end : WrapAlignment.center);
 
-        return Wrap(
-          alignment: WrapAlignment.center,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 6.0,
-          runSpacing: 4.0,
-          children: List.generate(words.length, (i) {
-            final w = words[i];
-            final isActive = i == activeIdx;
-            final isSpoken = i < activeIdx;
-            final activeColor = text.highlightColor ?? const Color(0xFFFFEB3B);
-            final wordColor = isActive
-                ? activeColor
-                : (isSpoken ? text.color : text.color.withOpacity(0.88));
+        return SizedBox(
+          width: double.infinity,
+          child: Wrap(
+            alignment: wrapAlignment,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 6.0,
+            runSpacing: 4.0,
+            children: List.generate(words.length, (i) {
+              final w = words[i];
+              final isActive = i == activeIdx;
+              final isSpoken = i < activeIdx;
+              final activeColor = text.highlightColor ?? const Color(0xFFFFEB3B);
+              final wordColor = isActive
+                  ? activeColor
+                  : (isSpoken ? text.color : text.color.withOpacity(0.88));
 
-            final wordText = _buildStrokedWord(
-              word: w.word,
-              textColor: wordColor,
-              strokeWidth: text.strokeWidth,
-              strokeColor: text.strokeColor ?? Colors.black,
-              fontSize: text.fontSize,
-              fontFamily: text.fontFamily,
-              isBold: text.isBold,
-              isItalic: text.isItalic,
-              isUnderline: text.isUnderline,
-              textAlign: text.textAlign,
-              isActive: isActive,
-              activeGlowColor: activeColor,
-            );
-
-            if (isActive) {
-              return Transform.scale(
-                scale: 1.12,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: Colors.black38,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: wordText,
-                ),
+              final wordText = _buildStrokedWord(
+                word: w.word,
+                textColor: wordColor,
+                strokeWidth: text.strokeWidth,
+                strokeColor: text.strokeColor ?? Colors.black,
+                fontSize: text.fontSize,
+                fontFamily: text.fontFamily,
+                isBold: text.isBold,
+                isItalic: text.isItalic,
+                isUnderline: text.isUnderline,
+                textAlign: text.textAlign,
+                isActive: isActive,
+                activeGlowColor: activeColor,
               );
-            }
 
-            return wordText;
-          }),
+              if (isActive) {
+                return Transform.scale(
+                  scale: 1.12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.black38,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: wordText,
+                  ),
+                );
+              }
+
+              return wordText;
+            }),
+          ),
         );
       }
     }
@@ -1997,64 +2003,79 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
         : (textAlign == TextAlign.right ? Alignment.centerRight : Alignment.center);
 
     if (strokeWidth > 0.0) {
-      return Stack(
-        alignment: alignment,
-        children: [
-          // Background stroke outline
-          Text(
-            word,
-            textAlign: textAlign,
-            style: style.copyWith(
-              foreground: Paint()
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = strokeWidth * 2
-                ..color = strokeColor,
-              decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
-              decorationColor: strokeColor,
+      return SizedBox(
+        width: double.infinity,
+        child: Stack(
+          alignment: alignment,
+          children: [
+            // Background stroke outline
+            SizedBox(
+              width: double.infinity,
+              child: Text(
+                word,
+                textAlign: textAlign,
+                softWrap: true,
+                style: style.copyWith(
+                  foreground: Paint()
+                    ..style = PaintingStyle.stroke
+                    ..strokeWidth = strokeWidth * 2
+                    ..color = strokeColor,
+                  decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
+                  decorationColor: strokeColor,
+                ),
+              ),
             ),
-          ),
-          // Foreground fill text
-          Text(
-            word,
-            textAlign: textAlign,
-            style: style.copyWith(
-              color: textColor,
-              decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
-              decorationColor: textColor,
-              shadows: isActive && activeGlowColor != null
-                  ? [
-                      Shadow(
-                        color: activeGlowColor.withOpacity(0.85),
-                        blurRadius: 10,
-                      ),
-                    ]
-                  : null,
+            // Foreground fill text
+            SizedBox(
+              width: double.infinity,
+              child: Text(
+                word,
+                textAlign: textAlign,
+                softWrap: true,
+                style: style.copyWith(
+                  color: textColor,
+                  decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
+                  decorationColor: textColor,
+                  shadows: isActive && activeGlowColor != null
+                      ? [
+                          Shadow(
+                            color: activeGlowColor.withOpacity(0.85),
+                            blurRadius: 10,
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       );
     }
 
-    return Text(
-      word,
-      textAlign: textAlign,
-      style: style.copyWith(
-        color: textColor,
-        decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
-        decorationColor: textColor,
-        shadows: [
-          if (isActive && activeGlowColor != null)
-            Shadow(
-              color: activeGlowColor.withOpacity(0.85),
-              blurRadius: 10,
-            )
-          else
-            const Shadow(
-              blurRadius: 4,
-              color: Colors.black87,
-              offset: Offset(1, 1),
-            ),
-        ],
+    return SizedBox(
+      width: double.infinity,
+      child: Text(
+        word,
+        textAlign: textAlign,
+        softWrap: true,
+        style: style.copyWith(
+          color: textColor,
+          decoration: isUnderline ? TextDecoration.underline : TextDecoration.none,
+          decorationColor: textColor,
+          shadows: [
+            if (isActive && activeGlowColor != null)
+              Shadow(
+                color: activeGlowColor.withOpacity(0.85),
+                blurRadius: 10,
+              )
+            else
+              const Shadow(
+                blurRadius: 4,
+                color: Colors.black87,
+                offset: Offset(1, 1),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2198,6 +2219,7 @@ class InteractiveTextOverlayWidget extends StatefulWidget {
 class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWidget> {
   late Offset _livePosition;
   late double _liveScale;
+  late double _liveBoxWidth;
   bool _isGestureActive = false;
 
   final Map<int, Offset> _activePointers = {}; // pointerId -> global screen position
@@ -2222,11 +2244,16 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
   double _startCornerDragScale = 1.0;
   Offset _startCornerTextPos = Offset.zero;
 
+  // Horizontal box width drag baseline
+  double _startWidthDragPos = 0.0;
+  double _startWidthDragWidth = 260.0;
+
   @override
   void initState() {
     super.initState();
     _livePosition = widget.text.position;
     _liveScale = widget.text.scale;
+    _liveBoxWidth = widget.text.getEffectiveBoxWidth(widget.canvasWidth);
   }
 
   @override
@@ -2236,6 +2263,10 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
       if (widget.text.position != _livePosition || widget.text.scale != _liveScale) {
         _livePosition = widget.text.position;
         _liveScale = widget.text.scale;
+      }
+      final targetBoxW = widget.text.getEffectiveBoxWidth(widget.canvasWidth);
+      if (targetBoxW != _liveBoxWidth) {
+        _liveBoxWidth = targetBoxW;
       }
     }
   }
@@ -2417,6 +2448,48 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
     );
   }
 
+  void _handleRightWidthPanStart(DragStartDetails details) {
+    _mode = InteractionMode.textResize;
+    _isGestureActive = true;
+    _startWidthDragPos = details.globalPosition.dx;
+    _startWidthDragWidth = _liveBoxWidth;
+  }
+
+  void _handleRightWidthPanUpdate(DragUpdateDetails details) {
+    final scale = _liveScale > 0 ? _liveScale : 1.0;
+    final deltaX = (details.globalPosition.dx - _startWidthDragPos) / scale;
+    final newWidth = (_startWidthDragWidth + deltaX * 2).clamp(80.0, 1000.0);
+    setState(() {
+      _liveBoxWidth = newWidth;
+    });
+  }
+
+  void _handleLeftWidthPanStart(DragStartDetails details) {
+    _mode = InteractionMode.textResize;
+    _isGestureActive = true;
+    _startWidthDragPos = details.globalPosition.dx;
+    _startWidthDragWidth = _liveBoxWidth;
+  }
+
+  void _handleLeftWidthPanUpdate(DragUpdateDetails details) {
+    final scale = _liveScale > 0 ? _liveScale : 1.0;
+    final deltaX = (_startWidthDragPos - details.globalPosition.dx) / scale;
+    final newWidth = (_startWidthDragWidth + deltaX * 2).clamp(80.0, 1000.0);
+    setState(() {
+      _liveBoxWidth = newWidth;
+    });
+  }
+
+  void _handleWidthPanEnd(DragEndDetails details) {
+    _mode = InteractionMode.none;
+    _isGestureActive = false;
+    widget.viewModel.updateTextOverlay(
+      widget.text.copyWith(boxWidth: _liveBoxWidth),
+      saveSnapshot: true,
+      notify: true,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final text = widget.text;
@@ -2526,6 +2599,7 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
                       onDoubleTap: () =>
                           TextDrawer.showAddOrEditModal(context, widget.viewModel, existing: text),
                       child: Container(
+                        width: _liveBoxWidth,
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
                           color: text.backgroundColor ??
@@ -2645,6 +2719,76 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
                             ],
                           ),
                           child: const Icon(Icons.open_in_full_rounded, size: 14, color: Colors.black),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Middle-Right: Width resize handle (drags text box width horizontally)
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    right: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanStart: _handleRightWidthPanStart,
+                        onPanUpdate: _handleRightWidthPanUpdate,
+                        onPanEnd: _handleWidthPanEnd,
+                        child: Container(
+                          width: 36,
+                          height: 40,
+                          alignment: Alignment.center,
+                          color: Colors.transparent,
+                          child: Container(
+                            width: 6,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(3),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.4),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Middle-Left: Width resize handle (drags text box width horizontally)
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    left: 0,
+                    child: Center(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanStart: _handleLeftWidthPanStart,
+                        onPanUpdate: _handleLeftWidthPanUpdate,
+                        onPanEnd: _handleWidthPanEnd,
+                        child: Container(
+                          width: 36,
+                          height: 40,
+                          alignment: Alignment.center,
+                          color: Colors.transparent,
+                          child: Container(
+                            width: 6,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(3),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.4),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),

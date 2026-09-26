@@ -92,6 +92,7 @@ class TextOverlay {
   final double strokeWidth;
   final Color? strokeColor;
   final double scale;
+  final double? boxWidth;
   final List<CaptionWord> words;
 
   const TextOverlay({
@@ -118,6 +119,7 @@ class TextOverlay {
     this.strokeWidth = 0.0,
     this.strokeColor,
     this.scale = 1.0,
+    this.boxWidth,
     this.words = const [],
   }) : textColor = color ?? textColor;
 
@@ -210,6 +212,18 @@ class TextOverlay {
     });
   }
 
+  /// Returns the effective box width for text layout and bounds rendering.
+  /// If boxWidth was explicitly set, it is returned clamped to minimum 60.0.
+  /// Otherwise, falls back to a comfortable proportion of the canvas (70%-80%),
+  /// ensuring text alignment (left/center/right) has a meaningful horizontal layout box.
+  double getEffectiveBoxWidth([double canvasWidth = 360.0]) {
+    if (boxWidth != null && boxWidth! > 0) {
+      return boxWidth!.clamp(60.0, 1200.0);
+    }
+    final defaultBoxW = (canvasWidth * 0.75).clamp(200.0, 320.0);
+    return defaultBoxW;
+  }
+
   TextOverlay copyWith({
     String? id,
     String? text,
@@ -234,6 +248,7 @@ class TextOverlay {
     double? strokeWidth,
     Color? strokeColor,
     double? scale,
+    double? boxWidth,
     List<CaptionWord>? words,
   }) {
     return TextOverlay(
@@ -259,6 +274,7 @@ class TextOverlay {
       strokeWidth: strokeWidth ?? this.strokeWidth,
       strokeColor: strokeColor ?? this.strokeColor,
       scale: scale ?? this.scale,
+      boxWidth: boxWidth ?? this.boxWidth,
       words: words ?? this.words,
     );
   }
@@ -288,6 +304,7 @@ class TextOverlay {
       'strokeWidth': strokeWidth,
       'strokeColorValue': strokeColor?.value,
       'scale': scale,
+      'boxWidth': boxWidth,
       'words': words.map((w) => w.toJson()).toList(),
     };
   }
@@ -331,6 +348,7 @@ class TextOverlay {
       strokeWidth: (json['strokeWidth'] as num?)?.toDouble() ?? 0.0,
       strokeColor: strokeVal != null ? Color(strokeVal) : null,
       scale: (json['scale'] as num?)?.toDouble() ?? 1.0,
+      boxWidth: (json['boxWidth'] as num?)?.toDouble(),
       words: (json['words'] as List?)
               ?.map((w) => CaptionWord.fromJson(w as Map<String, dynamic>))
               .toList() ??

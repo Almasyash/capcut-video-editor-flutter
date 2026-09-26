@@ -298,9 +298,11 @@ class TextEditModalSheet extends StatefulWidget {
 class _TextEditModalSheetState extends State<TextEditModalSheet> {
   late TextEditingController _controller;
   late TextEditingController _sizeController;
+  late TextEditingController _widthController;
   late TextOverlay _activeOverlay;
   late Color _selectedColor;
   late double _fontSize;
+  late double _boxWidth;
   late TextAlign _textAlign;
   late bool _isBold;
   late bool _isItalic;
@@ -319,6 +321,8 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
     _selectedColor = existing?.color ?? Colors.white;
     _fontSize = (existing?.fontSize ?? 24.0).clamp(8.0, 100.0);
     _sizeController = TextEditingController(text: _fontSize.round().toString());
+    _boxWidth = existing?.boxWidth ?? 260.0;
+    _widthController = TextEditingController(text: _boxWidth.round().toString());
     _textAlign = existing?.textAlign ?? TextAlign.center;
     _isBold = existing?.isBold ?? false;
     _isItalic = existing?.isItalic ?? false;
@@ -331,7 +335,7 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
       final newId = 'text_${DateTime.now().millisecondsSinceEpoch}';
       _activeOverlay = TextOverlay(
         id: newId,
-        text: _controller.text.trim().isEmpty ? 'Your Title' : _controller.text.trim(),
+        text: _controller.text.trim().isEmpty ? 'Your Title' : _controller.text,
         startTime: Duration(milliseconds: (playhead * 1000).round()),
         duration: const Duration(seconds: 4),
         textColor: _selectedColor,
@@ -342,6 +346,7 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
         isUnderline: _isUnderline,
         backgroundColor: _backgroundColor,
         fontFamily: _selectedFontFamily,
+        boxWidth: _boxWidth,
       );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -357,8 +362,10 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
 
   void _applyLiveUpdate() {
     if (!mounted) return;
+    final rawText = _controller.text;
+    final cleanText = rawText.trim().isEmpty ? (_isNew ? 'Your Title' : '') : rawText;
     _activeOverlay = _activeOverlay.copyWith(
-      text: _controller.text.trim().isEmpty ? (_isNew ? 'Your Title' : '') : _controller.text.trim(),
+      text: cleanText,
       textColor: _selectedColor,
       fontSize: _fontSize,
       textAlign: _textAlign,
@@ -367,6 +374,7 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
       isUnderline: _isUnderline,
       backgroundColor: _backgroundColor,
       fontFamily: _selectedFontFamily,
+      boxWidth: _boxWidth,
     );
     widget.viewModel.updateTextOverlay(_activeOverlay, saveSnapshot: false, notify: true);
   }
@@ -376,6 +384,7 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
     _controller.removeListener(_applyLiveUpdate);
     _controller.dispose();
     _sizeController.dispose();
+    _widthController.dispose();
     if (!_isSaved) {
       if (_isNew) {
         final idToRemove = _activeOverlay.id;
@@ -487,6 +496,9 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
               controller: _controller,
               autofocus: false,
               textAlign: _textAlign,
+              maxLines: null,
+              minLines: 1,
+              keyboardType: TextInputType.multiline,
               style: FontHelper.getTextStyle(
                 fontSize: _fontSize.clamp(12.0, 32.0),
                 fontFamily: _selectedFontFamily,
@@ -678,6 +690,66 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+
+            // Box Width Controls: Numeric Input + Slider (80px - 500px)
+            Row(
+              children: [
+                const Text('Width:', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 58,
+                  height: 32,
+                  child: TextField(
+                    controller: _widthController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 13, color: Colors.white, fontWeight: FontWeight.bold),
+                    decoration: InputDecoration(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                      filled: true,
+                      fillColor: AppColors.surfaceLight,
+                      suffixText: 'px',
+                      suffixStyle: const TextStyle(fontSize: 10, color: AppColors.textMuted),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(6),
+                        borderSide: const BorderSide(color: AppColors.divider, width: 0.8),
+                      ),
+                    ),
+                    onChanged: (val) {
+                      final parsed = double.tryParse(val);
+                      if (parsed != null && parsed >= 60 && parsed <= 600) {
+                        setState(() {
+                          _boxWidth = parsed;
+                          _applyLiveUpdate();
+                        });
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Slider(
+                    value: _boxWidth.clamp(80.0, 500.0),
+                    min: 80.0,
+                    max: 500.0,
+                    activeColor: AppColors.primary,
+                    inactiveColor: AppColors.surfaceLight,
+                    onChanged: (val) {
+                      setState(() {
+                        _boxWidth = val;
+                        _widthController.text = val.round().toString();
+                        _applyLiveUpdate();
+                      });
+                    },
+                  ),
+                ),
+                const Text(
+                  '500px',
+                  style: TextStyle(fontSize: 10, color: AppColors.textMuted),
+                ),
+              ],
+            ),
             const SizedBox(height: 16),
 
             // Submit Button
@@ -691,7 +763,8 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () {
-                  final textToSave = _controller.text.trim().isEmpty ? (_isNew ? 'Your Title' : '') : _controller.text.trim();
+                  final raw = _controller.text;
+                  final textToSave = raw.trim().isEmpty ? (_isNew ? 'Your Title' : '') : raw;
                   if (textToSave.isNotEmpty) {
                     _isSaved = true;
                     _activeOverlay = _activeOverlay.copyWith(
@@ -704,6 +777,7 @@ class _TextEditModalSheetState extends State<TextEditModalSheet> {
                       isUnderline: _isUnderline,
                       backgroundColor: _backgroundColor,
                       fontFamily: _selectedFontFamily,
+                      boxWidth: _boxWidth,
                     );
                     widget.viewModel.updateTextOverlay(_activeOverlay, saveSnapshot: true, notify: true);
                     Navigator.of(context).pop();

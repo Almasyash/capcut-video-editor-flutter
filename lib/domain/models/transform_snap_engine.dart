@@ -303,7 +303,7 @@ class TransformAlignmentBounds {
     required TextOverlay text,
     required Size canvasSize,
   }) {
-    final approxW = math.max(80.0, text.text.length * (text.fontSize * 0.55) + 28.0);
+    final approxW = text.boxWidth ?? math.max(80.0, text.text.length * (text.fontSize * 0.55) + 28.0);
     final approxH = text.fontSize + 16.0;
 
     final childLeft = (canvasSize.width - approxW) * text.position.dx.clamp(0.05, 0.95);
