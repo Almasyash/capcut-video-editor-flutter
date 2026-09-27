@@ -9,9 +9,11 @@ class OverlayClip {
   final Duration startTime;
   final Duration duration;
   final Offset position; // Relative (0.0 to 1.0) on canvas
-  final double scale; // 0.2 to 2.5
+  final double scale; // 0.05 to 5.0
   final double opacity; // 0.0 to 1.0
   final double rotation; // In radians
+  final bool flipHorizontal;
+  final bool flipVertical;
   final List<Color> previewGradient;
   final IconData previewIcon;
   final List<VideoKeyframe> keyframes;
@@ -21,6 +23,7 @@ class OverlayClip {
   // Real Media Asset linkage
   final String? assetId;
   final String? localPath;
+  final String? thumbnailPath;
   final bool isPhoto;
 
   // Chroma Key (Green / Blue Screen Removal)
@@ -35,10 +38,12 @@ class OverlayClip {
     required this.title,
     required this.startTime,
     required this.duration,
-    this.position = const Offset(0.7, 0.25),
+    this.position = const Offset(0.5, 0.5),
     this.scale = 0.45,
     this.opacity = 1.0,
     this.rotation = 0.0,
+    this.flipHorizontal = false,
+    this.flipVertical = false,
     this.previewGradient = const [Color(0xFF8A2387), Color(0xFFE94057)],
     this.previewIcon = Icons.layers_rounded,
     this.keyframes = const [],
@@ -46,6 +51,7 @@ class OverlayClip {
     this.blendMode = BlendMode.srcOver,
     this.assetId,
     this.localPath,
+    this.thumbnailPath,
     this.isPhoto = false,
     this.enableChromaKey = false,
     this.chromaKeyColor = const Color(0xFF00FF00),
@@ -56,8 +62,36 @@ class OverlayClip {
 
   double get startTimeInSeconds => startTime.inMilliseconds / 1000.0;
   double get durationInSeconds => duration.inMilliseconds / 1000.0;
+  double get endTimeInSeconds => (startTime.inMilliseconds + duration.inMilliseconds) / 1000.0;
+  Duration get endTime => startTime + duration;
   int get startTimeMs => startTime.inMilliseconds;
   int get durationMs => duration.inMilliseconds;
+  int get endTimeMs => startTime.inMilliseconds + duration.inMilliseconds;
+
+  static Offset sanitizePosition(Offset pos, {Offset fallback = const Offset(0.5, 0.5)}) {
+    if (pos.dx.isNaN || pos.dx.isInfinite || pos.dy.isNaN || pos.dy.isInfinite) {
+      return fallback;
+    }
+    return Offset(
+      pos.dx.clamp(-0.5, 1.5),
+      pos.dy.clamp(-0.5, 1.5),
+    );
+  }
+
+  static double sanitizeScale(double s, {double fallback = 0.45}) {
+    if (s.isNaN || s.isInfinite || s <= 0.0) return fallback;
+    return s.clamp(0.05, 5.0);
+  }
+
+  static double sanitizeOpacity(double o, {double fallback = 1.0}) {
+    if (o.isNaN || o.isInfinite) return fallback;
+    return o.clamp(0.0, 1.0);
+  }
+
+  static double sanitizeRotation(double r, {double fallback = 0.0}) {
+    if (r.isNaN || r.isInfinite) return fallback;
+    return r;
+  }
 
   OverlayClip copyWith({
     String? id,
@@ -68,6 +102,8 @@ class OverlayClip {
     double? scale,
     double? opacity,
     double? rotation,
+    bool? flipHorizontal,
+    bool? flipVertical,
     List<Color>? previewGradient,
     IconData? previewIcon,
     List<VideoKeyframe>? keyframes,
@@ -76,6 +112,7 @@ class OverlayClip {
     BlendMode? blendMode,
     String? assetId,
     String? localPath,
+    String? thumbnailPath,
     bool? isPhoto,
     bool? enableChromaKey,
     Color? chromaKeyColor,
@@ -92,6 +129,8 @@ class OverlayClip {
       scale: scale ?? this.scale,
       opacity: opacity ?? this.opacity,
       rotation: rotation ?? this.rotation,
+      flipHorizontal: flipHorizontal ?? this.flipHorizontal,
+      flipVertical: flipVertical ?? this.flipVertical,
       previewGradient: previewGradient ?? this.previewGradient,
       previewIcon: previewIcon ?? this.previewIcon,
       keyframes: keyframes ?? this.keyframes,
@@ -99,6 +138,7 @@ class OverlayClip {
       blendMode: blendMode ?? this.blendMode,
       assetId: assetId ?? this.assetId,
       localPath: localPath ?? this.localPath,
+      thumbnailPath: thumbnailPath ?? this.thumbnailPath,
       isPhoto: isPhoto ?? this.isPhoto,
       enableChromaKey: enableChromaKey ?? this.enableChromaKey,
       chromaKeyColor: chromaKeyColor ?? this.chromaKeyColor,
@@ -119,11 +159,14 @@ class OverlayClip {
       'scale': scale,
       'opacity': opacity,
       'rotation': rotation,
+      'flipHorizontal': flipHorizontal,
+      'flipVertical': flipVertical,
       if (keyframes.isNotEmpty) 'keyframes': keyframes.map((k) => k.toJson()).toList(),
       if (mask != null) 'mask': mask!.toJson(),
       'blendMode': blendMode.index,
       if (assetId != null) 'assetId': assetId,
       if (localPath != null) 'localPath': localPath,
+      if (thumbnailPath != null) 'thumbnailPath': thumbnailPath,
       'isPhoto': isPhoto,
       'enableChromaKey': enableChromaKey,
       'chromaKeyColor': chromaKeyColor.value,
@@ -140,12 +183,14 @@ class OverlayClip {
       startTime: Duration(milliseconds: (json['startTimeMs'] as num?)?.toInt() ?? 0),
       duration: Duration(milliseconds: (json['durationMs'] as num?)?.toInt() ?? 3000),
       position: Offset(
-        (json['posX'] as num?)?.toDouble() ?? 0.7,
-        (json['posY'] as num?)?.toDouble() ?? 0.25,
+        (json['posX'] as num?)?.toDouble() ?? 0.5,
+        (json['posY'] as num?)?.toDouble() ?? 0.5,
       ),
       scale: (json['scale'] as num?)?.toDouble() ?? 0.45,
       opacity: (json['opacity'] as num?)?.toDouble() ?? 1.0,
       rotation: (json['rotation'] as num?)?.toDouble() ?? 0.0,
+      flipHorizontal: json['flipHorizontal'] as bool? ?? false,
+      flipVertical: json['flipVertical'] as bool? ?? false,
       keyframes: (json['keyframes'] as List<dynamic>?)
               ?.map((k) => VideoKeyframe.fromJson(k as Map<String, dynamic>))
               .toList() ??
@@ -156,6 +201,7 @@ class OverlayClip {
           : BlendMode.srcOver,
       assetId: json['assetId'] as String?,
       localPath: json['localPath'] as String?,
+      thumbnailPath: json['thumbnailPath'] as String?,
       isPhoto: json['isPhoto'] as bool? ?? false,
       enableChromaKey: json['enableChromaKey'] as bool? ?? false,
       chromaKeyColor: json['chromaKeyColor'] != null

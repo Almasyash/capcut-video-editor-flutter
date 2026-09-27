@@ -491,11 +491,11 @@ void main() {
       const currentGlobalX = 360.0;
       const currentScrollOffset = 800.0;
 
-      final deltaPx = (currentGlobalX - dragStartX) + (currentScrollOffset - dragStartScrollOffset);
-      final deltaSec = deltaPx / pps; // (110 + 800) / 50 = 910 / 50 = 18.2s
+      const deltaPx = (currentGlobalX - dragStartX) + (currentScrollOffset - dragStartScrollOffset);
+      const deltaSec = deltaPx / pps; // (110 + 800) / 50 = 910 / 50 = 18.2s
       expect(deltaSec, closeTo(18.2, 0.001));
 
-      final proposedEndSec = initialStartSec + initialDurSec + deltaSec; // 5 + 4 + 18.2 = 27.2s
+      const proposedEndSec = initialStartSec + initialDurSec + deltaSec; // 5 + 4 + 18.2 = 27.2s
       expect(proposedEndSec, closeTo(27.2, 0.001));
 
       const maxProjectDuration = 30.0;

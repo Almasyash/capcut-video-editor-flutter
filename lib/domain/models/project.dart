@@ -70,7 +70,7 @@ class Project {
   /// Convenient getter for primary/single audio track
   AudioTrack? get audioTrack => audioTracks.isNotEmpty ? audioTracks.first : null;
 
-  /// Computed total duration in seconds across video clips, audio tracks, and text overlays
+  /// Computed total duration in seconds across video clips, audio tracks, text overlays, and PIP overlays
   double get durationInSeconds {
     double videoTotal = 0.0;
     for (final clip in videoClips) {
@@ -86,7 +86,12 @@ class Project {
       final tEnd = text.startTimeInSeconds + text.durationInSeconds;
       if (tEnd > textEnd) textEnd = tEnd;
     }
-    return math.max(videoTotal, math.max(audioEnd, textEnd));
+    double overlayEnd = 0.0;
+    for (final overlay in overlayClips) {
+      final oEnd = overlay.startTimeInSeconds + overlay.durationInSeconds;
+      if (oEnd > overlayEnd) overlayEnd = oEnd;
+    }
+    return math.max(videoTotal, math.max(audioEnd, math.max(textEnd, overlayEnd)));
   }
 
   Project copyWith({

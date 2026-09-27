@@ -7,6 +7,7 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/aud
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/edit_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/effects_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/filters_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/overlay_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/stickers_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/transitions_drawer.dart';
@@ -53,6 +54,8 @@ class _DesktopToolsPanelState extends State<DesktopToolsPanel> {
         return AdjustDrawer(viewModel: widget.viewModel);
       case EditorCategory.transitions:
         return TransitionsDrawer(viewModel: widget.viewModel, isDesktop: true);
+      case EditorCategory.overlay:
+        return OverlayDrawer(viewModel: widget.viewModel, isDesktop: true);
     }
   }
 
@@ -68,6 +71,7 @@ class _DesktopToolsPanelState extends State<DesktopToolsPanel> {
       (EditorCategory.audio, 'Audio', Icons.audiotrack_rounded),
       (EditorCategory.text, 'Text', Icons.text_fields_rounded),
       (EditorCategory.stickers, 'Stickers', Icons.emoji_emotions_rounded),
+      (EditorCategory.overlay, 'Overlay', Icons.picture_in_picture_alt_rounded),
       (EditorCategory.effects, 'Effects', Icons.auto_awesome_rounded),
       (EditorCategory.filters, 'Filters', Icons.filter_vintage_rounded),
       (EditorCategory.adjust, 'Adjust', Icons.contrast_rounded),

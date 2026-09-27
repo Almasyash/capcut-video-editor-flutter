@@ -370,6 +370,8 @@ class EditorViewModel extends ChangeNotifier {
 
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
+  @visibleForTesting
+  int get undoStackCount => _undoStack.length;
 
   bool get isExporting => _isExporting;
   double get exportProgress => _exportProgress;
@@ -635,6 +637,33 @@ class EditorViewModel extends ChangeNotifier {
       _EditorSnapshot(
         clips: List.from(_videoClips),
         overlayClips: List.from(_overlayClips),
+        stickerOverlays: List.from(_stickerOverlays),
+        textOverlays: List.from(_textOverlays),
+        audioTracks: List.from(_audioTracks),
+        transitions: List.from(_currentProject.transitions),
+        selectedIndex: _selectedClipIndex,
+        selectedOverlayIndex: _selectedOverlayIndex,
+        selectedAudioTrackId: _selectedAudioTrackId,
+        selectedTextId: _selectedTextId,
+        selectedStickerId: _selectedStickerId,
+        playheadPosition: _playheadPosition,
+        activeFilter: _activeFilter,
+        colorAdjustments: _colorAdjustments,
+        activeEffect: _activeEffect,
+      ),
+    );
+    _redoStack.clear();
+    if (_undoStack.length > 30) {
+      _undoStack.removeAt(0);
+    }
+    scheduleAutoSave();
+  }
+
+  void _saveSnapshotWithOverlays(List<OverlayClip> previousOverlays) {
+    _undoStack.add(
+      _EditorSnapshot(
+        clips: List.from(_videoClips),
+        overlayClips: previousOverlays,
         stickerOverlays: List.from(_stickerOverlays),
         textOverlays: List.from(_textOverlays),
         audioTracks: List.from(_audioTracks),
@@ -957,7 +986,12 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
-  void selectOverlay(int index) {
+  void selectOverlay(int? index) {
+    if (index == null) {
+      _selectedOverlayIndex = null;
+      notifyListeners();
+      return;
+    }
     if (index >= 0 && index < _overlayClips.length) {
       _selectedOverlayIndex = index;
       _selectedClipIndex = null;
@@ -966,6 +1000,18 @@ class EditorViewModel extends ChangeNotifier {
       _selectedTextId = null;
       _selectedStickerId = null;
       notifyListeners();
+    }
+  }
+
+  void selectOverlayById(String? id) {
+    if (id == null) {
+      _selectedOverlayIndex = null;
+      notifyListeners();
+      return;
+    }
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index != -1) {
+      selectOverlay(index);
     }
   }
 
@@ -1055,18 +1101,47 @@ class EditorViewModel extends ChangeNotifier {
 
   // --- Universal Timeline Trimming & Dragging ---
 
-  /// Trims or moves PIP overlay layer timing
-  void updateOverlayClipTiming(String id, Duration newStart, Duration newDuration) {
+  /// Trims or moves PIP overlay layer timing with live preview updates.
+  void updateOverlayClipTiming(
+    String id,
+    Duration newStart,
+    Duration newDuration, {
+    bool saveSnapshot = false,
+    bool notify = true,
+  }) {
     final index = _overlayClips.indexWhere((o) => o.id == id);
     if (index == -1) return;
-    if (newDuration.inMilliseconds < 400) return; // Minimum 0.4s
-    _saveSnapshot();
+    if (newDuration.inMilliseconds < 300) return; // Minimum 0.3s
+    if (saveSnapshot) _saveSnapshot();
 
     _overlayClips[index] = _overlayClips[index].copyWith(
       startTime: newStart,
       duration: newDuration,
     );
-    notifyListeners();
+    if (notify) notifyListeners();
+  }
+
+  /// Commits a completed timeline trim or drag timing gesture into the undo history.
+  /// Exactly ONE undo snapshot is created for the complete timing interaction.
+  void commitOverlayTiming(
+    String id, {
+    required Duration oldStart,
+    required Duration oldDuration,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    final current = _overlayClips[index];
+    if (current.startTime == oldStart && current.duration == oldDuration) {
+      return;
+    }
+
+    final previousOverlays = List<OverlayClip>.from(_overlayClips);
+    previousOverlays[index] = current.copyWith(
+      startTime: oldStart,
+      duration: oldDuration,
+    );
+
+    _saveSnapshotWithOverlays(previousOverlays);
   }
 
   /// Trims or moves sticker overlay timing
@@ -1605,13 +1680,116 @@ class EditorViewModel extends ChangeNotifier {
 
   void updateOverlayPosition(int index, Offset newPos) {
     if (index < 0 || index >= _overlayClips.length) return;
-    _overlayClips[index] = _overlayClips[index].copyWith(position: newPos);
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      position: OverlayClip.sanitizePosition(newPos),
+    );
     notifyListeners();
   }
 
   void updateOverlayScale(int index, double scale) {
     if (index < 0 || index >= _overlayClips.length) return;
-    _overlayClips[index] = _overlayClips[index].copyWith(scale: scale);
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      scale: OverlayClip.sanitizeScale(scale),
+    );
+    notifyListeners();
+  }
+
+  /// Updates PIP overlay position, scale, and/or rotation live during gestures.
+  void updateOverlayTransform(
+    String id, {
+    Offset? position,
+    double? scale,
+    double? rotation,
+    bool notify = true,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    final current = _overlayClips[index];
+    _overlayClips[index] = current.copyWith(
+      position: position != null ? OverlayClip.sanitizePosition(position) : null,
+      scale: scale != null ? OverlayClip.sanitizeScale(scale) : null,
+      rotation: rotation != null ? OverlayClip.sanitizeRotation(rotation) : null,
+    );
+    if (notify) notifyListeners();
+  }
+
+  /// Commits a completed transform gesture (drag, pinch, rotate) into undo history as a single snapshot.
+  void commitOverlayTransform(
+    String id, {
+    required Offset oldPosition,
+    required double oldScale,
+    required double oldRotation,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    final current = _overlayClips[index];
+    if (current.position == oldPosition &&
+        (current.scale - oldScale).abs() < 0.0001 &&
+        (current.rotation - oldRotation).abs() < 0.0001) {
+      return;
+    }
+
+    final previousOverlays = List<OverlayClip>.from(_overlayClips);
+    previousOverlays[index] = current.copyWith(
+      position: oldPosition,
+      scale: oldScale,
+      rotation: oldRotation,
+    );
+
+    _saveSnapshotWithOverlays(previousOverlays);
+  }
+
+  /// Updates overlay opacity live without polluting undo stack during slider drag.
+  void updateOverlayOpacity(
+    String id,
+    double opacity, {
+    bool saveSnapshot = false,
+    bool notify = true,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    if (saveSnapshot) _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      opacity: OverlayClip.sanitizeOpacity(opacity),
+    );
+    if (notify) notifyListeners();
+  }
+
+  /// Commits a completed opacity slider drag into undo history.
+  void commitOverlayOpacity(
+    String id, {
+    required double oldOpacity,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    final current = _overlayClips[index];
+    if ((current.opacity - oldOpacity).abs() < 0.001) return;
+
+    final previousOverlays = List<OverlayClip>.from(_overlayClips);
+    previousOverlays[index] = current.copyWith(opacity: oldOpacity);
+
+    _saveSnapshotWithOverlays(previousOverlays);
+  }
+
+  void toggleOverlayFlipHorizontal(String id) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      flipHorizontal: !_overlayClips[index].flipHorizontal,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleOverlayFlipVertical(String id) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      flipVertical: !_overlayClips[index].flipVertical,
+    );
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -1637,7 +1815,7 @@ class EditorViewModel extends ChangeNotifier {
     }
     _saveSnapshot();
     _overlayClips[_selectedOverlayIndex!] = _overlayClips[_selectedOverlayIndex!].copyWith(
-      opacity: opacity.clamp(0.0, 1.0),
+      opacity: OverlayClip.sanitizeOpacity(opacity),
     );
     scheduleAutoSave();
     notifyListeners();
@@ -1692,13 +1870,14 @@ class EditorViewModel extends ChangeNotifier {
       title: asset.name.isNotEmpty ? asset.name : 'PIP Layer',
       assetId: asset.id,
       localPath: asset.localPath ?? asset.thumbnailPath,
+      thumbnailPath: asset.thumbnailPath,
       isPhoto: asset.type == MediaAssetType.photo,
       startTime: Duration(milliseconds: playheadMs),
       duration: dur,
       previewGradient: const [Color(0xFF00C6FF), Color(0xFF0072FF)],
       previewIcon: asset.type == MediaAssetType.photo ? Icons.image_rounded : Icons.movie_filter_rounded,
-      position: const Offset(0.7, 0.25),
-      scale: 0.45,
+      position: const Offset(0.5, 0.5),
+      scale: 0.5,
       opacity: 1.0,
       blendMode: BlendMode.srcOver,
     );
@@ -1706,6 +1885,10 @@ class EditorViewModel extends ChangeNotifier {
     _overlayClips.add(overlay);
     _selectedOverlayIndex = _overlayClips.length - 1;
     _selectedClipIndex = null;
+    _selectedTextId = null;
+    _selectedStickerId = null;
+    _selectedAudioTrackId = null;
+    _isAudioSelected = false;
     scheduleAutoSave();
     notifyListeners();
   }

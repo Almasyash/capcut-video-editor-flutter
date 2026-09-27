@@ -26,6 +26,7 @@ enum EditorCategory {
   edit('Edit', Icons.content_cut_rounded),
   audio('Audio', Icons.music_note_rounded),
   text('Text', Icons.title_rounded),
+  overlay('Overlay', Icons.picture_in_picture_alt_rounded),
   stickers('Stickers', Icons.emoji_emotions_outlined),
   effects('Effects', Icons.auto_fix_high_rounded),
   filters('Filters', Icons.photo_filter_rounded),

@@ -16,6 +16,7 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/aud
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/edit_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/effects_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/filters_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/overlay_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/stickers_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/transitions_drawer.dart';
@@ -237,6 +238,8 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
         return AdjustDrawer(viewModel: _viewModel);
       case EditorCategory.transitions:
         return TransitionsDrawer(viewModel: _viewModel);
+      case EditorCategory.overlay:
+        return OverlayDrawer(viewModel: _viewModel);
     }
   }
 
