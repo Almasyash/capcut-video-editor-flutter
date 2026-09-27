@@ -105,6 +105,23 @@ data class ExportTextOverlay(
     val boxWidth: Double? = null
 )
 
+data class ExportPipOverlay(
+    val id: String,
+    val path: String?,
+    val thumbnailPath: String?,
+    val isPhoto: Boolean,
+    val title: String,
+    val startTimeMs: Long,
+    val durationMs: Long,
+    val x: Double,
+    val y: Double,
+    val scale: Double,
+    val rotation: Double,
+    val opacity: Double,
+    val flipHorizontal: Boolean = false,
+    val flipVertical: Boolean = false
+)
+
 /**
  * High-performance hardware video export engine using Android MediaExtractor,
  * MediaCodec hardware decoders, SurfaceTexture (GL_TEXTURE_EXTERNAL_OES),
@@ -394,6 +411,7 @@ class VideoExportEngine(private val context: Context) {
         private var tex2DTexCoordLoc = 0
         private var tex2DMVPLoc = 0
         private var tex2DSTLoc = 0
+        private var tex2DAlphaLoc = 0
 
         private var solidProgram = 0
         private var solidPosLoc = 0
@@ -558,8 +576,10 @@ class VideoExportEngine(private val context: Context) {
                 precision mediump float;
                 varying vec2 vTextureCoord;
                 uniform sampler2D sTexture;
+                uniform float uAlpha;
                 void main() {
-                    gl_FragColor = texture2D(sTexture, vTextureCoord);
+                    vec4 col = texture2D(sTexture, vTextureCoord);
+                    gl_FragColor = vec4(col.rgb, col.a * uAlpha);
                 }
             """.trimIndent()
 
@@ -568,6 +588,7 @@ class VideoExportEngine(private val context: Context) {
             tex2DTexCoordLoc = GLES20.glGetAttribLocation(tex2DProgram, "aTextureCoord")
             tex2DMVPLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMVPMatrix")
             tex2DSTLoc = GLES20.glGetUniformLocation(tex2DProgram, "uSTMatrix")
+            tex2DAlphaLoc = GLES20.glGetUniformLocation(tex2DProgram, "uAlpha")
 
             // 3. Solid Color Program
             val solidVS = """
@@ -817,7 +838,8 @@ class VideoExportEngine(private val context: Context) {
         fun render2DTexture(
             textureId: Int,
             mvpMatrix: FloatArray,
-            quadBuffer: FloatBuffer
+            quadBuffer: FloatBuffer,
+            alpha: Float = 1.0f
         ) {
             GLES20.glUseProgram(tex2DProgram)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -825,6 +847,9 @@ class VideoExportEngine(private val context: Context) {
 
             GLES20.glUniformMatrix4fv(tex2DMVPLoc, 1, false, mvpMatrix, 0)
             GLES20.glUniformMatrix4fv(tex2DSTLoc, 1, false, tex2DSTMatrix, 0)
+            if (tex2DAlphaLoc >= 0) {
+                GLES20.glUniform1f(tex2DAlphaLoc, alpha)
+            }
 
             quadBuffer.position(0)
             GLES20.glVertexAttribPointer(tex2DPosLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, quadBuffer)
@@ -856,6 +881,57 @@ class VideoExportEngine(private val context: Context) {
             GLES20.glEnable(GLES20.GL_BLEND)
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             render2DTexture(textureId, projMatrix, reusableOverlayQuadBuffer)
+            GLES20.glDisable(GLES20.GL_BLEND)
+        }
+
+        fun renderPipOverlay(
+            textureId: Int,
+            dstCenterX: Float,
+            dstCenterY: Float,
+            baseW: Float,
+            baseH: Float,
+            scale: Float,
+            rotationRad: Float,
+            opacity: Float,
+            flipH: Boolean,
+            flipV: Boolean
+        ) {
+            val halfW = (baseW * scale) / 2.0f
+            val halfH = (baseH * scale) / 2.0f
+
+            val uLeft = if (flipH) 1.0f else 0.0f
+            val uRight = if (flipH) 0.0f else 1.0f
+            val vTop = if (flipV) 0.0f else 1.0f
+            val vBottom = if (flipV) 1.0f else 0.0f
+
+            val cosR = Math.cos(rotationRad.toDouble()).toFloat()
+            val sinR = Math.sin(rotationRad.toDouble()).toFloat()
+
+            fun rotX(x: Float, y: Float) = x * cosR - y * sinR + dstCenterX
+            fun rotY(x: Float, y: Float) = x * sinR + y * cosR + dstCenterY
+
+            val x0 = rotX(-halfW, -halfH)
+            val y0 = rotY(-halfW, -halfH)
+
+            val x1 = rotX(-halfW, halfH)
+            val y1 = rotY(-halfW, halfH)
+
+            val x2 = rotX(halfW, -halfH)
+            val y2 = rotY(halfW, -halfH)
+
+            val x3 = rotX(halfW, halfH)
+            val y3 = rotY(halfW, halfH)
+
+            reusableOverlayQuadBuffer.clear()
+            reusableOverlayQuadBuffer.put(x0).put(y0).put(uLeft).put(vTop)
+            reusableOverlayQuadBuffer.put(x1).put(y1).put(uLeft).put(vBottom)
+            reusableOverlayQuadBuffer.put(x2).put(y2).put(uRight).put(vTop)
+            reusableOverlayQuadBuffer.put(x3).put(y3).put(uRight).put(vBottom)
+            reusableOverlayQuadBuffer.position(0)
+
+            GLES20.glEnable(GLES20.GL_BLEND)
+            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            render2DTexture(textureId, projMatrix, reusableOverlayQuadBuffer, alpha = opacity)
             GLES20.glDisable(GLES20.GL_BLEND)
         }
 
@@ -1041,6 +1117,7 @@ class VideoExportEngine(private val context: Context) {
         transitions: List<ExportTransition>,
         audioTracks: List<ExportAudioTrack>,
         textOverlays: List<ExportTextOverlay> = emptyList(),
+        pipOverlays: List<ExportPipOverlay> = emptyList(),
         targetWidth: Int,
         targetHeight: Int,
         targetFps: Int,
@@ -1280,6 +1357,35 @@ class VideoExportEngine(private val context: Context) {
                     textTextures[overlay.id] = Pair(bmp, texId)
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed creating text overlay texture for '${overlay.text}': ${e.message}")
+                }
+            }
+        }
+
+        // PIP overlay textures cache
+        val pipTextures = mutableMapOf<String, Int>()
+        for (pip in pipOverlays) {
+            val imgPath = if (pip.isPhoto) pip.path else (pip.thumbnailPath ?: pip.path)
+            if (imgPath != null && !pipTextures.containsKey(imgPath)) {
+                val f = File(imgPath)
+                if (f.exists()) {
+                    try {
+                        val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
+                        val bm = BitmapFactory.decodeFile(f.absolutePath, opts)
+                        if (bm != null) {
+                            val tex = IntArray(1)
+                            GLES20.glGenTextures(1, tex, 0)
+                            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+                            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+                            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bm, 0)
+                            pipTextures[imgPath] = tex[0]
+                            bm.recycle()
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed creating PIP texture for '${pip.title}': ${e.message}")
+                    }
                 }
             }
         }
@@ -1536,6 +1642,35 @@ class VideoExportEngine(private val context: Context) {
                     renderClip(clip, localMs)
                 }
 
+                // Composite Active PIP Overlays
+                if (pipTextures.isNotEmpty()) {
+                    for (pip in pipOverlays) {
+                        val pipEnd = pip.startTimeMs + pip.durationMs
+                        if (currentTimeMs in pip.startTimeMs..pipEnd) {
+                            val imgPath = if (pip.isPhoto) pip.path else (pip.thumbnailPath ?: pip.path)
+                            val texId = if (imgPath != null) pipTextures[imgPath] else null
+                            if (texId != null && texId > 0) {
+                                val centerX = (pip.x * width).toFloat()
+                                val centerY = (pip.y * height).toFloat()
+                                val pipW = width * 0.45f
+                                val pipH = pipW * (9.0f / 16.0f)
+                                inputSurface.renderPipOverlay(
+                                    textureId = texId,
+                                    dstCenterX = centerX,
+                                    dstCenterY = centerY,
+                                    baseW = pipW,
+                                    baseH = pipH,
+                                    scale = pip.scale.toFloat(),
+                                    rotationRad = pip.rotation.toFloat(),
+                                    opacity = pip.opacity.toFloat().coerceIn(0f, 1f),
+                                    flipH = pip.flipHorizontal,
+                                    flipV = pip.flipVertical
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Composite Active Text Overlays
                 if (textTextures.isNotEmpty()) {
                     for (txt in textOverlays) {
@@ -1752,6 +1887,13 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
                     pair.first.recycle()
                 }
                 textTextures.clear()
+            } catch (e: Exception) {}
+            try {
+                pipTextures.values.forEach { tex ->
+                    val textures = intArrayOf(tex)
+                    GLES20.glDeleteTextures(1, textures, 0)
+                }
+                pipTextures.clear()
             } catch (e: Exception) {}
             videoDecoders.values.forEach { it.release() }
             videoDecoders.clear()

@@ -43,6 +43,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
   EditorViewModel get viewModel => widget.viewModel;
 
   final GlobalKey _canvasKey = GlobalKey();
+  final GlobalKey _fullscreenCanvasKey = GlobalKey();
   VideoPlayerSession? _session;
   String? _loadedPath;
   String? _lastActiveClipId;
@@ -386,9 +387,10 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
 
     final width = customWidth ?? 360.0;
     final height = customHeight ?? (width / targetRatio);
+    final effectiveCanvasKey = (customWidth != null || customHeight != null) ? _fullscreenCanvasKey : _canvasKey;
 
     return SizedBox(
-      key: _canvasKey,
+      key: effectiveCanvasKey,
       width: width,
       height: height,
       child: Container(
@@ -425,18 +427,17 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
             if (viewModel.activeEffect.type != VideoEffectType.none)
               _buildEffectOverlay(viewModel.activeEffect),
 
-            // 3. Secondary Picture-in-Picture (PIP) Overlay Layers
-            ...activeOverlays.map((overlay) => _buildOverlayLayer(overlay)),
-
-            // 4. Active Stickers Overlays
+            // 3. Active Stickers Overlays
             ...activeStickers.map((sticker) => _buildStickerOverlay(sticker)),
 
-            // 5. Tap to Play / Pause / Deselect Gesture Overlay
+            // 4. Tap to Play / Pause / Deselect Gesture Overlay
             GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: () {
                 if (viewModel.selectedTextId != null) {
                   viewModel.selectText(null);
+                } else if (viewModel.selectedOverlayIndex != null) {
+                  viewModel.selectOverlay(null);
                 } else if (viewModel.isCropModeActive) {
                   viewModel.setCropMode(false);
                 } else if (viewModel.selectedClipId == null) {
@@ -472,8 +473,11 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
               ),
             ),
 
+            // 5. Secondary Picture-in-Picture (PIP) Overlay Layers (Positioned on top for direct fluent touch manipulation)
+            ...activeOverlays.map((overlay) => _buildOverlayLayer(overlay, canvasWidth: width, canvasHeight: height, canvasKey: effectiveCanvasKey)),
+
             // 6. Active Text / Subtitle Overlays (Positioned on top for direct fluent touch manipulation)
-            ...activeTexts.map((text) => _buildTextOverlay(text, canvasWidth: width, canvasHeight: height)),
+            ...activeTexts.map((text) => _buildTextOverlay(text, canvasWidth: width, canvasHeight: height, canvasKey: effectiveCanvasKey)),
 
             // 7. Interactive Crop Area Resize Handles (Priority when crop mode active)
             if (viewModel.isCropModeActive ||
@@ -482,7 +486,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
                 viewModel: viewModel,
                 canvasWidth: width,
                 canvasHeight: height,
-                canvasKey: _canvasKey,
+                canvasKey: effectiveCanvasKey,
               ),
 
             // 7. Top-Left: Badges (Aspect Ratio & Active Filter)
@@ -1623,148 +1627,20 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     );
   }
 
-  Widget _buildOverlayLayer(dynamic overlay) {
-    double effScale = (overlay.scale as num).toDouble();
-    Offset effPos = overlay.position is Offset ? overlay.position as Offset : const Offset(0.7, 0.25);
-    double effOpacity = overlay.opacity != null ? (overlay.opacity as num).toDouble() : 1.0;
-    double effRotation = overlay.rotation != null ? (overlay.rotation as num).toDouble() : 0.0;
-
-    if (overlay is OverlayClip && overlay.keyframes.isNotEmpty) {
-      final overlayTime = (viewModel.currentTimeInSeconds - overlay.startTimeInSeconds).clamp(0.0, overlay.durationInSeconds);
-      final kf = viewModel.getInterpolatedOverlayKeyframe(overlay, overlayTime);
-      if (kf != null) {
-        effScale = kf.scale;
-        effOpacity = kf.opacity;
-        effRotation = kf.rotationDegrees * math.pi / 180.0;
-        effPos = Offset(
-          (overlay.position.dx + kf.positionX / 300.0).clamp(0.0, 1.0),
-          (overlay.position.dy + kf.positionY / 300.0).clamp(0.0, 1.0),
-        );
-      }
-    }
-
-    Widget visualBody;
-    if (overlay is OverlayClip && overlay.localPath != null && File(overlay.localPath!).existsSync()) {
-      visualBody = Image.file(
-        File(overlay.localPath!),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _buildPlaceholderOverlayGradient(overlay),
-      );
-    } else {
-      visualBody = _buildPlaceholderOverlayGradient(overlay);
-    }
-
-    Widget overlayCard = Container(
-      width: 140,
-      height: 100,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-        border: Border.all(color: AppColors.secondary, width: 1.5),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 8, offset: const Offset(0, 2)),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppDimensions.radiusSm - 1.5),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            visualBody,
-            Positioned(
-              top: 4,
-              left: 4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.65),
-                  borderRadius: BorderRadius.circular(3),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('PIP', style: TextStyle(fontSize: 8, color: AppColors.secondary, fontWeight: FontWeight.bold)),
-                    if (overlay is OverlayClip && overlay.enableChromaKey) ...[
-                      const SizedBox(width: 3),
-                      const Icon(Icons.auto_fix_high_rounded, size: 8, color: Color(0xFF00FF00)),
-                    ],
-                    if (overlay is OverlayClip && overlay.blendMode != BlendMode.srcOver) ...[
-                      const SizedBox(width: 3),
-                      const Icon(Icons.layers_rounded, size: 8, color: Colors.cyanAccent),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    // Apply Chroma Key (Green / Blue Screen Removal)
-    if (overlay is OverlayClip && overlay.enableChromaKey) {
-      overlayCard = ColorFiltered(
-        colorFilter: ChromaKeyHelper.createColorFilter(
-          keyColor: overlay.chromaKeyColor,
-          similarity: overlay.chromaSimilarity,
-          smoothness: overlay.chromaSmoothness,
-          spill: overlay.chromaSpill,
-        ),
-        child: overlayCard,
-      );
-    }
-
-    // Apply Spatial Positioning, Scaling & Opacity
-    Widget overlayContent = Align(
-      alignment: FractionalOffset(effPos.dx, effPos.dy),
-      child: Transform.rotate(
-        angle: effRotation,
-        child: Transform.scale(
-          scale: effScale,
-          child: Opacity(
-            opacity: effOpacity.clamp(0.0, 1.0),
-            child: overlayCard,
-          ),
-        ),
-      ),
-    );
-
+  Widget _buildOverlayLayer(dynamic overlay, {required double canvasWidth, required double canvasHeight, GlobalKey? canvasKey}) {
     if (overlay is OverlayClip) {
-      if (overlay.mask != null) {
-        overlayContent = ClipPath(
-          clipper: MaskPathClipper(overlay.mask!),
-          child: overlayContent,
-        );
-      }
-      if (overlay.blendMode != BlendMode.srcOver) {
-        overlayContent = CanvasBlendLayer(
-          blendMode: overlay.blendMode,
-          child: overlayContent,
-        );
-      }
+      final isSelected = viewModel.selectedOverlay?.id == overlay.id;
+      return InteractivePipOverlayWidget(
+        key: ValueKey(overlay.id),
+        overlay: overlay,
+        isSelected: isSelected,
+        viewModel: viewModel,
+        canvasWidth: canvasWidth,
+        canvasHeight: canvasHeight,
+        canvasKey: canvasKey ?? _canvasKey,
+      );
     }
-
-    return overlayContent;
-  }
-
-  Widget _buildPlaceholderOverlayGradient(dynamic overlay) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: overlay.previewGradient is List<Color>
-              ? overlay.previewGradient as List<Color>
-              : const [Color(0xFF8A2387), Color(0xFFE94057)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Center(
-        child: Icon(
-          overlay.previewIcon is IconData ? overlay.previewIcon as IconData : Icons.layers_rounded,
-          color: Colors.white70,
-          size: 28,
-        ),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   Widget _buildStickerOverlay(dynamic sticker) {
@@ -1862,6 +1738,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     TextOverlay text, {
     double canvasWidth = 360.0,
     double canvasHeight = 640.0,
+    GlobalKey? canvasKey,
   }) {
     final isSelected = viewModel.selectedTextId == text.id;
     final elapsedSec = viewModel.currentTimeInSeconds - text.startTimeInSeconds;
@@ -1873,7 +1750,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       viewModel: viewModel,
       canvasWidth: canvasWidth,
       canvasHeight: canvasHeight,
-      canvasKey: _canvasKey,
+      canvasKey: canvasKey ?? _canvasKey,
       captionChild: _buildCaptionContent(text, elapsedSec),
     );
   }
@@ -2824,6 +2701,541 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
     ),
   );
 }
+}
+
+enum PipInteractionMode { none, move, pinch, resizeRotate }
+
+/// CapCut-style Interactive PIP Overlay Widget with Fluent Touch Direct Manipulation:
+/// 1-finger direct drag with center-snap, 2-finger body pinch-zoom, corner scale/rotate,
+/// single-snapshot undo history, and transparent PNG preservation.
+class InteractivePipOverlayWidget extends StatefulWidget {
+  final OverlayClip overlay;
+  final bool isSelected;
+  final EditorViewModel viewModel;
+  final double canvasWidth;
+  final double canvasHeight;
+  final GlobalKey canvasKey;
+
+  const InteractivePipOverlayWidget({
+    super.key,
+    required this.overlay,
+    required this.isSelected,
+    required this.viewModel,
+    required this.canvasWidth,
+    required this.canvasHeight,
+    required this.canvasKey,
+  });
+
+  @override
+  State<InteractivePipOverlayWidget> createState() => _InteractivePipOverlayWidgetState();
+}
+
+class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidget> {
+  late Offset _livePosition;
+  late double _liveScale;
+  late double _liveRotation;
+  bool _isGestureActive = false;
+
+  final Map<int, Offset> _activePointers = {};
+  PipInteractionMode _mode = PipInteractionMode.none;
+
+  // 1-Finger translation baseline
+  Offset _dragStartPointerNorm = Offset.zero;
+  Offset _dragStartOverlayPos = Offset.zero;
+
+  // Gesture snapshot baseline for single undo commit
+  Offset _gestureStartPos = Offset.zero;
+  double _gestureStartScale = 1.0;
+  double _gestureStartRotation = 0.0;
+
+  // 2-Finger pinch zoom & rotate baseline
+  double _initialPinchDistance = 1.0;
+  double _initialPinchScale = 1.0;
+  double _initialPinchAngle = 0.0;
+  double _initialPinchRotation = 0.0;
+  Offset _initialFocalPoint = Offset.zero;
+  Offset _initialPinchOverlayPos = Offset.zero;
+
+  // Corner resize/rotate baseline
+  Offset _startCornerDragPos = Offset.zero;
+  double _startCornerDragScale = 1.0;
+  Offset _startCornerOverlayPos = Offset.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _livePosition = widget.overlay.position;
+    _liveScale = widget.overlay.scale;
+    _liveRotation = widget.overlay.rotation;
+  }
+
+  @override
+  void didUpdateWidget(covariant InteractivePipOverlayWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_isGestureActive) {
+      if (widget.overlay.position != _livePosition ||
+          widget.overlay.scale != _liveScale ||
+          widget.overlay.rotation != _liveRotation) {
+        _livePosition = widget.overlay.position;
+        _liveScale = widget.overlay.scale;
+        _liveRotation = widget.overlay.rotation;
+      }
+    }
+  }
+
+  Offset _getCanvasLocal(Offset globalPos) {
+    final renderBox = widget.canvasKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox != null && renderBox.hasSize) {
+      return renderBox.globalToLocal(globalPos);
+    }
+    return globalPos;
+  }
+
+  Offset _getNormalizedCanvasPos(Offset globalPos) {
+    final local = _getCanvasLocal(globalPos);
+    final w = widget.canvasWidth > 0 ? widget.canvasWidth : 360.0;
+    final h = widget.canvasHeight > 0 ? widget.canvasHeight : 640.0;
+    return Offset(local.dx / w, local.dy / h);
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (!widget.isSelected) {
+      widget.viewModel.selectOverlayById(widget.overlay.id);
+    }
+
+    _activePointers[event.pointer] = event.position;
+
+    if (!_isGestureActive) {
+      _isGestureActive = true;
+      _gestureStartPos = _livePosition;
+      _gestureStartScale = _liveScale;
+      _gestureStartRotation = _liveRotation;
+    }
+
+    final canvasNorm = _getNormalizedCanvasPos(event.position);
+
+    if (_activePointers.length == 1) {
+      _mode = PipInteractionMode.move;
+      _dragStartPointerNorm = canvasNorm;
+      _dragStartOverlayPos = _livePosition;
+    } else if (_activePointers.length >= 2) {
+      _mode = PipInteractionMode.pinch;
+      final entries = _activePointers.values.toList();
+      final p1 = _getCanvasLocal(entries[0]);
+      final p2 = _getCanvasLocal(entries[1]);
+      final dist = (p1 - p2).distance;
+
+      _initialPinchDistance = dist > 5.0 ? dist : 5.0;
+      _initialPinchScale = _liveScale;
+      _initialPinchAngle = math.atan2(p2.dy - p1.dy, p2.dx - p1.dx);
+      _initialPinchRotation = _liveRotation;
+      _initialFocalPoint = (p1 + p2) / 2.0;
+      _initialPinchOverlayPos = _livePosition;
+    }
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (!_activePointers.containsKey(event.pointer)) return;
+    _activePointers[event.pointer] = event.position;
+
+    final w = widget.canvasWidth > 0 ? widget.canvasWidth : 360.0;
+    final h = widget.canvasHeight > 0 ? widget.canvasHeight : 640.0;
+
+    if (_mode == PipInteractionMode.move && _activePointers.length == 1) {
+      final currentNorm = _getNormalizedCanvasPos(event.position);
+      final delta = currentNorm - _dragStartPointerNorm;
+      var targetX = _dragStartOverlayPos.dx + delta.dx;
+      var targetY = _dragStartOverlayPos.dy + delta.dy;
+
+      // Center snap with 2% threshold
+      if ((targetX - 0.5).abs() < 0.02) targetX = 0.5;
+      if ((targetY - 0.5).abs() < 0.02) targetY = 0.5;
+
+      targetX = targetX.clamp(0.0, 1.0);
+      targetY = targetY.clamp(0.0, 1.0);
+
+      setState(() {
+        _livePosition = OverlayClip.sanitizePosition(Offset(targetX, targetY));
+      });
+      widget.viewModel.updateOverlayTransform(
+        widget.overlay.id,
+        position: _livePosition,
+        notify: false,
+      );
+    } else if (_mode == PipInteractionMode.pinch && _activePointers.length >= 2) {
+      final entries = _activePointers.values.toList();
+      final p1 = _getCanvasLocal(entries[0]);
+      final p2 = _getCanvasLocal(entries[1]);
+      final currentDist = (p1 - p2).distance;
+
+      if (_initialPinchDistance > 1.0 && !currentDist.isNaN && !currentDist.isInfinite && currentDist > 0.0) {
+        final scaleFactor = currentDist / _initialPinchDistance;
+        final rawScale = _initialPinchScale * scaleFactor;
+        final newScale = OverlayClip.sanitizeScale(rawScale);
+
+        final currentAngle = math.atan2(p2.dy - p1.dy, p2.dx - p1.dx);
+        final deltaAngle = currentAngle - _initialPinchAngle;
+        final newRot = OverlayClip.sanitizeRotation(_initialPinchRotation + deltaAngle);
+
+        final currentFocal = (p1 + p2) / 2.0;
+        final focalDelta = currentFocal - _initialFocalPoint;
+        final normFocalDelta = Offset(focalDelta.dx / w, focalDelta.dy / h);
+        final newPos = OverlayClip.sanitizePosition(_initialPinchOverlayPos + normFocalDelta);
+
+        setState(() {
+          _liveScale = newScale;
+          _liveRotation = newRot;
+          _livePosition = newPos;
+        });
+        widget.viewModel.updateOverlayTransform(
+          widget.overlay.id,
+          position: _livePosition,
+          scale: _liveScale,
+          rotation: _liveRotation,
+          notify: false,
+        );
+      }
+    }
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    _activePointers.remove(event.pointer);
+
+    if (_activePointers.length == 1) {
+      _mode = PipInteractionMode.move;
+      final remainingGlobal = _activePointers.values.first;
+      _dragStartPointerNorm = _getNormalizedCanvasPos(remainingGlobal);
+      _dragStartOverlayPos = _livePosition;
+    } else if (_activePointers.isEmpty) {
+      _finalizeGesture();
+    }
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _activePointers.remove(event.pointer);
+    if (_activePointers.isEmpty) {
+      _finalizeGesture();
+    }
+  }
+
+  void _finalizeGesture() {
+    _mode = PipInteractionMode.none;
+    _isGestureActive = false;
+
+    widget.viewModel.updateOverlayTransform(
+      widget.overlay.id,
+      position: _livePosition,
+      scale: _liveScale,
+      rotation: _liveRotation,
+    );
+    widget.viewModel.commitOverlayTransform(
+      widget.overlay.id,
+      oldPosition: _gestureStartPos,
+      oldScale: _gestureStartScale,
+      oldRotation: _gestureStartRotation,
+    );
+  }
+
+  void _handleCornerPanStart(DragStartDetails details) {
+    _mode = PipInteractionMode.resizeRotate;
+    _isGestureActive = true;
+    _startCornerDragPos = details.globalPosition;
+    _startCornerDragScale = _liveScale;
+    _startCornerOverlayPos = _livePosition;
+    _gestureStartPos = _livePosition;
+    _gestureStartScale = _liveScale;
+    _gestureStartRotation = _liveRotation;
+  }
+
+  void _handleCornerPanUpdate(DragUpdateDetails details) {
+    final dragDistance = (details.globalPosition.dx - _startCornerDragPos.dx) +
+        (details.globalPosition.dy - _startCornerDragPos.dy);
+    final scaleMultiplier = 1.0 + (dragDistance / 180.0);
+    final rawScale = _startCornerDragScale * scaleMultiplier;
+    final newScale = OverlayClip.sanitizeScale(rawScale);
+    setState(() {
+      _liveScale = newScale;
+    });
+    widget.viewModel.updateOverlayTransform(
+      widget.overlay.id,
+      scale: _liveScale,
+      notify: false,
+    );
+  }
+
+  void _handleCornerPanEnd(DragEndDetails details) {
+    _mode = PipInteractionMode.none;
+    _isGestureActive = false;
+    widget.viewModel.updateOverlayTransform(
+      widget.overlay.id,
+      position: _livePosition,
+      scale: _liveScale,
+      rotation: _liveRotation,
+    );
+    widget.viewModel.commitOverlayTransform(
+      widget.overlay.id,
+      oldPosition: _startCornerOverlayPos,
+      oldScale: _startCornerDragScale,
+      oldRotation: _gestureStartRotation,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final overlay = widget.overlay;
+    final isSelected = widget.isSelected;
+
+    final posX = _livePosition.dx.clamp(0.0, 1.0) * widget.canvasWidth;
+    final posY = _livePosition.dy.clamp(0.0, 1.0) * widget.canvasHeight;
+
+    // Base media dimension inside canvas
+    final baseWidth = widget.canvasWidth * 0.45;
+    final baseHeight = baseWidth * (9.0 / 16.0);
+
+    return Positioned(
+      left: posX,
+      top: posY,
+      child: FractionalTranslation(
+        translation: const Offset(-0.5, -0.5),
+        child: Transform.rotate(
+          angle: _liveRotation,
+          child: Transform.scale(
+            scale: _liveScale,
+            child: Opacity(
+              opacity: overlay.opacity.clamp(0.0, 1.0),
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  // 1. PIP Overlay Media Body with 1-finger move and 2-finger body pinch
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: _handlePointerDown,
+                      onPointerMove: _handlePointerMove,
+                      onPointerUp: _handlePointerUp,
+                      onPointerCancel: _handlePointerCancel,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          if (!isSelected) {
+                            widget.viewModel.selectOverlayById(overlay.id);
+                          }
+                        },
+                        child: Container(
+                          width: baseWidth,
+                          height: baseHeight,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                            border: Border.all(
+                              color: isSelected ? AppColors.primary : Colors.transparent,
+                              width: isSelected ? 2.0 : 0.0,
+                            ),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                            child: _buildMediaContent(overlay),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // 2. Interactive Selection Handles
+                  if (isSelected) ...[
+                    // Top-Left: Flip Horizontal Button
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => widget.viewModel.toggleOverlayFlipHorizontal(overlay.id),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(Icons.flip_rounded, size: 13, color: Colors.black),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Top-Right: Delete Layer Button
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => widget.viewModel.removeOverlayClip(overlay.id),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Bottom-Right: Corner Scale Handle
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onPanStart: _handleCornerPanStart,
+                        onPanUpdate: _handleCornerPanUpdate,
+                        onPanEnd: _handleCornerPanEnd,
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.5),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(Icons.open_in_full_rounded, size: 12, color: Colors.black),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMediaContent(OverlayClip overlay) {
+    Widget visual;
+
+    final mediaPath = overlay.localPath;
+    final thumbPath = overlay.thumbnailPath;
+
+    if (overlay.isPhoto && mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync()) {
+      visual = Image.file(
+        File(mediaPath),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildFallbackContent(overlay),
+      );
+    } else if (!overlay.isPhoto && thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync()) {
+      visual = Image.file(
+        File(thumbPath),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildFallbackContent(overlay),
+      );
+    } else if (mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync() && overlay.isPhoto) {
+      visual = Image.file(
+        File(mediaPath),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => _buildFallbackContent(overlay),
+      );
+    } else {
+      visual = _buildFallbackContent(overlay);
+    }
+
+    // Apply horizontal & vertical flipping
+    if (overlay.flipHorizontal || overlay.flipVertical) {
+      visual = Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.diagonal3Values(
+          overlay.flipHorizontal ? -1.0 : 1.0,
+          overlay.flipVertical ? -1.0 : 1.0,
+          1.0,
+        ),
+        child: visual,
+      );
+    }
+
+    // Apply Chroma Key (green/blue screen)
+    if (overlay.enableChromaKey) {
+      visual = ColorFiltered(
+        colorFilter: ChromaKeyHelper.createColorFilter(
+          keyColor: overlay.chromaKeyColor,
+          similarity: overlay.chromaSimilarity,
+          smoothness: overlay.chromaSmoothness,
+          spill: overlay.chromaSpill,
+        ),
+        child: visual,
+      );
+    }
+
+    // Apply Mask
+    if (overlay.mask != null) {
+      visual = ClipPath(
+        clipper: MaskPathClipper(overlay.mask!),
+        child: visual,
+      );
+    }
+
+    // Apply Blend Mode
+    if (overlay.blendMode != BlendMode.srcOver) {
+      visual = CanvasBlendLayer(
+        blendMode: overlay.blendMode,
+        child: visual,
+      );
+    }
+
+    return visual;
+  }
+
+  Widget _buildFallbackContent(OverlayClip overlay) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: overlay.previewGradient.isNotEmpty
+              ? overlay.previewGradient
+              : const [Color(0xFF00C6FF), Color(0xFF0072FF)],
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          overlay.previewIcon,
+          size: 28,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
 }
 
 /// Interactive Crop Area Touch Handles Overlay for direct manipulation of video masks.

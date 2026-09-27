@@ -414,6 +414,45 @@ class DeviceMediaService {
       });
     }
 
+    // 6. Build serialized PIP overlays payload
+    final pipOverlaysPayload = <Map<String, dynamic>>[];
+    for (final overlay in project.overlayClips) {
+      final asset = assets.firstWhere(
+        (a) => a.id == overlay.assetId,
+        orElse: () => MediaAsset(
+          id: overlay.assetId ?? overlay.id,
+          type: overlay.isPhoto ? MediaAssetType.photo : MediaAssetType.video,
+          name: overlay.title,
+          localPath: overlay.localPath,
+          thumbnailPath: overlay.thumbnailPath,
+          createdAt: DateTime.now(),
+        ),
+      );
+      final mediaPath = overlay.localPath ?? asset.localPath;
+      final thumbPath = overlay.thumbnailPath ?? asset.thumbnailPath;
+
+      pipOverlaysPayload.add({
+        'id': overlay.id,
+        'path': (mediaPath != null && !mediaPath.startsWith('content://') && !kIsWeb && File(mediaPath).existsSync())
+            ? mediaPath
+            : null,
+        'thumbnailPath': (thumbPath != null && !thumbPath.startsWith('content://') && !kIsWeb && File(thumbPath).existsSync())
+            ? thumbPath
+            : null,
+        'isPhoto': overlay.isPhoto,
+        'title': overlay.title,
+        'startTimeMs': overlay.startTime.inMilliseconds,
+        'durationMs': overlay.duration.inMilliseconds,
+        'x': overlay.position.dx,
+        'y': overlay.position.dy,
+        'scale': overlay.scale,
+        'rotation': overlay.rotation,
+        'opacity': overlay.opacity,
+        'flipHorizontal': overlay.flipHorizontal,
+        'flipVertical': overlay.flipVertical,
+      });
+    }
+
     final payload = {
       'width': targetWidth,
       'height': targetHeight,
@@ -424,6 +463,7 @@ class DeviceMediaService {
       'transitions': transitionsPayload,
       'audioTracks': audioPayload,
       'textOverlays': textsPayload,
+      'pipOverlays': pipOverlaysPayload,
     };
 
     // 5. Invoke platform channel or handle mock/test environment

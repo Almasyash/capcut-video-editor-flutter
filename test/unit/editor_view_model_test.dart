@@ -1501,15 +1501,15 @@ void main() {
         viewModel.addTextOverlay(text);
         viewModel.selectText(text.id);
 
-        // Change speed to 2.0x
+        // Change speed to 2.0x (timeline duration remains decoupled)
         viewModel.setTextSpeed(2.0);
         expect(viewModel.selectedTextOverlay!.speed, equals(2.0));
-        expect(viewModel.selectedTextOverlay!.durationInSeconds, closeTo(2.0, 0.01));
+        expect(viewModel.selectedTextOverlay!.durationInSeconds, closeTo(4.0, 0.01));
 
-        // Change speed to 0.5x
+        // Change speed to 0.5x (timeline duration remains decoupled)
         viewModel.setTextSpeed(0.5);
         expect(viewModel.selectedTextOverlay!.speed, equals(0.5));
-        expect(viewModel.selectedTextOverlay!.durationInSeconds, closeTo(8.0, 0.01));
+        expect(viewModel.selectedTextOverlay!.durationInSeconds, closeTo(4.0, 0.01));
       });
 
       test('7. Text Layer Delete: Deletes text layer, clears selection, updates total duration', () {

@@ -44,8 +44,8 @@ val isReleaseSigningConfigured = !keyPasswordProp.isNullOrBlank() &&
 
 android {
     namespace = "com.example.capcut_video_editor"
-    compileSdk = 34
-    buildToolsVersion = "34.0.0"
+    compileSdk = 35
+    buildToolsVersion = "35.0.0"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

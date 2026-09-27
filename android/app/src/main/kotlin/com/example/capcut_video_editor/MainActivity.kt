@@ -900,22 +900,27 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == FILE_PICKER_REQUEST_CODE) {
-            if (resultCode == Activity.RESULT_OK && data?.data != null) {
-                val uri: Uri = data.data!!
+            val selectedUri: Uri? = data?.data ?: if (data?.clipData != null && data.clipData!!.itemCount > 0) data.clipData!!.getItemAt(0).uri else null
+            if (resultCode == Activity.RESULT_OK && selectedUri != null) {
+                val uri: Uri = selectedUri
                 var displayName = "Imported_Media"
                 var fileSize: Long = 0
 
-                contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (cursor.moveToFirst()) {
-                        if (nameIndex != -1) {
-                            displayName = cursor.getString(nameIndex) ?: displayName
-                        }
-                        if (sizeIndex != -1) {
-                            fileSize = cursor.getLong(sizeIndex)
+                try {
+                    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (cursor.moveToFirst()) {
+                            if (nameIndex != -1) {
+                                displayName = cursor.getString(nameIndex) ?: displayName
+                            }
+                            if (sizeIndex != -1) {
+                                fileSize = cursor.getLong(sizeIndex)
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.w("MainActivity", "Failed to query URI metadata: ${e.message}")
                 }
 
                 val mimeType = contentResolver.getType(uri) ?: ""
@@ -926,7 +931,19 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 var thumbnailPath: String? = null
 
                 try {
-                    val sanitizedName = displayName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+                    var sanitizedName = displayName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")
+                    if (!sanitizedName.contains(".")) {
+                        val ext = when {
+                            mimeType.contains("png") -> ".png"
+                            mimeType.contains("jpeg") || mimeType.contains("jpg") -> ".jpg"
+                            mimeType.contains("webp") -> ".webp"
+                            mimeType.contains("mp4") -> ".mp4"
+                            mimeType.contains("audio") || mimeType.contains("m4a") -> ".m4a"
+                            mimeType.contains("video") -> ".mp4"
+                            else -> ".jpg"
+                        }
+                        sanitizedName += ext
+                    }
                     val mediaDir = File(filesDir, "media").apply { if (!exists()) mkdirs() }
                     val targetFile = File(mediaDir, sanitizedName)
                     val inputStream: InputStream? = contentResolver.openInputStream(uri)
@@ -942,8 +959,9 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
 
                             // Extract metadata using MediaMetadataRetriever
                             try {
-                                val isVideo = mimeType.startsWith("video") || displayName.endsWith(".mp4") || displayName.endsWith(".mov") || displayName.endsWith(".mkv")
-                                val isAudio = mimeType.startsWith("audio") || displayName.endsWith(".mp3") || displayName.endsWith(".wav") || displayName.endsWith(".aac")
+                                val lowerName = displayName.lowercase()
+                                val isVideo = mimeType.startsWith("video") || lowerName.endsWith(".mp4") || lowerName.endsWith(".mov") || lowerName.endsWith(".mkv")
+                                val isAudio = mimeType.startsWith("audio") || lowerName.endsWith(".mp3") || lowerName.endsWith(".wav") || lowerName.endsWith(".aac")
 
                                 if (isVideo || isAudio) {
                                     val retriever = MediaMetadataRetriever()
@@ -1281,6 +1299,26 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
             )
         }
 
+        val rawPip = call.argument<List<Map<String, Any>>>("pipOverlays") ?: emptyList()
+        val pipOverlays = rawPip.map { map ->
+            ExportPipOverlay(
+                id = map["id"] as? String ?: "",
+                path = map["path"] as? String,
+                thumbnailPath = map["thumbnailPath"] as? String,
+                isPhoto = map["isPhoto"] as? Boolean ?: true,
+                title = map["title"] as? String ?: "PIP",
+                startTimeMs = (map["startTimeMs"] as? Number)?.toLong() ?: 0L,
+                durationMs = (map["durationMs"] as? Number)?.toLong() ?: 3000L,
+                x = (map["x"] as? Number)?.toDouble() ?: 0.5,
+                y = (map["y"] as? Number)?.toDouble() ?: 0.5,
+                scale = (map["scale"] as? Number)?.toDouble() ?: 0.5,
+                rotation = (map["rotation"] as? Number)?.toDouble() ?: 0.0,
+                opacity = (map["opacity"] as? Number)?.toDouble() ?: 1.0,
+                flipHorizontal = map["flipHorizontal"] as? Boolean ?: false,
+                flipVertical = map["flipVertical"] as? Boolean ?: false
+            )
+        }
+
         Thread {
             try {
                 val engine = VideoExportEngine(applicationContext)
@@ -1289,6 +1327,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     transitions = transitions,
                     audioTracks = audioTracks,
                     textOverlays = textOverlays,
+                    pipOverlays = pipOverlays,
                     targetWidth = width,
                     targetHeight = height,
                     targetFps = fps,

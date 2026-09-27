@@ -11,6 +11,7 @@ import 'media_picker_sheet.dart';
 import 'package:capcut_video_editor/domain/models/transition.dart';
 import 'package:capcut_video_editor/domain/enums/transition_type.dart';
 import 'timeline_clip_item.dart';
+import 'timeline_overlay_track_item.dart';
 import 'timeline_ruler.dart';
 import 'timeline_text_track_item.dart';
 import 'transition_selection_sheet.dart';
@@ -807,105 +808,15 @@ class _TimelineSectionState extends State<TimelineSection> {
                 top: 2,
                 bottom: 2,
                 width: width,
-                child: GestureDetector(
-                  onTap: () => viewModel.selectOverlay(idx),
-                  onTapDown: (details) {
-                    if (viewModel.isPlaying) viewModel.pause();
-                    viewModel.selectOverlay(idx);
-                    final targetTime = (overlay.startTimeInSeconds + (details.localPosition.dx / viewModel.pixelsPerSecond))
-                        .clamp(0.0, viewModel.totalDurationInSeconds);
-                    viewModel.seekTo(targetTime);
-                    if (_horizontalScrollController.hasClients) {
-                      _horizontalScrollController.jumpTo(
-                        (targetTime * viewModel.pixelsPerSecond)
-                            .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                      );
-                    }
-                  },
-                  onHorizontalDragUpdate: (details) {
-                    final deltaSec = details.primaryDelta! / viewModel.pixelsPerSecond;
-                    final newStartSec = math.max(0.0, overlay.startTimeInSeconds + deltaSec);
-                    viewModel.updateOverlayClipTiming(
-                      overlay.id,
-                      Duration(milliseconds: (newStartSec * 1000).round()),
-                      overlay.duration,
-                    );
-                  },
-                  child: Container(
-                    clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceElevated,
-                      borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                      border: Border.all(
-                        color: isSelected ? AppColors.secondary : AppColors.secondary.withOpacity(0.4),
-                        width: isSelected ? 2.0 : 1.0,
-                      ),
-                    ),
-                    child: Stack(
-                      children: [
-                        Center(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.layers_rounded, size: 12, color: AppColors.secondary),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  overlay.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (isSelected) ...[
-                          Positioned(
-                            left: 0,
-                            top: 0,
-                            bottom: 0,
-                            child: _buildHandle(
-                              isLeft: true,
-                              color: AppColors.secondary,
-                              onDrag: (dx) {
-                                final deltaSec = dx / viewModel.pixelsPerSecond;
-                                final curStart = overlay.startTimeInSeconds;
-                                final curDur = overlay.durationInSeconds;
-                                final newStart = math.max(0.0, curStart + deltaSec);
-                                final newDur = curDur - (newStart - curStart);
-                                if (newDur >= 0.4) {
-                                  viewModel.updateOverlayClipTiming(
-                                    overlay.id,
-                                    Duration(milliseconds: (newStart * 1000).round()),
-                                    Duration(milliseconds: (newDur * 1000).round()),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                          Positioned(
-                            right: 0,
-                            top: 0,
-                            bottom: 0,
-                            child: _buildHandle(
-                              isLeft: false,
-                              color: AppColors.secondary,
-                              onDrag: (dx) {
-                                final deltaSec = dx / viewModel.pixelsPerSecond;
-                                final newDur = math.max(0.4, overlay.durationInSeconds + deltaSec);
-                                viewModel.updateOverlayClipTiming(
-                                  overlay.id,
-                                  overlay.startTime,
-                                  Duration(milliseconds: (newDur * 1000).round()),
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                child: TimelineOverlayTrackItem(
+                  key: ValueKey(overlay.id),
+                  overlay: overlay,
+                  overlayIndex: idx,
+                  isSelected: isSelected,
+                  width: width,
+                  startOffset: startOffset,
+                  viewModel: viewModel,
+                  scrollController: _horizontalScrollController,
                 ),
               ),
             ],
