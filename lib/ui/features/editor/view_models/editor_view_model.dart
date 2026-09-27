@@ -36,6 +36,7 @@ import 'package:capcut_video_editor/domain/services/transition_validator.dart';
 import 'package:flutter/services.dart';
 import 'package:capcut_video_editor/core/services/audio_beat_service.dart';
 import 'package:capcut_video_editor/core/services/auto_caption_service.dart';
+import 'package:capcut_video_editor/core/services/pip_ai_provider.dart';
 
 /// Result returned from every transition mutation.
 class TransitionMutationResult {
@@ -1930,6 +1931,333 @@ class EditorViewModel extends ChangeNotifier {
     scheduleAutoSave();
     notifyListeners();
     return true;
+  }
+
+  // --- Advanced PIP Editing Operations ---
+
+  void updateOverlaySpeed(String id, double speed) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final sanitized = OverlayClip.sanitizeSpeed(speed);
+    _overlayClips[index] = _overlayClips[index].copyWith(speed: sanitized);
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce('Speed set to ${sanitized}x');
+  }
+
+  void updateOverlayAudio(
+    String id, {
+    double? volume,
+    bool? isMuted,
+    double? fadeIn,
+    double? fadeInSec,
+    double? fadeOut,
+    double? fadeOutSec,
+    PipAudioEffects? audioEffects,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      volume: volume != null ? OverlayClip.sanitizeVolume(volume) : null,
+      isMuted: isMuted,
+      fadeInDurationSec: fadeIn ?? fadeInSec,
+      fadeOutDurationSec: fadeOut ?? fadeOutSec,
+      audioEffects: audioEffects,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+    if (isMuted != null) {
+      TtsService.announce(isMuted ? 'Overlay audio muted' : 'Overlay audio unmuted');
+    } else if (volume != null) {
+      TtsService.announce('Volume ${(volume * 100).round()}%');
+    }
+  }
+
+  void updateOverlayAnimation(
+    String id, {
+    PipAnimation? inAnim,
+    PipAnimation? inAnimation,
+    bool clearInAnim = false,
+    PipAnimation? overallAnim,
+    PipAnimation? overallAnimation,
+    bool clearOverallAnim = false,
+    PipAnimation? outAnim,
+    PipAnimation? outAnimation,
+    bool clearOutAnim = false,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      inAnimation: inAnim ?? inAnimation,
+      clearInAnimation: clearInAnim,
+      overallAnimation: overallAnim ?? overallAnimation,
+      clearOverallAnimation: clearOverallAnim,
+      outAnimation: outAnim ?? outAnimation,
+      clearOutAnimation: clearOutAnim,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce('Animation updated');
+  }
+
+  void updateOverlayCrop(
+    String id, {
+    Rect? cropRect,
+    bool clearCrop = false,
+    String? cropAspectRatio,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      cropRect: cropRect,
+      clearCropRect: clearCrop,
+      cropAspectRatio: cropAspectRatio,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce(clearCrop ? 'Crop reset' : 'Crop applied');
+  }
+
+  void updateOverlayCornerPin(
+    String id, {
+    Offset? tl,
+    Offset? topLeft,
+    Offset? tr,
+    Offset? topRight,
+    Offset? bl,
+    Offset? bottomLeft,
+    Offset? br,
+    Offset? bottomRight,
+    bool clearCornerPin = false,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      cornerTopLeft: tl ?? topLeft,
+      cornerTopRight: tr ?? topRight,
+      cornerBottomLeft: bl ?? bottomLeft,
+      cornerBottomRight: br ?? bottomRight,
+      clearCornerPin: clearCornerPin,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce(clearCornerPin ? 'Corner pin reset' : 'Corner pin adjusted');
+  }
+
+  void updateOverlayBlendMode(String id, BlendMode blendMode) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(blendMode: blendMode);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void updateOverlayChromaKey(
+    String id, {
+    bool? enabled,
+    Color? color,
+    double? similarity,
+    double? smoothness,
+    double? spill,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      enableChromaKey: enabled,
+      chromaKeyColor: color,
+      chromaSimilarity: similarity,
+      chromaSmoothness: smoothness,
+      chromaSpill: spill,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void updateOverlayFilter(
+    String id, {
+    String? filterId,
+    double? intensity,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      filterId: filterId,
+      filterIntensity: intensity?.clamp(0.0, 1.0),
+    );
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce('Filter ${filterId ?? "none"} applied');
+  }
+
+  void updateOverlayAdjustments(
+    String id,
+    PipAdjustments adjustments,
+  ) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(adjustments: adjustments);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void updateOverlayEffects(
+    String id, {
+    PipOutline? outline,
+    PipShadow? shadow,
+    PipGlow? glow,
+    String? effectId,
+    double? effectIntensity,
+  }) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    _overlayClips[index] = _overlayClips[index].copyWith(
+      outline: outline,
+      shadow: shadow,
+      glow: glow,
+      effectId: effectId,
+      effectIntensity: effectIntensity,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void applySplitScreenPreset(String id, String preset) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _overlayClips[index];
+
+    Offset pos = current.position;
+    double scale = current.scale;
+    Rect? crop;
+
+    switch (preset) {
+      case 'left':
+        pos = const Offset(0.25, 0.5);
+        scale = 0.5;
+        crop = const Rect.fromLTWH(0.0, 0.0, 0.5, 1.0);
+        break;
+      case 'right':
+        pos = const Offset(0.75, 0.5);
+        scale = 0.5;
+        crop = const Rect.fromLTWH(0.5, 0.0, 0.5, 1.0);
+        break;
+      case 'top':
+        pos = const Offset(0.5, 0.25);
+        scale = 0.5;
+        crop = const Rect.fromLTWH(0.0, 0.0, 1.0, 0.5);
+        break;
+      case 'bottom':
+        pos = const Offset(0.5, 0.75);
+        scale = 0.5;
+        crop = const Rect.fromLTWH(0.0, 0.5, 1.0, 0.5);
+        break;
+      case 'quad_tl':
+        pos = const Offset(0.25, 0.25);
+        scale = 0.48;
+        crop = null;
+        break;
+      case 'quad_tr':
+        pos = const Offset(0.75, 0.25);
+        scale = 0.48;
+        crop = null;
+        break;
+      case 'quad_bl':
+        pos = const Offset(0.25, 0.75);
+        scale = 0.48;
+        crop = null;
+        break;
+      case 'quad_br':
+        pos = const Offset(0.75, 0.75);
+        scale = 0.48;
+        crop = null;
+        break;
+      case 'pip':
+      case 'pictureInPicture':
+        pos = const Offset(0.75, 0.25);
+        scale = 0.35;
+        crop = null;
+        break;
+      case 'reset':
+      default:
+        pos = const Offset(0.5, 0.5);
+        scale = 0.5;
+        crop = null;
+        break;
+    }
+
+    _overlayClips[index] = current.copyWith(
+      position: pos,
+      scale: scale,
+      cropRect: crop,
+      clearCropRect: crop == null,
+      splitScreenPreset: preset,
+    );
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce('Split screen $preset applied');
+  }
+
+  void extractAudioFromOverlay(String id) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    final overlay = _overlayClips[index];
+    if (overlay.isPhoto) {
+      TtsService.announce('Cannot extract audio from a photo overlay');
+      return;
+    }
+    _saveSnapshot();
+    final audioId = 'audio_pip_${DateTime.now().millisecondsSinceEpoch}';
+    final audioTrack = AudioTrack(
+      id: audioId,
+      assetId: overlay.assetId ?? overlay.id,
+      name: '${overlay.title} (Audio)',
+      startTime: overlay.startTime,
+      duration: overlay.duration,
+      trimStart: Duration.zero,
+      trimEnd: overlay.duration,
+      volume: overlay.volume.clamp(0.0, 1.0),
+      speed: overlay.speed,
+      isMuted: false,
+      waveformPoints: const [],
+      beats: const [],
+    );
+    _audioTracks.add(audioTrack);
+    // Mute the overlay video so audio is not duplicated
+    _overlayClips[index] = overlay.copyWith(isMuted: true, volume: 0.0);
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce('Audio extracted to timeline track');
+  }
+
+  Future<void> generateAutoCaptionsFromOverlay(String id) async {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    final overlay = _overlayClips[index];
+    _saveSnapshot();
+    final provider = DefaultPipAiProvider();
+    final captions = await provider.generateCaptions(
+      overlayId: overlay.id,
+      startTime: overlay.startTime,
+      duration: overlay.duration,
+      overlayTitle: overlay.title,
+    );
+    for (final cap in captions) {
+      _textOverlays.add(cap);
+    }
+    scheduleAutoSave();
+    notifyListeners();
+    TtsService.announce('Auto captions generated from PIP');
   }
 
   // --- Edit Panel Transformations ---

@@ -119,7 +119,53 @@ data class ExportPipOverlay(
     val rotation: Double,
     val opacity: Double,
     val flipHorizontal: Boolean = false,
-    val flipVertical: Boolean = false
+    val flipVertical: Boolean = false,
+    val speed: Double = 1.0,
+    val volume: Double = 1.0,
+    val isMuted: Boolean = false,
+    val filterId: String? = null,
+    val filterIntensity: Double = 1.0,
+    val blendMode: String? = null,
+    val enableChromaKey: Boolean = false,
+    val chromaKeyColor: Int = 0,
+    val chromaSimilarity: Double = 0.4,
+    val chromaSmoothness: Double = 0.1,
+    val cropLeft: Double = 0.0,
+    val cropTop: Double = 0.0,
+    val cropWidth: Double = 1.0,
+    val cropHeight: Double = 1.0,
+    val cornerTopLeftX: Double = 0.0,
+    val cornerTopLeftY: Double = 0.0,
+    val cornerTopRightX: Double = 1.0,
+    val cornerTopRightY: Double = 0.0,
+    val cornerBottomLeftX: Double = 0.0,
+    val cornerBottomLeftY: Double = 1.0,
+    val cornerBottomRightX: Double = 1.0,
+    val cornerBottomRightY: Double = 1.0,
+    val inAnimation: String? = null,
+    val inAnimationDuration: Double = 0.5,
+    val overallAnimation: String? = null,
+    val outAnimation: String? = null,
+    val outAnimationDuration: Double = 0.5,
+    val brightness: Double = 0.0,
+    val contrast: Double = 0.0,
+    val saturation: Double = 0.0,
+    val exposure: Double = 0.0,
+    val temperature: Double = 0.0,
+    val tint: Double = 0.0,
+    val outlineEnabled: Boolean = false,
+    val outlineColor: Int = 0,
+    val outlineWidth: Double = 2.0,
+    val shadowEnabled: Boolean = false,
+    val shadowColor: Int = 0,
+    val shadowBlur: Double = 8.0,
+    val shadowDx: Double = 2.0,
+    val shadowDy: Double = 4.0,
+    val shadowOpacity: Double = 0.6,
+    val glowEnabled: Boolean = false,
+    val glowColor: Int = 0,
+    val glowRadius: Double = 12.0,
+    val glowIntensity: Double = 0.7
 )
 
 /**
@@ -894,15 +940,32 @@ class VideoExportEngine(private val context: Context) {
             rotationRad: Float,
             opacity: Float,
             flipH: Boolean,
-            flipV: Boolean
+            flipV: Boolean,
+            cropLeft: Float = 0f,
+            cropTop: Float = 0f,
+            cropWidth: Float = 1f,
+            cropHeight: Float = 1f,
+            cornerTlX: Float = 0f,
+            cornerTlY: Float = 0f,
+            cornerTrX: Float = 1f,
+            cornerTrY: Float = 0f,
+            cornerBlX: Float = 0f,
+            cornerBlY: Float = 1f,
+            cornerBrX: Float = 1f,
+            cornerBrY: Float = 1f
         ) {
             val halfW = (baseW * scale) / 2.0f
             val halfH = (baseH * scale) / 2.0f
 
-            val uLeft = if (flipH) 1.0f else 0.0f
-            val uRight = if (flipH) 0.0f else 1.0f
-            val vTop = if (flipV) 0.0f else 1.0f
-            val vBottom = if (flipV) 1.0f else 0.0f
+            val uMin = cropLeft.coerceIn(0f, 1f)
+            val uMax = (cropLeft + cropWidth).coerceIn(0f, 1f)
+            val vMin = cropTop.coerceIn(0f, 1f)
+            val vMax = (cropTop + cropHeight).coerceIn(0f, 1f)
+
+            val uLeft = if (flipH) uMax else uMin
+            val uRight = if (flipH) uMin else uMax
+            val vTop = if (flipV) vMin else vMax
+            val vBottom = if (flipV) vMax else vMin
 
             val cosR = Math.cos(rotationRad.toDouble()).toFloat()
             val sinR = Math.sin(rotationRad.toDouble()).toFloat()
@@ -910,17 +973,20 @@ class VideoExportEngine(private val context: Context) {
             fun rotX(x: Float, y: Float) = x * cosR - y * sinR + dstCenterX
             fun rotY(x: Float, y: Float) = x * sinR + y * cosR + dstCenterY
 
-            val x0 = rotX(-halfW, -halfH)
-            val y0 = rotY(-halfW, -halfH)
+            val isPinned = (cornerTlX != 0f || cornerTlY != 0f || cornerTrX != 1f || cornerTrY != 0f ||
+                    cornerBlX != 0f || cornerBlY != 1f || cornerBrX != 1f || cornerBrY != 1f)
 
-            val x1 = rotX(-halfW, halfH)
-            val y1 = rotY(-halfW, halfH)
+            val x0 = if (isPinned) rotX((cornerTlX - 0.5f) * 2f * halfW, (cornerTlY - 0.5f) * 2f * halfH) else rotX(-halfW, -halfH)
+            val y0 = if (isPinned) rotY((cornerTlX - 0.5f) * 2f * halfW, (cornerTlY - 0.5f) * 2f * halfH) else rotY(-halfW, -halfH)
 
-            val x2 = rotX(halfW, -halfH)
-            val y2 = rotY(halfW, -halfH)
+            val x1 = if (isPinned) rotX((cornerBlX - 0.5f) * 2f * halfW, (cornerBlY - 0.5f) * 2f * halfH) else rotX(-halfW, halfH)
+            val y1 = if (isPinned) rotY((cornerBlX - 0.5f) * 2f * halfW, (cornerBlY - 0.5f) * 2f * halfH) else rotY(-halfW, halfH)
 
-            val x3 = rotX(halfW, halfH)
-            val y3 = rotY(halfW, halfH)
+            val x2 = if (isPinned) rotX((cornerTrX - 0.5f) * 2f * halfW, (cornerTrY - 0.5f) * 2f * halfH) else rotX(halfW, -halfH)
+            val y2 = if (isPinned) rotY((cornerTrX - 0.5f) * 2f * halfW, (cornerTrY - 0.5f) * 2f * halfH) else rotY(halfW, -halfH)
+
+            val x3 = if (isPinned) rotX((cornerBrX - 0.5f) * 2f * halfW, (cornerBrY - 0.5f) * 2f * halfH) else rotX(halfW, halfH)
+            val y3 = if (isPinned) rotY((cornerBrX - 0.5f) * 2f * halfW, (cornerBrY - 0.5f) * 2f * halfH) else rotY(halfW, halfH)
 
             reusableOverlayQuadBuffer.clear()
             reusableOverlayQuadBuffer.put(x0).put(y0).put(uLeft).put(vTop)
@@ -1654,17 +1720,89 @@ class VideoExportEngine(private val context: Context) {
                                 val centerY = (pip.y * height).toFloat()
                                 val pipW = width * 0.45f
                                 val pipH = pipW * (9.0f / 16.0f)
+
+                                val elapsedMs = (currentTimeMs - pip.startTimeMs).coerceAtLeast(0L)
+                                val remainingMs = (pipEnd - currentTimeMs).coerceAtLeast(0L)
+                                val inDurMs = (pip.inAnimationDuration * 1000).toLong().coerceIn(100L, 2000L)
+                                val outDurMs = (pip.outAnimationDuration * 1000).toLong().coerceIn(100L, 2000L)
+
+                                var animScale = 1.0f
+                                var animOpacity = 1.0f
+                                var animRotation = 0.0f
+                                var animOffsetX = 0.0f
+                                var animOffsetY = 0.0f
+
+                                if (pip.inAnimation != null && pip.inAnimation != "none" && elapsedMs < inDurMs) {
+                                    val t = (elapsedMs.toFloat() / inDurMs.toFloat()).coerceIn(0f, 1f)
+                                    when (pip.inAnimation) {
+                                        "fade", "fadeIn" -> animOpacity *= t
+                                        "slideRight" -> { animOffsetX += (1f - t) * pipW; animOpacity *= t }
+                                        "slideLeft" -> { animOffsetX -= (1f - t) * pipW; animOpacity *= t }
+                                        "slideUp" -> { animOffsetY -= (1f - t) * pipH; animOpacity *= t }
+                                        "slideDown" -> { animOffsetY += (1f - t) * pipH; animOpacity *= t }
+                                        "zoomIn" -> { animScale *= (0.2f + 0.8f * t); animOpacity *= t }
+                                        "zoomOut" -> { animScale *= (1.8f - 0.8f * t); animOpacity *= t }
+                                        "rotateIn" -> { animRotation += (1f - t) * Math.PI.toFloat(); animScale *= t }
+                                        "bounce" -> {
+                                            val bt = if (t == 0f || t == 1f) t else (Math.pow(2.0, -10.0 * t.toDouble()) * Math.sin((t - 0.075) * (2 * Math.PI) / 0.3) + 1.0).toFloat()
+                                            animScale *= bt.coerceIn(0f, 1.5f)
+                                        }
+                                    }
+                                }
+
+                                if (pip.outAnimation != null && pip.outAnimation != "none" && remainingMs < outDurMs) {
+                                    val t = (remainingMs.toFloat() / outDurMs.toFloat()).coerceIn(0f, 1f)
+                                    when (pip.outAnimation) {
+                                        "fade", "fadeOut" -> animOpacity *= t
+                                        "slideRight" -> { animOffsetX += (1f - t) * pipW; animOpacity *= t }
+                                        "slideLeft" -> { animOffsetX -= (1f - t) * pipW; animOpacity *= t }
+                                        "slideUp" -> { animOffsetY -= (1f - t) * pipH; animOpacity *= t }
+                                        "slideDown" -> { animOffsetY += (1f - t) * pipH; animOpacity *= t }
+                                        "zoomIn" -> { animScale *= (1f + (1f - t) * 0.8f); animOpacity *= t }
+                                        "zoomOut" -> animScale *= t
+                                    }
+                                }
+
+                                if (pip.overallAnimation != null && pip.overallAnimation != "none") {
+                                    val sec = elapsedMs / 1000.0
+                                    when (pip.overallAnimation) {
+                                        "pulse" -> animScale *= 1.0f + 0.08f * Math.sin(sec * 6.0).toFloat()
+                                        "float" -> animOffsetY += 6.0f * Math.sin(sec * 3.5).toFloat()
+                                        "spin" -> animRotation += (sec * 1.5f).toFloat() % (2f * Math.PI.toFloat())
+                                        "flicker" -> animOpacity *= (0.85f + 0.15f * Math.sin(sec * 20.0).toFloat()).coerceIn(0f, 1f)
+                                        "shake" -> animOffsetX += 4.0f * Math.sin(sec * 25.0).toFloat()
+                                    }
+                                }
+
+                                val effScale = (pip.scale.toFloat() * animScale).coerceIn(0.05f, 10f)
+                                val effRotation = pip.rotation.toFloat() + animRotation
+                                val effOpacity = (pip.opacity.toFloat() * animOpacity).coerceIn(0f, 1f)
+                                val effCenterX = centerX + animOffsetX
+                                val effCenterY = centerY + animOffsetY
+
                                 inputSurface.renderPipOverlay(
                                     textureId = texId,
-                                    dstCenterX = centerX,
-                                    dstCenterY = centerY,
+                                    dstCenterX = effCenterX,
+                                    dstCenterY = effCenterY,
                                     baseW = pipW,
                                     baseH = pipH,
-                                    scale = pip.scale.toFloat(),
-                                    rotationRad = pip.rotation.toFloat(),
-                                    opacity = pip.opacity.toFloat().coerceIn(0f, 1f),
+                                    scale = effScale,
+                                    rotationRad = effRotation,
+                                    opacity = effOpacity,
                                     flipH = pip.flipHorizontal,
-                                    flipV = pip.flipVertical
+                                    flipV = pip.flipVertical,
+                                    cropLeft = pip.cropLeft.toFloat(),
+                                    cropTop = pip.cropTop.toFloat(),
+                                    cropWidth = pip.cropWidth.toFloat(),
+                                    cropHeight = pip.cropHeight.toFloat(),
+                                    cornerTlX = pip.cornerTopLeftX.toFloat(),
+                                    cornerTlY = pip.cornerTopLeftY.toFloat(),
+                                    cornerTrX = pip.cornerTopRightX.toFloat(),
+                                    cornerTrY = pip.cornerTopRightY.toFloat(),
+                                    cornerBlX = pip.cornerBottomLeftX.toFloat(),
+                                    cornerBlY = pip.cornerBottomLeftY.toFloat(),
+                                    cornerBrX = pip.cornerBottomRightX.toFloat(),
+                                    cornerBrY = pip.cornerBottomRightY.toFloat()
                                 )
                             }
                         }
