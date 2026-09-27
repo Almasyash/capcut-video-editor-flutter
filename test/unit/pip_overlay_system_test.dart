@@ -333,6 +333,158 @@ void main() {
 
       expect(viewModel.totalDurationInSeconds, 10.0);
     });
+
+    test('updateOverlaySpeed updates speed and affects playback', () {
+      const clip = OverlayClip(
+        id: 'speed_pip',
+        title: 'Speed PIP',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      viewModel.addOverlayClip(clip);
+
+      viewModel.updateOverlaySpeed('speed_pip', 2.0);
+      expect(viewModel.overlayClips.first.speed, 2.0);
+
+      viewModel.updateOverlaySpeed('speed_pip', 0.5);
+      expect(viewModel.overlayClips.first.speed, 0.5);
+    });
+
+    test('updateOverlayAudio updates volume, mute state and audio fades', () {
+      const clip = OverlayClip(
+        id: 'audio_pip',
+        title: 'Audio PIP',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      viewModel.addOverlayClip(clip);
+
+      viewModel.updateOverlayAudio('audio_pip', volume: 1.5, isMuted: true, fadeInSec: 0.8, fadeOutSec: 1.2);
+      final updated = viewModel.overlayClips.first;
+      expect(updated.volume, 1.5);
+      expect(updated.isMuted, true);
+      expect(updated.fadeInDurationSec, 0.8);
+      expect(updated.fadeOutDurationSec, 1.2);
+    });
+
+    test('updateOverlayAnimation updates in/overall/out animations and clears them', () {
+      const clip = OverlayClip(
+        id: 'anim_pip',
+        title: 'Anim PIP',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      viewModel.addOverlayClip(clip);
+
+      viewModel.updateOverlayAnimation(
+        'anim_pip',
+        inAnimation: const PipAnimation(type: 'slideLeft', durationSec: 0.6),
+        overallAnimation: const PipAnimation(type: 'pulse'),
+        outAnimation: const PipAnimation(type: 'fade', durationSec: 0.4),
+      );
+
+      var updated = viewModel.overlayClips.first;
+      expect(updated.inAnimation?.type, 'slideLeft');
+      expect(updated.overallAnimation?.type, 'pulse');
+      expect(updated.outAnimation?.type, 'fade');
+
+      viewModel.updateOverlayAnimation('anim_pip', clearInAnim: true, clearOverallAnim: true, clearOutAnim: true);
+      updated = viewModel.overlayClips.first;
+      expect(updated.inAnimation, isNull);
+      expect(updated.overallAnimation, isNull);
+      expect(updated.outAnimation, isNull);
+    });
+
+    test('updateOverlayCrop applies non-destructive crop and reset', () {
+      const clip = OverlayClip(
+        id: 'crop_pip',
+        title: 'Crop PIP',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      viewModel.addOverlayClip(clip);
+
+      viewModel.updateOverlayCrop('crop_pip', cropRect: const Rect.fromLTWH(0.1, 0.1, 0.8, 0.8), cropAspectRatio: '16:9');
+      var updated = viewModel.overlayClips.first;
+      expect(updated.cropRect, const Rect.fromLTWH(0.1, 0.1, 0.8, 0.8));
+      expect(updated.cropAspectRatio, '16:9');
+
+      viewModel.updateOverlayCrop('crop_pip', clearCrop: true);
+      updated = viewModel.overlayClips.first;
+      expect(updated.cropRect, isNull);
+    });
+
+    test('updateOverlayCornerPin sets projective perspective points and reset', () {
+      const clip = OverlayClip(
+        id: 'corner_pip',
+        title: 'Corner Pin PIP',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      viewModel.addOverlayClip(clip);
+
+      viewModel.updateOverlayCornerPin(
+        'corner_pip',
+        topLeft: const Offset(0.1, 0.2),
+        topRight: const Offset(0.9, 0.1),
+        bottomLeft: const Offset(0.0, 1.0),
+        bottomRight: const Offset(1.0, 0.95),
+      );
+      var updated = viewModel.overlayClips.first;
+      expect(updated.cornerTopLeft, const Offset(0.1, 0.2));
+      expect(updated.cornerTopRight, const Offset(0.9, 0.1));
+
+      viewModel.updateOverlayCornerPin('corner_pip', clearCornerPin: true);
+      updated = viewModel.overlayClips.first;
+      expect(updated.cornerTopLeft, isNull);
+      expect(updated.cornerTopRight, isNull);
+    });
+
+    test('updateOverlayBlendMode and updateOverlayChromaKey configure composite modes', () {
+      const clip = OverlayClip(
+        id: 'blend_pip',
+        title: 'Blend PIP',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      viewModel.addOverlayClip(clip);
+
+      viewModel.updateOverlayBlendMode('blend_pip', BlendMode.screen);
+      expect(viewModel.overlayClips.first.blendMode, BlendMode.screen);
+
+      viewModel.updateOverlayChromaKey(
+        'blend_pip',
+        enabled: true,
+        color: const Color(0xFF00FF00),
+        similarity: 0.55,
+        smoothness: 0.25,
+      );
+      final updated = viewModel.overlayClips.first;
+      expect(updated.enableChromaKey, true);
+      expect(updated.chromaKeyColor, const Color(0xFF00FF00));
+      expect(updated.chromaSimilarity, 0.55);
+      expect(updated.chromaSmoothness, 0.25);
+    });
+
+    test('applySplitScreenPreset updates position, scale, and crop according to preset', () {
+      const clip = OverlayClip(
+        id: 'split_pip',
+        title: 'Split PIP',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 4),
+      );
+      viewModel.addOverlayClip(clip);
+
+      viewModel.applySplitScreenPreset('split_pip', 'left');
+      var updated = viewModel.overlayClips.first;
+      expect(updated.position.dx, 0.25);
+      expect(updated.scale, 0.5);
+
+      viewModel.applySplitScreenPreset('split_pip', 'pictureInPicture');
+      updated = viewModel.overlayClips.first;
+      expect(updated.position, const Offset(0.75, 0.25));
+      expect(updated.scale, 0.35);
+    });
   });
 
   group('PIP Overlay Export Payload Serialization Tests', () {

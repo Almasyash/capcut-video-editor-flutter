@@ -101,12 +101,22 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       VideoPlaybackService.instance.disposeSession(_secondarySession!.textureId);
       _secondarySession = null;
     }
+    for (final s in _pipSessions.values) {
+      VideoPlaybackService.instance.disposeSession(s.textureId);
+    }
+    _pipSessions.clear();
+    _pipPlayingState.clear();
+    _loadingPipIds.clear();
     super.dispose();
   }
 
   VideoPlayerSession? _secondarySession;
   String? _secondaryLoadedPath;
   String? _secondaryClipId;
+
+  final Map<String, VideoPlayerSession> _pipSessions = {};
+  final Map<String, bool> _pipPlayingState = {};
+  final Set<String> _loadingPipIds = {};
 
   void _syncPlayerWithModel() {
     final activeTransition = widget.viewModel.activeTransitionAtPlayhead;
@@ -115,6 +125,82 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       _syncTransitionPlayback(activeTransition);
     } else {
       _syncNormalPlayback();
+    }
+    _syncPipPlayback();
+  }
+
+  void _syncPipPlayback() {
+    final activeOverlays = widget.viewModel.activeOverlayClipsAtPlayhead;
+    final activeVideoOverlays = activeOverlays.where((o) => !o.isPhoto && o.localPath != null && o.localPath!.isNotEmpty).toList();
+    final activeIds = activeVideoOverlays.map((o) => o.id).toSet();
+
+    // 1. Dispose sessions for overlays that left active playhead
+    final toRemove = <String>[];
+    for (final id in _pipSessions.keys) {
+      if (!activeIds.contains(id)) toRemove.add(id);
+    }
+    for (final id in toRemove) {
+      final s = _pipSessions.remove(id);
+      _pipPlayingState.remove(id);
+      _loadingPipIds.remove(id);
+      if (s != null) {
+        VideoPlaybackService.instance.disposeSession(s.textureId);
+      }
+    }
+
+    // 2. Synchronize active video PIP sessions
+    for (final overlay in activeVideoOverlays) {
+      final path = overlay.localPath!;
+      final session = _pipSessions[overlay.id];
+      final deltaSec = widget.viewModel.playheadPosition - overlay.startTimeInSeconds;
+      final rawOffsetSec = deltaSec * overlay.speed;
+      final maxDurSec = overlay.durationInSeconds * overlay.speed;
+      final clampedSec = rawOffsetSec.clamp(0.0, math.max(0.0, maxDurSec));
+      final targetMs = (clampedSec * 1000).round();
+
+      if (session == null) {
+        if (!_loadingPipIds.contains(overlay.id) && !kIsWeb && File(path).existsSync()) {
+          _loadingPipIds.add(overlay.id);
+          VideoPlaybackService.instance.createSession(path).then((newSession) {
+            _loadingPipIds.remove(overlay.id);
+            if (mounted && activeIds.contains(overlay.id) && newSession != null) {
+              setState(() {
+                _pipSessions[overlay.id] = newSession;
+              });
+              final effVol = overlay.isMuted ? 0.0 : (overlay.volume / 2.0).clamp(0.0, 1.0);
+              VideoPlaybackService.instance.setVolume(newSession.textureId, effVol);
+              VideoPlaybackService.instance.setSpeed(newSession.textureId, overlay.speed);
+              if (widget.viewModel.isPlaying) {
+                VideoPlaybackService.instance.play(newSession.textureId, position: Duration(milliseconds: targetMs));
+                _pipPlayingState[overlay.id] = true;
+              } else {
+                VideoPlaybackService.instance.seekTo(newSession.textureId, Duration(milliseconds: targetMs));
+                _pipPlayingState[overlay.id] = false;
+              }
+            }
+          });
+        }
+        continue;
+      }
+
+      if (!session.isInitialized) continue;
+
+      // Sync live volume and speed
+      final effVol = overlay.isMuted ? 0.0 : (overlay.volume / 2.0).clamp(0.0, 1.0);
+      VideoPlaybackService.instance.setVolume(session.textureId, effVol);
+      VideoPlaybackService.instance.setSpeed(session.textureId, overlay.speed);
+
+      final isPipPlaying = _pipPlayingState[overlay.id] ?? false;
+      if (widget.viewModel.isPlaying && !isPipPlaying) {
+        _pipPlayingState[overlay.id] = true;
+        VideoPlaybackService.instance.play(session.textureId, position: Duration(milliseconds: targetMs));
+      } else if (!widget.viewModel.isPlaying && isPipPlaying) {
+        _pipPlayingState[overlay.id] = false;
+        VideoPlaybackService.instance.pause(session.textureId);
+        VideoPlaybackService.instance.seekTo(session.textureId, Duration(milliseconds: targetMs));
+      } else if (!widget.viewModel.isPlaying) {
+        VideoPlaybackService.instance.seekTo(session.textureId, Duration(milliseconds: targetMs));
+      }
     }
   }
 
@@ -1638,6 +1724,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
         canvasWidth: canvasWidth,
         canvasHeight: canvasHeight,
         canvasKey: canvasKey ?? _canvasKey,
+        pipSession: _pipSessions[overlay.id],
       );
     }
     return const SizedBox.shrink();
@@ -2703,6 +2790,112 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
 }
 }
 
+class PipColorFilterHelper {
+  static ColorFilter? createFilter({
+    String? filterId,
+    double filterIntensity = 1.0,
+    PipAdjustments? adjustments,
+  }) {
+    final hasAdjustments = adjustments != null && (
+      adjustments.brightness != 0.0 ||
+      adjustments.contrast != 1.0 ||
+      adjustments.saturation != 1.0 ||
+      adjustments.temperature != 0.0 ||
+      adjustments.tint != 0.0
+    );
+    final hasFilter = filterId != null && filterId.isNotEmpty && filterId != 'none';
+
+    if (!hasAdjustments && !hasFilter) return null;
+
+    double rScale = 1.0, gScale = 1.0, bScale = 1.0;
+    double rOffset = 0.0, gOffset = 0.0, bOffset = 0.0;
+
+    final b = adjustments?.brightness ?? 0.0;
+    final c = adjustments?.contrast ?? 1.0;
+    final s = adjustments?.saturation ?? 1.0;
+    final temp = adjustments?.temperature ?? 0.0;
+    final tint = adjustments?.tint ?? 0.0;
+
+    final brightOffset = b * 255.0;
+    rOffset += temp * 30.0;
+    bOffset -= temp * 30.0;
+
+    gOffset -= tint * 25.0;
+    rOffset += tint * 15.0;
+    bOffset += tint * 15.0;
+
+    rScale *= c;
+    gScale *= c;
+    bScale *= c;
+    final cOffset = 128.0 * (1.0 - c);
+
+    if (hasFilter) {
+      final intensity = filterIntensity.clamp(0.0, 1.0);
+      switch (filterId) {
+        case 'sepia':
+          return ColorFilter.matrix(<double>[
+            (1.0 - 0.607 * intensity) * rScale, (0.769 * intensity) * gScale, (0.189 * intensity) * bScale, 0, brightOffset + cOffset,
+            (0.349 * intensity) * rScale, (1.0 - 0.314 * intensity) * gScale, (0.168 * intensity) * bScale, 0, brightOffset + cOffset,
+            (0.272 * intensity) * rScale, (0.534 * intensity) * gScale, (1.0 - 0.869 * intensity) * bScale, 0, brightOffset + cOffset,
+            0, 0, 0, 1, 0,
+          ]);
+        case 'grayscale':
+        case 'black_white':
+        case 'bw':
+          final lumR = 0.2126 * intensity;
+          final lumG = 0.7152 * intensity;
+          final lumB = 0.0722 * intensity;
+          final inv = 1.0 - intensity;
+          return ColorFilter.matrix(<double>[
+            (inv + lumR) * rScale, lumG * gScale, lumB * bScale, 0, brightOffset + cOffset,
+            lumR * rScale, (inv + lumG) * gScale, lumB * bScale, 0, brightOffset + cOffset,
+            lumR * rScale, lumG * gScale, (inv + lumB) * bScale, 0, brightOffset + cOffset,
+            0, 0, 0, 1, 0,
+          ]);
+        case 'vivid':
+          rScale *= (1.0 + 0.3 * intensity);
+          gScale *= (1.0 + 0.3 * intensity);
+          bScale *= (1.0 + 0.3 * intensity);
+          break;
+        case 'vintage':
+          rOffset += 20 * intensity;
+          bOffset -= 20 * intensity;
+          rScale *= (1.0 + 0.1 * intensity);
+          break;
+        case 'cool':
+          bOffset += 35 * intensity;
+          rOffset -= 15 * intensity;
+          break;
+        case 'warm':
+          rOffset += 35 * intensity;
+          bOffset -= 20 * intensity;
+          break;
+        case 'cyberpunk':
+          rOffset += 40 * intensity;
+          bOffset += 40 * intensity;
+          gOffset -= 20 * intensity;
+          break;
+        case 'cinema':
+          rOffset += 15 * intensity;
+          bOffset += 25 * intensity;
+          gOffset -= 10 * intensity;
+          break;
+      }
+    }
+
+    final rw = 0.2126 * (1.0 - s);
+    final gw = 0.7152 * (1.0 - s);
+    final bw = 0.0722 * (1.0 - s);
+
+    return ColorFilter.matrix(<double>[
+      (rw + s) * rScale, gw * gScale, bw * bScale, 0, brightOffset + cOffset + rOffset,
+      rw * rScale, (gw + s) * gScale, bw * bScale, 0, brightOffset + cOffset + gOffset,
+      rw * rScale, gw * gScale, (bw + s) * bScale, 0, brightOffset + cOffset + bOffset,
+      0, 0, 0, 1, 0,
+    ]);
+  }
+}
+
 enum PipInteractionMode { none, move, pinch, resizeRotate }
 
 /// CapCut-style Interactive PIP Overlay Widget with Fluent Touch Direct Manipulation:
@@ -2715,6 +2908,7 @@ class InteractivePipOverlayWidget extends StatefulWidget {
   final double canvasWidth;
   final double canvasHeight;
   final GlobalKey canvasKey;
+  final VideoPlayerSession? pipSession;
 
   const InteractivePipOverlayWidget({
     super.key,
@@ -2724,6 +2918,7 @@ class InteractivePipOverlayWidget extends StatefulWidget {
     required this.canvasWidth,
     required this.canvasHeight,
     required this.canvasKey,
+    this.pipSession,
   });
 
   @override
@@ -2992,151 +3187,301 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
     final baseWidth = widget.canvasWidth * 0.45;
     final baseHeight = baseWidth * (9.0 / 16.0);
 
+    // Compute animated parameters at playhead (clamped, non-destructive to timeline trimming)
+    final currentPlayheadMs = (widget.viewModel.playheadPosition * 1000.0).round();
+    final durationMs = (overlay.endTimeMs - overlay.startTimeMs).clamp(1, 99999999);
+    final elapsedMs = (currentPlayheadMs - overlay.startTimeMs).clamp(0, durationMs);
+    final remainingMs = (overlay.endTimeMs - currentPlayheadMs).clamp(0, durationMs);
+
+    final inDurationMs = math.min(500, (durationMs * 0.3).round());
+    final outDurationMs = math.min(500, (durationMs * 0.3).round());
+
+    double animOpacity = 1.0;
+    double animScale = 1.0;
+    double animRotation = 0.0;
+    Offset animOffset = Offset.zero;
+
+    final inAnim = overlay.inAnimation;
+    if (inAnim != null && inAnim.enabled && inAnim.type != 'none' && elapsedMs < inDurationMs && inDurationMs > 0) {
+      final t = (elapsedMs / inDurationMs).clamp(0.0, 1.0);
+      switch (inAnim.type) {
+        case 'fade':
+        case 'fadeIn':
+          animOpacity *= t;
+          break;
+        case 'slideRight':
+          animOffset += Offset((1.0 - t) * baseWidth, 0);
+          animOpacity *= t;
+          break;
+        case 'slideLeft':
+          animOffset += Offset(-(1.0 - t) * baseWidth, 0);
+          animOpacity *= t;
+          break;
+        case 'slideUp':
+          animOffset += Offset(0, -(1.0 - t) * baseHeight);
+          animOpacity *= t;
+          break;
+        case 'slideDown':
+          animOffset += Offset(0, (1.0 - t) * baseHeight);
+          animOpacity *= t;
+          break;
+        case 'zoomIn':
+          animScale *= (0.2 + 0.8 * t);
+          animOpacity *= t;
+          break;
+        case 'zoomOut':
+          animScale *= (1.8 - 0.8 * t);
+          animOpacity *= t;
+          break;
+        case 'rotateIn':
+          animRotation += (1.0 - t) * math.pi;
+          animScale *= t;
+          break;
+        case 'bounce':
+          final bounceT = (t == 0 || t == 1) ? t : (math.pow(2, -10 * t) * math.sin((t - 0.075) * (2 * math.pi) / 0.3) + 1).toDouble();
+          animScale *= bounceT.clamp(0.0, 1.5);
+          break;
+      }
+    }
+
+    final outAnim = overlay.outAnimation;
+    if (outAnim != null && outAnim.enabled && outAnim.type != 'none' && remainingMs < outDurationMs && outDurationMs > 0) {
+      final t = (remainingMs / outDurationMs).clamp(0.0, 1.0);
+      switch (outAnim.type) {
+        case 'fade':
+        case 'fadeOut':
+          animOpacity *= t;
+          break;
+        case 'slideRight':
+          animOffset += Offset((1.0 - t) * baseWidth, 0);
+          animOpacity *= t;
+          break;
+        case 'slideLeft':
+          animOffset += Offset(-(1.0 - t) * baseWidth, 0);
+          animOpacity *= t;
+          break;
+        case 'slideUp':
+          animOffset += Offset(0, -(1.0 - t) * baseHeight);
+          animOpacity *= t;
+          break;
+        case 'slideDown':
+          animOffset += Offset(0, (1.0 - t) * baseHeight);
+          animOpacity *= t;
+          break;
+        case 'zoomIn':
+          animScale *= (1.0 + (1.0 - t) * 0.8);
+          animOpacity *= t;
+          break;
+        case 'zoomOut':
+          animScale *= t;
+          break;
+      }
+    }
+
+    final overallAnim = overlay.overallAnimation;
+    if (overallAnim != null && overallAnim.enabled && overallAnim.type != 'none') {
+      final sec = elapsedMs / 1000.0;
+      switch (overallAnim.type) {
+        case 'pulse':
+          animScale *= 1.0 + 0.08 * math.sin(sec * 6.0);
+          break;
+        case 'float':
+          animOffset += Offset(0, 6.0 * math.sin(sec * 3.5));
+          break;
+        case 'spin':
+          animRotation += (sec * 1.5) % (2 * math.pi);
+          break;
+        case 'flicker':
+          animOpacity *= (0.85 + 0.15 * math.sin(sec * 20.0)).clamp(0.0, 1.0);
+          break;
+        case 'shake':
+          animOffset += Offset(4.0 * math.sin(sec * 25.0), 0);
+          break;
+      }
+    }
+
+    final effScale = (_liveScale * animScale).clamp(0.05, 10.0);
+    final effRotation = _liveRotation + animRotation;
+    final effOpacity = (overlay.opacity * animOpacity).clamp(0.0, 1.0);
+
+    final shadows = <BoxShadow>[];
+    final sh = overlay.shadow;
+    if (sh != null && sh.enabled) {
+      shadows.add(BoxShadow(
+        color: sh.color.withOpacity(sh.opacity.clamp(0.0, 1.0)),
+        blurRadius: sh.blur,
+        offset: Offset(sh.dx, sh.dy),
+      ));
+    }
+    final gl = overlay.glow;
+    if (gl != null && gl.enabled) {
+      shadows.add(BoxShadow(
+        color: gl.color.withOpacity(gl.intensity.clamp(0.0, 1.0)),
+        blurRadius: gl.radius,
+        spreadRadius: gl.radius * 0.3,
+      ));
+    }
+
+    Border border;
+    final outl = overlay.outline;
+    if (outl != null && outl.enabled) {
+      border = Border.all(
+        color: outl.color.withOpacity(outl.opacity.clamp(0.0, 1.0)),
+        width: outl.width,
+      );
+    } else {
+      border = Border.all(
+        color: isSelected ? AppColors.primary : Colors.transparent,
+        width: isSelected ? 2.0 : 0.0,
+      );
+    }
+
     return Positioned(
       left: posX,
       top: posY,
-      child: FractionalTranslation(
-        translation: const Offset(-0.5, -0.5),
-        child: Transform.rotate(
-          angle: _liveRotation,
-          child: Transform.scale(
-            scale: _liveScale,
-            child: Opacity(
-              opacity: overlay.opacity.clamp(0.0, 1.0),
-              child: Stack(
-                clipBehavior: Clip.none,
-                alignment: Alignment.center,
-                children: [
-                  // 1. PIP Overlay Media Body with 1-finger move and 2-finger body pinch
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Listener(
-                      behavior: HitTestBehavior.opaque,
-                      onPointerDown: _handlePointerDown,
-                      onPointerMove: _handlePointerMove,
-                      onPointerUp: _handlePointerUp,
-                      onPointerCancel: _handlePointerCancel,
-                      child: GestureDetector(
+      child: Transform.translate(
+        offset: animOffset,
+        child: FractionalTranslation(
+          translation: const Offset(-0.5, -0.5),
+          child: Transform.rotate(
+            angle: effRotation,
+            child: Transform.scale(
+              scale: effScale,
+              child: Opacity(
+                opacity: effOpacity,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    // 1. PIP Overlay Media Body with 1-finger move and 2-finger body pinch
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Listener(
                         behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          if (!isSelected) {
-                            widget.viewModel.selectOverlayById(overlay.id);
-                          }
-                        },
-                        child: Container(
-                          width: baseWidth,
-                          height: baseHeight,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                            border: Border.all(
-                              color: isSelected ? AppColors.primary : Colors.transparent,
-                              width: isSelected ? 2.0 : 0.0,
-                            ),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-                            child: _buildMediaContent(overlay),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // 2. Interactive Selection Handles
-                  if (isSelected) ...[
-                    // Top-Left: Flip Horizontal Button
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => widget.viewModel.toggleOverlayFlipHorizontal(overlay.id),
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          alignment: Alignment.center,
+                        onPointerDown: _handlePointerDown,
+                        onPointerMove: _handlePointerMove,
+                        onPointerUp: _handlePointerUp,
+                        onPointerCancel: _handlePointerCancel,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            if (!isSelected) {
+                              widget.viewModel.selectOverlayById(overlay.id);
+                            }
+                          },
                           child: Container(
-                            width: 24,
-                            height: 24,
+                            width: baseWidth,
+                            height: baseHeight,
                             decoration: BoxDecoration(
-                              color: AppColors.primary,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.5),
-                                  blurRadius: 4,
-                                ),
-                              ],
+                              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                              border: border,
+                              boxShadow: shadows.isNotEmpty ? shadows : null,
                             ),
-                            child: const Icon(Icons.flip_rounded, size: 13, color: Colors.black),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+                              child: _buildMediaContent(overlay, baseWidth, baseHeight),
+                            ),
                           ),
                         ),
                       ),
                     ),
 
-                    // Top-Right: Delete Layer Button
-                    Positioned(
-                      top: 0,
-                      right: 0,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () => widget.viewModel.removeOverlayClip(overlay.id),
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          alignment: Alignment.center,
+                    // 2. Interactive Selection Handles
+                    if (isSelected) ...[
+                      // Top-Left: Flip Horizontal Button
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => widget.viewModel.toggleOverlayFlipHorizontal(overlay.id),
                           child: Container(
-                            width: 24,
-                            height: 24,
-                            decoration: BoxDecoration(
-                              color: Colors.redAccent,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.5),
-                                  blurRadius: 4,
-                                ),
-                              ],
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.5),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(Icons.flip_rounded, size: 13, color: Colors.black),
                             ),
-                            child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
                           ),
                         ),
                       ),
-                    ),
 
-                    // Bottom-Right: Corner Scale Handle
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onPanStart: _handleCornerPanStart,
-                        onPanUpdate: _handleCornerPanUpdate,
-                        onPanEnd: _handleCornerPanEnd,
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          alignment: Alignment.center,
+                      // Top-Right: Delete Layer Button
+                      Positioned(
+                        top: 0,
+                        right: 0,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => widget.viewModel.removeOverlayClip(overlay.id),
                           child: Container(
-                            width: 24,
-                            height: 24,
-                            decoration: BoxDecoration(
-                              color: AppColors.primary,
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.5),
-                                  blurRadius: 4,
-                                ),
-                              ],
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.5),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(Icons.close_rounded, size: 14, color: Colors.white),
                             ),
-                            child: const Icon(Icons.open_in_full_rounded, size: 12, color: Colors.black),
                           ),
                         ),
                       ),
-                    ),
+
+                      // Bottom-Right: Corner Scale Handle
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanStart: _handleCornerPanStart,
+                          onPanUpdate: _handleCornerPanUpdate,
+                          onPanEnd: _handleCornerPanEnd,
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.5),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(Icons.open_in_full_rounded, size: 12, color: Colors.black),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -3145,35 +3490,83 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
     );
   }
 
-  Widget _buildMediaContent(OverlayClip overlay) {
+  Widget _buildMediaContent(OverlayClip overlay, double baseWidth, double baseHeight) {
     Widget visual;
 
     final mediaPath = overlay.localPath;
     final thumbPath = overlay.thumbnailPath;
 
-    if (overlay.isPhoto && mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync()) {
+    if (!overlay.isPhoto && widget.pipSession != null && widget.pipSession!.isInitialized) {
+      visual = FittedBox(
+        fit: BoxFit.cover,
+        clipBehavior: Clip.hardEdge,
+        child: SizedBox(
+          width: widget.pipSession!.width > 0 ? widget.pipSession!.width.toDouble() : baseWidth,
+          height: widget.pipSession!.height > 0 ? widget.pipSession!.height.toDouble() : baseHeight,
+          child: Texture(textureId: widget.pipSession!.textureId),
+        ),
+      );
+    } else if (overlay.isPhoto && mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync()) {
       visual = Image.file(
         File(mediaPath),
-        fit: BoxFit.contain,
+        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => _buildFallbackContent(overlay),
       );
     } else if (!overlay.isPhoto && thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync()) {
       visual = Image.file(
         File(thumbPath),
-        fit: BoxFit.contain,
+        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => _buildFallbackContent(overlay),
       );
-    } else if (mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync() && overlay.isPhoto) {
+    } else if (mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync()) {
       visual = Image.file(
         File(mediaPath),
-        fit: BoxFit.contain,
+        fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => _buildFallbackContent(overlay),
       );
     } else {
       visual = _buildFallbackContent(overlay);
     }
 
-    // Apply horizontal & vertical flipping
+    // 1. Non-destructive Crop
+    if (overlay.cropRect != null) {
+      final c = overlay.cropRect!;
+      if (c.left > 0.001 || c.top > 0.001 || c.width < 0.999 || c.height < 0.999) {
+        final invW = 1.0 / c.width.clamp(0.01, 1.0);
+        final invH = 1.0 / c.height.clamp(0.01, 1.0);
+        visual = ClipRect(
+          child: Transform(
+            alignment: Alignment.topLeft,
+            transform: Matrix4.identity()
+              ..scale(invW, invH)
+              ..translate(-c.left * baseWidth, -c.top * baseHeight),
+            child: visual,
+          ),
+        );
+      }
+    }
+
+    // 2. Corner Pin Perspective Warping
+    final tl = overlay.cornerTopLeft ?? Offset.zero;
+    final tr = overlay.cornerTopRight ?? const Offset(1, 0);
+    final bl = overlay.cornerBottomLeft ?? const Offset(0, 1);
+    final br = overlay.cornerBottomRight ?? const Offset(1, 1);
+    final isCornerPinned = tl != Offset.zero ||
+        tr != const Offset(1, 0) ||
+        bl != const Offset(0, 1) ||
+        br != const Offset(1, 1);
+
+    if (isCornerPinned) {
+      final cornerMatrix = _computeCornerPinMatrix(tl, tr, bl, br, baseWidth, baseHeight);
+      if (cornerMatrix != null) {
+        visual = Transform(
+          transform: cornerMatrix,
+          child: visual,
+        );
+      }
+    }
+
+    // 3. Apply horizontal & vertical flipping
     if (overlay.flipHorizontal || overlay.flipVertical) {
       visual = Transform(
         alignment: Alignment.center,
@@ -3186,7 +3579,20 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
       );
     }
 
-    // Apply Chroma Key (green/blue screen)
+    // 4. Color Filters & Adjustments
+    final colorFilter = PipColorFilterHelper.createFilter(
+      filterId: overlay.filterId,
+      filterIntensity: overlay.filterIntensity,
+      adjustments: overlay.adjustments,
+    );
+    if (colorFilter != null) {
+      visual = ColorFiltered(
+        colorFilter: colorFilter,
+        child: visual,
+      );
+    }
+
+    // 5. Apply Chroma Key (green/blue screen)
     if (overlay.enableChromaKey) {
       visual = ColorFiltered(
         colorFilter: ChromaKeyHelper.createColorFilter(
@@ -3199,7 +3605,7 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
       );
     }
 
-    // Apply Mask
+    // 6. Apply Mask
     if (overlay.mask != null) {
       visual = ClipPath(
         clipper: MaskPathClipper(overlay.mask!),
@@ -3207,7 +3613,7 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
       );
     }
 
-    // Apply Blend Mode
+    // 7. Apply Blend Mode
     if (overlay.blendMode != BlendMode.srcOver) {
       visual = CanvasBlendLayer(
         blendMode: overlay.blendMode,
@@ -3216,6 +3622,68 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
     }
 
     return visual;
+  }
+
+  static Matrix4? _computeCornerPinMatrix(Offset tl, Offset tr, Offset bl, Offset br, double w, double h) {
+    final x0 = tl.dx * w, y0 = tl.dy * h;
+    final x1 = tr.dx * w, y1 = tr.dy * h;
+    final x2 = bl.dx * w, y2 = bl.dy * h;
+    final x3 = br.dx * w, y3 = br.dy * h;
+
+    final dx1 = x1 - x3;
+    final dx2 = x2 - x3;
+    final sx = x0 - x1 + x3 - x2;
+    final dy1 = y1 - y3;
+    final dy2 = y2 - y3;
+    final sy = y0 - y1 + y3 - y2;
+
+    double a, b, c, d, e, f, g, h0;
+
+    if (sx.abs() < 1e-5 && sy.abs() < 1e-5) {
+      a = x1 - x0;
+      b = x2 - x0;
+      c = x0;
+      d = y1 - y0;
+      e = y2 - y0;
+      f = y0;
+      g = 0.0;
+      h0 = 0.0;
+    } else {
+      final det = dx1 * dy2 - dx2 * dy1;
+      if (det.abs() < 1e-7) return null;
+      g = (sx * dy2 - sy * dx2) / det;
+      h0 = (dx1 * sy - dy1 * sx) / det;
+      a = x1 - x0 + g * x1;
+      b = x2 - x0 + h0 * x2;
+      c = x0;
+      d = y1 - y0 + g * y1;
+      e = y2 - y0 + h0 * y2;
+      f = y0;
+    }
+
+    if (w <= 0 || h <= 0) return null;
+
+    final m = Matrix4.identity();
+    m.setEntry(0, 0, a / w);
+    m.setEntry(0, 1, b / h);
+    m.setEntry(0, 2, 0.0);
+    m.setEntry(0, 3, c);
+
+    m.setEntry(1, 0, d / w);
+    m.setEntry(1, 1, e / h);
+    m.setEntry(1, 2, 0.0);
+    m.setEntry(1, 3, f);
+
+    m.setEntry(2, 0, 0.0);
+    m.setEntry(2, 1, 0.0);
+    m.setEntry(2, 2, 1.0);
+    m.setEntry(2, 3, 0.0);
+
+    m.setEntry(3, 0, g / w);
+    m.setEntry(3, 1, h0 / h);
+    m.setEntry(3, 2, 0.0);
+    m.setEntry(3, 3, 1.0);
+    return m;
   }
 
   Widget _buildFallbackContent(OverlayClip overlay) {

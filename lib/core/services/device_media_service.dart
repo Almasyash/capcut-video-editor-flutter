@@ -430,12 +430,22 @@ class DeviceMediaService {
       );
       final mediaPath = overlay.localPath ?? asset.localPath;
       final thumbPath = overlay.thumbnailPath ?? asset.thumbnailPath;
+      final hasValidMedia = mediaPath != null && !mediaPath.startsWith('content://') && !kIsWeb && File(mediaPath).existsSync();
+
+      // If PIP video has audio, mix into audio payload
+      if (!overlay.isPhoto && !overlay.isMuted && overlay.volume > 0.0 && hasValidMedia) {
+        audioPayload.add({
+          'path': mediaPath,
+          'startTimeMs': overlay.startTime.inMilliseconds,
+          'trimStartMs': 0,
+          'trimEndMs': (overlay.duration.inMilliseconds * overlay.speed).round(),
+          'volume': overlay.volume,
+        });
+      }
 
       pipOverlaysPayload.add({
         'id': overlay.id,
-        'path': (mediaPath != null && !mediaPath.startsWith('content://') && !kIsWeb && File(mediaPath).existsSync())
-            ? mediaPath
-            : null,
+        'path': hasValidMedia ? mediaPath : null,
         'thumbnailPath': (thumbPath != null && !thumbPath.startsWith('content://') && !kIsWeb && File(thumbPath).existsSync())
             ? thumbPath
             : null,
@@ -450,6 +460,52 @@ class DeviceMediaService {
         'opacity': overlay.opacity,
         'flipHorizontal': overlay.flipHorizontal,
         'flipVertical': overlay.flipVertical,
+        'speed': overlay.speed,
+        'volume': overlay.volume,
+        'isMuted': overlay.isMuted,
+        'filterId': overlay.filterId,
+        'filterIntensity': overlay.filterIntensity,
+        'blendMode': overlay.blendMode.name,
+        'enableChromaKey': overlay.enableChromaKey,
+        'chromaKeyColor': overlay.chromaKeyColor.value,
+        'chromaSimilarity': overlay.chromaSimilarity,
+        'chromaSmoothness': overlay.chromaSmoothness,
+        'cropLeft': overlay.cropRect?.left ?? 0.0,
+        'cropTop': overlay.cropRect?.top ?? 0.0,
+        'cropWidth': overlay.cropRect?.width ?? 1.0,
+        'cropHeight': overlay.cropRect?.height ?? 1.0,
+        'cornerTopLeftX': overlay.cornerTopLeft?.dx ?? 0.0,
+        'cornerTopLeftY': overlay.cornerTopLeft?.dy ?? 0.0,
+        'cornerTopRightX': overlay.cornerTopRight?.dx ?? 1.0,
+        'cornerTopRightY': overlay.cornerTopRight?.dy ?? 0.0,
+        'cornerBottomLeftX': overlay.cornerBottomLeft?.dx ?? 0.0,
+        'cornerBottomLeftY': overlay.cornerBottomLeft?.dy ?? 1.0,
+        'cornerBottomRightX': overlay.cornerBottomRight?.dx ?? 1.0,
+        'cornerBottomRightY': overlay.cornerBottomRight?.dy ?? 1.0,
+        'inAnimation': overlay.inAnimation?.type,
+        'inAnimationDuration': overlay.inAnimation?.durationSec ?? 0.5,
+        'overallAnimation': overlay.overallAnimation?.type,
+        'outAnimation': overlay.outAnimation?.type,
+        'outAnimationDuration': overlay.outAnimation?.durationSec ?? 0.5,
+        'brightness': overlay.adjustments.brightness,
+        'contrast': overlay.adjustments.contrast,
+        'saturation': overlay.adjustments.saturation,
+        'exposure': overlay.adjustments.exposure,
+        'temperature': overlay.adjustments.temperature,
+        'tint': overlay.adjustments.tint,
+        'outlineEnabled': overlay.outline?.enabled ?? false,
+        'outlineColor': overlay.outline?.color.value ?? 0xFF00C6FF,
+        'outlineWidth': overlay.outline?.width ?? 2.0,
+        'shadowEnabled': overlay.shadow?.enabled ?? false,
+        'shadowColor': overlay.shadow?.color.value ?? 0xFF000000,
+        'shadowBlur': overlay.shadow?.blur ?? 8.0,
+        'shadowDx': overlay.shadow?.dx ?? 2.0,
+        'shadowDy': overlay.shadow?.dy ?? 4.0,
+        'shadowOpacity': overlay.shadow?.opacity ?? 0.6,
+        'glowEnabled': overlay.glow?.enabled ?? false,
+        'glowColor': overlay.glow?.color.value ?? 0xFF00FFFF,
+        'glowRadius': overlay.glow?.radius ?? 12.0,
+        'glowIntensity': overlay.glow?.intensity ?? 0.7,
       });
     }
 
