@@ -399,7 +399,8 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
   }
 
   Widget _buildThumbPreview(OverlayClip overlay) {
-    final thumb = overlay.thumbnailPath ?? (overlay.isPhoto ? overlay.localPath : null);
+    final isPhoto = overlay.isPhoto || overlay.isPhotoOverlay;
+    final thumb = overlay.thumbnailPath ?? (isPhoto ? overlay.localPath : null);
     if (thumb != null && thumb.isNotEmpty && File(thumb).existsSync()) {
       return ClipRRect(
         borderRadius: BorderRadius.circular(3),
@@ -409,7 +410,7 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
           height: 16,
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Icon(
-            overlay.isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
+            isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
             size: 12,
             color: AppColors.primary,
           ),
@@ -417,7 +418,7 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
       );
     }
     return Icon(
-      overlay.isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
+      isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
       size: 12,
       color: AppColors.primary,
     );

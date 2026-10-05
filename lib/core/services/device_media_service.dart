@@ -33,10 +33,26 @@ class DeviceMediaResult {
   });
 
   MediaAsset toMediaAsset() {
+    final lowerName = fileName.toLowerCase();
+    final lowerPath = filePath.toLowerCase();
+    final isPhoto = fileType == 'photo' ||
+        lowerName.endsWith('.jpg') ||
+        lowerName.endsWith('.jpeg') ||
+        lowerName.endsWith('.png') ||
+        lowerName.endsWith('.webp') ||
+        lowerName.endsWith('.bmp') ||
+        lowerName.endsWith('.gif') ||
+        lowerPath.endsWith('.jpg') ||
+        lowerPath.endsWith('.jpeg') ||
+        lowerPath.endsWith('.png') ||
+        lowerPath.endsWith('.webp') ||
+        lowerPath.endsWith('.bmp') ||
+        lowerPath.endsWith('.gif');
+
     MediaAssetType assetType;
     if (fileType == 'audio') {
       assetType = MediaAssetType.audio;
-    } else if (fileType == 'photo') {
+    } else if (isPhoto) {
       assetType = MediaAssetType.photo;
     } else {
       assetType = MediaAssetType.video;
@@ -421,7 +437,7 @@ class DeviceMediaService {
         (a) => a.id == overlay.assetId,
         orElse: () => MediaAsset(
           id: overlay.assetId ?? overlay.id,
-          type: overlay.isPhoto ? MediaAssetType.photo : MediaAssetType.video,
+          type: (overlay.isPhoto || overlay.isPhotoOverlay) ? MediaAssetType.photo : MediaAssetType.video,
           name: overlay.title,
           localPath: overlay.localPath,
           thumbnailPath: overlay.thumbnailPath,
@@ -430,10 +446,25 @@ class DeviceMediaService {
       );
       final mediaPath = overlay.localPath ?? asset.localPath;
       final thumbPath = overlay.thumbnailPath ?? asset.thumbnailPath;
+      final isPhoto = overlay.isPhoto ||
+          overlay.isPhotoOverlay ||
+          asset.isPhoto ||
+          (mediaPath != null && (
+              mediaPath.toLowerCase().endsWith('.jpg') ||
+              mediaPath.toLowerCase().endsWith('.jpeg') ||
+              mediaPath.toLowerCase().endsWith('.png') ||
+              mediaPath.toLowerCase().endsWith('.webp') ||
+              mediaPath.toLowerCase().endsWith('.bmp') ||
+              mediaPath.toLowerCase().endsWith('.gif') ||
+              mediaPath.toLowerCase().endsWith('.heic') ||
+              mediaPath.toLowerCase().endsWith('.avif')
+          ));
       final hasValidMedia = mediaPath != null && !mediaPath.startsWith('content://') && !kIsWeb && File(mediaPath).existsSync();
+      final hasValidThumb = thumbPath != null && !thumbPath.startsWith('content://') && !kIsWeb && File(thumbPath).existsSync();
+      final effectivePath = hasValidMedia ? mediaPath : (isPhoto && hasValidThumb ? thumbPath : null);
 
       // If PIP video has audio, mix into audio payload
-      if (!overlay.isPhoto && !overlay.isMuted && overlay.volume > 0.0 && hasValidMedia) {
+      if (!isPhoto && !overlay.isMuted && overlay.volume > 0.0 && hasValidMedia) {
         audioPayload.add({
           'path': mediaPath,
           'startTimeMs': overlay.startTime.inMilliseconds,
@@ -445,11 +476,9 @@ class DeviceMediaService {
 
       pipOverlaysPayload.add({
         'id': overlay.id,
-        'path': hasValidMedia ? mediaPath : null,
-        'thumbnailPath': (thumbPath != null && !thumbPath.startsWith('content://') && !kIsWeb && File(thumbPath).existsSync())
-            ? thumbPath
-            : null,
-        'isPhoto': overlay.isPhoto,
+        'path': effectivePath,
+        'thumbnailPath': hasValidThumb ? thumbPath : null,
+        'isPhoto': isPhoto,
         'title': overlay.title,
         'startTimeMs': overlay.startTime.inMilliseconds,
         'durationMs': overlay.duration.inMilliseconds,
@@ -660,6 +689,11 @@ class DeviceMediaService {
       final mime = (result['mimeType'] as String?) ?? '';
       final sizeBytes = (result['size'] as num?)?.toInt();
 
+      final path = localPath;
+      debugPrint('[PIP] Selected URI: $uri');
+      debugPrint('[PIP] Copied Path: $path');
+      debugPrint('[PIP] File Exists: ${!kIsWeb && path != null && File(path).existsSync()}');
+
       // Rule 2: If Android returns null/empty localPath, fail import
       if (localPath == null || localPath.trim().isEmpty) {
         debugPrint('[DeviceMediaService] Import failed: Native picker returned null/empty localPath');
@@ -687,11 +721,25 @@ class DeviceMediaService {
           ? Duration(milliseconds: durationMs)
           : null;
 
+      final lowerName = name.toLowerCase();
+      final lowerPath = localPath.toLowerCase();
       final isPhoto = mime.startsWith('image') ||
-          name.toLowerCase().endsWith('.jpg') ||
-          name.toLowerCase().endsWith('.jpeg') ||
-          name.toLowerCase().endsWith('.png') ||
-          name.toLowerCase().endsWith('.webp');
+          lowerName.endsWith('.jpg') ||
+          lowerName.endsWith('.jpeg') ||
+          lowerName.endsWith('.png') ||
+          lowerName.endsWith('.webp') ||
+          lowerName.endsWith('.bmp') ||
+          lowerName.endsWith('.gif') ||
+          lowerName.endsWith('.heic') ||
+          lowerName.endsWith('.avif') ||
+          lowerPath.endsWith('.jpg') ||
+          lowerPath.endsWith('.jpeg') ||
+          lowerPath.endsWith('.png') ||
+          lowerPath.endsWith('.webp') ||
+          lowerPath.endsWith('.bmp') ||
+          lowerPath.endsWith('.gif') ||
+          lowerPath.endsWith('.heic') ||
+          lowerPath.endsWith('.avif');
 
       final assetType = isPhoto ? MediaAssetType.photo : MediaAssetType.video;
 

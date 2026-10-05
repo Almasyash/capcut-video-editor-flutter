@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.MediaCodec
 import android.media.MediaExtractor
@@ -903,6 +904,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
             val selectedUri: Uri? = data?.data ?: if (data?.clipData != null && data.clipData!!.itemCount > 0) data.clipData!!.getItemAt(0).uri else null
             if (resultCode == Activity.RESULT_OK && selectedUri != null) {
                 val uri: Uri = selectedUri
+                android.util.Log.d("MainActivity", "[PIP] Selected URI: $uri")
+                try {
+                    contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                } catch (e: Exception) {}
+
                 var displayName = "Imported_Media"
                 var fileSize: Long = 0
 
@@ -923,7 +929,13 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                     android.util.Log.w("MainActivity", "Failed to query URI metadata: ${e.message}")
                 }
 
-                val mimeType = contentResolver.getType(uri) ?: ""
+                var mimeType = contentResolver.getType(uri) ?: ""
+                if (mimeType.isEmpty()) {
+                    val extFromName = android.webkit.MimeTypeMap.getFileExtensionFromUrl(displayName)
+                    if (extFromName.isNotEmpty()) {
+                        mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(extFromName.lowercase()) ?: ""
+                    }
+                }
 
                 // Cache file to local app storage for direct filesystem and image loading
                 var localFilePath = uri.toString()
@@ -937,6 +949,10 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                             mimeType.contains("png") -> ".png"
                             mimeType.contains("jpeg") || mimeType.contains("jpg") -> ".jpg"
                             mimeType.contains("webp") -> ".webp"
+                            mimeType.contains("gif") -> ".gif"
+                            mimeType.contains("bmp") -> ".bmp"
+                            mimeType.contains("heic") -> ".heic"
+                            mimeType.contains("avif") -> ".avif"
                             mimeType.contains("mp4") -> ".mp4"
                             mimeType.contains("audio") || mimeType.contains("m4a") -> ".m4a"
                             mimeType.contains("video") -> ".mp4"
@@ -945,24 +961,49 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         sanitizedName += ext
                     }
                     val mediaDir = File(filesDir, "media").apply { if (!exists()) mkdirs() }
-                    val targetFile = File(mediaDir, sanitizedName)
+                    val uniqueFileName = "media_${System.currentTimeMillis()}_$sanitizedName"
+                    val targetFile = File(mediaDir, uniqueFileName)
                     val inputStream: InputStream? = contentResolver.openInputStream(uri)
                     if (inputStream != null) {
-                        val outputStream = FileOutputStream(targetFile)
                         inputStream.use { input ->
-                            outputStream.use { output ->
+                            FileOutputStream(targetFile).use { output ->
                                 input.copyTo(output)
                             }
                         }
                         if (targetFile.exists() && targetFile.length() > 0) {
                             localFilePath = targetFile.absolutePath
+                            android.util.Log.d("MainActivity", "[PIP] Copied Path: $localFilePath")
+                            android.util.Log.d("MainActivity", "[PIP] File Exists: ${targetFile.exists()}")
+
+                            val lowerName = targetFile.name.lowercase()
+                            val isPhoto = mimeType.startsWith("image") ||
+                                    lowerName.endsWith(".jpg") ||
+                                    lowerName.endsWith(".jpeg") ||
+                                    lowerName.endsWith(".png") ||
+                                    lowerName.endsWith(".webp") ||
+                                    lowerName.endsWith(".bmp") ||
+                                    lowerName.endsWith(".gif") ||
+                                    lowerName.endsWith(".heic") ||
+                                    lowerName.endsWith(".avif")
+                            val isVideo = mimeType.startsWith("video") || lowerName.endsWith(".mp4") || lowerName.endsWith(".mov") || lowerName.endsWith(".mkv")
+                            val isAudio = mimeType.startsWith("audio") || lowerName.endsWith(".mp3") || lowerName.endsWith(".wav") || lowerName.endsWith(".aac")
+
+                            if (isPhoto) {
+                                // Step 4: Native image decoding and validation with ARGB_8888
+                                val options = BitmapFactory.Options().apply {
+                                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                                }
+                                val bitmap = BitmapFactory.decodeFile(targetFile.absolutePath, options)
+                                if (bitmap != null) {
+                                    android.util.Log.d("MainActivity", "[PIP] Image Decode Success: width=${bitmap.width}, height=${bitmap.height}, config=${bitmap.config}")
+                                    bitmap.recycle()
+                                } else {
+                                    android.util.Log.e("MainActivity", "[PIP] Image Decode Failed: bitmap == null for ${targetFile.absolutePath}. Reason: length=${targetFile.length()} bytes, outMimeType=${options.outMimeType}")
+                                }
+                            }
 
                             // Extract metadata using MediaMetadataRetriever
                             try {
-                                val lowerName = displayName.lowercase()
-                                val isVideo = mimeType.startsWith("video") || lowerName.endsWith(".mp4") || lowerName.endsWith(".mov") || lowerName.endsWith(".mkv")
-                                val isAudio = mimeType.startsWith("audio") || lowerName.endsWith(".mp3") || lowerName.endsWith(".wav") || lowerName.endsWith(".aac")
-
                                 if (isVideo || isAudio) {
                                     val retriever = MediaMetadataRetriever()
                                     retriever.setDataSource(targetFile.absolutePath)
@@ -973,7 +1014,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                                     if (isVideo) {
                                         val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
                                         if (frame != null) {
-                                            val thumbFile = File(mediaDir, "${sanitizedName}_thumb.jpg")
+                                            val thumbFile = File(mediaDir, "${uniqueFileName}_thumb.jpg")
                                             val thumbOut = FileOutputStream(thumbFile)
                                             thumbOut.use { out ->
                                                 frame.compress(Bitmap.CompressFormat.JPEG, 85, out)
@@ -991,7 +1032,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                 } catch (e: Exception) {
-                    // fallback to content URI
+                    android.util.Log.e("MainActivity", "[PIP] Failed copying URI to local app storage: ${e.message}", e)
                 }
 
                 val responseMap = mutableMapOf<String, Any?>(

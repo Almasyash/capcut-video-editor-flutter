@@ -1430,14 +1430,28 @@ class VideoExportEngine(private val context: Context) {
         // PIP overlay textures cache
         val pipTextures = mutableMapOf<String, Int>()
         for (pip in pipOverlays) {
-            val imgPath = if (pip.isPhoto) pip.path else (pip.thumbnailPath ?: pip.path)
+            val isImagePip = pip.isPhoto ||
+                    (pip.path != null && (
+                        pip.path.lowercase().endsWith(".jpg") ||
+                        pip.path.lowercase().endsWith(".jpeg") ||
+                        pip.path.lowercase().endsWith(".png") ||
+                        pip.path.lowercase().endsWith(".webp") ||
+                        pip.path.lowercase().endsWith(".bmp") ||
+                        pip.path.lowercase().endsWith(".gif") ||
+                        pip.path.lowercase().endsWith(".heic") ||
+                        pip.path.lowercase().endsWith(".avif")
+                    ))
+            val imgPath = if (isImagePip) pip.path else (pip.thumbnailPath ?: pip.path)
             if (imgPath != null && !pipTextures.containsKey(imgPath)) {
                 val f = File(imgPath)
                 if (f.exists()) {
                     try {
-                        val opts = BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 }
-                        val bm = BitmapFactory.decodeFile(f.absolutePath, opts)
-                        if (bm != null) {
+                        val options = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                        }
+                        val bitmap = BitmapFactory.decodeFile(f.absolutePath, options)
+                        if (bitmap != null) {
+                            Log.d(TAG, "[PIP] Export Image Decode Success: path=${f.absolutePath}, width=${bitmap.width}, height=${bitmap.height}, config=${bitmap.config}")
                             val tex = IntArray(1)
                             GLES20.glGenTextures(1, tex, 0)
                             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
@@ -1445,13 +1459,17 @@ class VideoExportEngine(private val context: Context) {
                             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
                             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
                             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-                            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bm, 0)
+                            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
                             pipTextures[imgPath] = tex[0]
-                            bm.recycle()
+                            bitmap.recycle()
+                        } else {
+                            Log.e(TAG, "[PIP] Export Image Decode Failed: bitmap == null for ${f.absolutePath}. Reason: file exists=${f.exists()}, length=${f.length()} bytes, canRead=${f.canRead()}, outMimeType=${options.outMimeType}")
                         }
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed creating PIP texture for '${pip.title}': ${e.message}")
+                        Log.e(TAG, "[PIP] Failed creating PIP texture for '${pip.title}': ${e.message}", e)
                     }
+                } else {
+                    Log.e(TAG, "[PIP] Export Image File Does Not Exist: $imgPath")
                 }
             }
         }
@@ -1713,7 +1731,18 @@ class VideoExportEngine(private val context: Context) {
                     for (pip in pipOverlays) {
                         val pipEnd = pip.startTimeMs + pip.durationMs
                         if (currentTimeMs in pip.startTimeMs..pipEnd) {
-                            val imgPath = if (pip.isPhoto) pip.path else (pip.thumbnailPath ?: pip.path)
+                            val isImagePip = pip.isPhoto ||
+                                    (pip.path != null && (
+                                        pip.path.lowercase().endsWith(".jpg") ||
+                                        pip.path.lowercase().endsWith(".jpeg") ||
+                                        pip.path.lowercase().endsWith(".png") ||
+                                        pip.path.lowercase().endsWith(".webp") ||
+                                        pip.path.lowercase().endsWith(".bmp") ||
+                                        pip.path.lowercase().endsWith(".gif") ||
+                                        pip.path.lowercase().endsWith(".heic") ||
+                                        pip.path.lowercase().endsWith(".avif")
+                                    ))
+                            val imgPath = if (isImagePip) pip.path else (pip.thumbnailPath ?: pip.path)
                             val texId = if (imgPath != null) pipTextures[imgPath] else null
                             if (texId != null && texId > 0) {
                                 val centerX = (pip.x * width).toFloat()

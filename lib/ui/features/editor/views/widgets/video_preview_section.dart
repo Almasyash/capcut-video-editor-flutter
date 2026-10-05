@@ -131,7 +131,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
 
   void _syncPipPlayback() {
     final activeOverlays = widget.viewModel.activeOverlayClipsAtPlayhead;
-    final activeVideoOverlays = activeOverlays.where((o) => !o.isPhoto && o.localPath != null && o.localPath!.isNotEmpty).toList();
+    final activeVideoOverlays = activeOverlays.where((o) => !o.isPhoto && !o.isPhotoOverlay && o.localPath != null && o.localPath!.isNotEmpty).toList();
     final activeIds = activeVideoOverlays.map((o) => o.id).toSet();
 
     // 1. Dispose sessions for overlays that left active playhead
@@ -3177,8 +3177,20 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
 
   @override
   Widget build(BuildContext context) {
+    if (widget.canvasWidth <= 0 || widget.canvasHeight <= 0) {
+      return const SizedBox.shrink();
+    }
+
     final overlay = widget.overlay;
     final isSelected = widget.isSelected;
+
+    // Timeline duration validation: overlay.startTime <= playhead <= overlay.endTime
+    final currentPlayheadSec = widget.viewModel.playheadPosition;
+    final isWithinTimeline = currentPlayheadSec >= (overlay.startTimeInSeconds - 0.05) &&
+        currentPlayheadSec <= (overlay.endTimeInSeconds + 0.05);
+    if (!isWithinTimeline && !isSelected) {
+      return const SizedBox.shrink();
+    }
 
     final posX = _livePosition.dx.clamp(0.0, 1.0) * widget.canvasWidth;
     final posY = _livePosition.dy.clamp(0.0, 1.0) * widget.canvasHeight;
@@ -3493,10 +3505,65 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
   Widget _buildMediaContent(OverlayClip overlay, double baseWidth, double baseHeight) {
     Widget visual;
 
-    final mediaPath = overlay.localPath;
-    final thumbPath = overlay.thumbnailPath;
+    final linkedAsset = overlay.assetId != null ? widget.viewModel.getAssetById(overlay.assetId!) : null;
+    final mediaPath = overlay.localPath ??
+        linkedAsset?.localPath ??
+        overlay.thumbnailPath ??
+        linkedAsset?.thumbnailPath;
+    final thumbPath = overlay.thumbnailPath ??
+        linkedAsset?.thumbnailPath;
 
-    if (!overlay.isPhoto && widget.pipSession != null && widget.pipSession!.isInitialized) {
+    final isPhoto = overlay.isPhoto ||
+        overlay.isPhotoOverlay ||
+        (mediaPath != null && (
+            mediaPath.toLowerCase().endsWith('.jpg') ||
+            mediaPath.toLowerCase().endsWith('.jpeg') ||
+            mediaPath.toLowerCase().endsWith('.png') ||
+            mediaPath.toLowerCase().endsWith('.webp') ||
+            mediaPath.toLowerCase().endsWith('.bmp') ||
+            mediaPath.toLowerCase().endsWith('.gif') ||
+            mediaPath.toLowerCase().endsWith('.heic') ||
+            mediaPath.toLowerCase().endsWith('.avif')
+        ));
+
+    debugPrint('[PIP] Preview Render: $mediaPath');
+
+    if (isPhoto) {
+      if (mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync()) {
+        visual = Image.file(
+          File(mediaPath),
+          fit: BoxFit.cover,
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (frame != null || wasSynchronouslyLoaded) {
+              debugPrint('[PIP] Image Decode Success');
+            }
+            return child;
+          },
+          errorBuilder: (context, error, stackTrace) {
+            debugPrint('[PIP] Image decode error: $error on $mediaPath');
+            return _buildFallbackContent(overlay);
+          },
+        );
+      } else if (thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync()) {
+        visual = Image.file(
+          File(thumbPath),
+          fit: BoxFit.cover,
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (frame != null || wasSynchronouslyLoaded) {
+              debugPrint('[PIP] Image Decode Success');
+            }
+            return child;
+          },
+          errorBuilder: (context, error, stackTrace) {
+            debugPrint('[PIP] Image decode error: $error on $thumbPath');
+            return _buildFallbackContent(overlay);
+          },
+        );
+      } else {
+        debugPrint('[PIP] Image file not found on disk: $mediaPath');
+        visual = _buildFallbackContent(overlay);
+      }
+    } else if (widget.pipSession != null && widget.pipSession!.isInitialized) {
       visual = FittedBox(
         fit: BoxFit.cover,
         clipBehavior: Clip.hardEdge,
@@ -3506,13 +3573,7 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
           child: Texture(textureId: widget.pipSession!.textureId),
         ),
       );
-    } else if (overlay.isPhoto && mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync()) {
-      visual = Image.file(
-        File(mediaPath),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _buildFallbackContent(overlay),
-      );
-    } else if (!overlay.isPhoto && thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync()) {
+    } else if (thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync()) {
       visual = Image.file(
         File(thumbPath),
         fit: BoxFit.cover,

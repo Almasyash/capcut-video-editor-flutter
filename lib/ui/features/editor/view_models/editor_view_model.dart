@@ -466,8 +466,10 @@ class EditorViewModel extends ChangeNotifier {
   /// Returns active overlay clips visible at current playhead
   List<OverlayClip> get activeOverlayClipsAtPlayhead {
     return _overlayClips.where((o) {
-      return _playheadPosition >= o.startTimeInSeconds &&
-          _playheadPosition <= (o.startTimeInSeconds + o.durationInSeconds);
+      final isSelected = selectedOverlay?.id == o.id;
+      final inRange = _playheadPosition >= (o.startTimeInSeconds - 0.05) &&
+          _playheadPosition <= (o.endTimeInSeconds + 0.05);
+      return inRange || isSelected;
     }).toList();
   }
 
@@ -1645,6 +1647,7 @@ class EditorViewModel extends ChangeNotifier {
   void addOverlayClip(OverlayClip overlay) {
     _saveSnapshot();
     _overlayClips.add(overlay);
+    debugPrint('[PIP] Overlay Added: ${overlay.id}');
     _selectedOverlayIndex = _overlayClips.length - 1;
     notifyListeners();
   }
@@ -1863,8 +1866,12 @@ class EditorViewModel extends ChangeNotifier {
 
   void addOverlayFromMediaAsset(MediaAsset asset) {
     _saveSnapshot();
+    if (!containsMediaAsset(asset)) {
+      _mediaLibrary.add(asset);
+    }
     final playheadMs = (_playheadPosition * 1000).round();
     final dur = asset.duration ?? const Duration(seconds: 4);
+    final isPhoto = asset.type == MediaAssetType.photo || asset.isPhoto;
 
     final overlay = OverlayClip(
       id: 'overlay_${DateTime.now().millisecondsSinceEpoch}',
@@ -1872,11 +1879,11 @@ class EditorViewModel extends ChangeNotifier {
       assetId: asset.id,
       localPath: asset.localPath ?? asset.thumbnailPath,
       thumbnailPath: asset.thumbnailPath,
-      isPhoto: asset.type == MediaAssetType.photo,
+      isPhoto: isPhoto,
       startTime: Duration(milliseconds: playheadMs),
       duration: dur,
       previewGradient: const [Color(0xFF00C6FF), Color(0xFF0072FF)],
-      previewIcon: asset.type == MediaAssetType.photo ? Icons.image_rounded : Icons.movie_filter_rounded,
+      previewIcon: isPhoto ? Icons.image_rounded : Icons.movie_filter_rounded,
       position: const Offset(0.5, 0.5),
       scale: 0.5,
       opacity: 1.0,
@@ -1884,6 +1891,7 @@ class EditorViewModel extends ChangeNotifier {
     );
 
     _overlayClips.add(overlay);
+    debugPrint('[PIP] Overlay Added: ${overlay.id}');
     _selectedOverlayIndex = _overlayClips.length - 1;
     _selectedClipIndex = null;
     _selectedTextId = null;

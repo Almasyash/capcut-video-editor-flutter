@@ -444,6 +444,27 @@ class OverlayClip {
   int get durationMs => duration.inMilliseconds;
   int get endTimeMs => startTime.inMilliseconds + duration.inMilliseconds;
 
+  bool get isPhotoOverlay =>
+      isPhoto ||
+      title.toLowerCase().endsWith('.jpg') ||
+      title.toLowerCase().endsWith('.jpeg') ||
+      title.toLowerCase().endsWith('.png') ||
+      title.toLowerCase().endsWith('.webp') ||
+      title.toLowerCase().endsWith('.bmp') ||
+      title.toLowerCase().endsWith('.gif') ||
+      title.toLowerCase().endsWith('.heic') ||
+      title.toLowerCase().endsWith('.avif') ||
+      (localPath != null && (
+          localPath!.toLowerCase().endsWith('.jpg') ||
+          localPath!.toLowerCase().endsWith('.jpeg') ||
+          localPath!.toLowerCase().endsWith('.png') ||
+          localPath!.toLowerCase().endsWith('.webp') ||
+          localPath!.toLowerCase().endsWith('.bmp') ||
+          localPath!.toLowerCase().endsWith('.gif') ||
+          localPath!.toLowerCase().endsWith('.heic') ||
+          localPath!.toLowerCase().endsWith('.avif')
+      ));
+
   bool get hasCornerPin =>
       cornerTopLeft != null ||
       cornerTopRight != null ||
@@ -698,7 +719,24 @@ class OverlayClip {
       assetId: json['assetId'] as String?,
       localPath: json['localPath'] as String?,
       thumbnailPath: json['thumbnailPath'] as String?,
-      isPhoto: json['isPhoto'] as bool? ?? false,
+      isPhoto: (json['isPhoto'] as bool?) ??
+          ((json['localPath'] != null && (
+              (json['localPath'] as String).toLowerCase().endsWith('.jpg') ||
+              (json['localPath'] as String).toLowerCase().endsWith('.jpeg') ||
+              (json['localPath'] as String).toLowerCase().endsWith('.png') ||
+              (json['localPath'] as String).toLowerCase().endsWith('.webp') ||
+              (json['localPath'] as String).toLowerCase().endsWith('.bmp') ||
+              (json['localPath'] as String).toLowerCase().endsWith('.gif') ||
+              (json['localPath'] as String).toLowerCase().endsWith('.heic') ||
+              (json['localPath'] as String).toLowerCase().endsWith('.avif')
+          )) || ((json['title'] != null && (
+              (json['title'] as String).toLowerCase().endsWith('.jpg') ||
+              (json['title'] as String).toLowerCase().endsWith('.jpeg') ||
+              (json['title'] as String).toLowerCase().endsWith('.png') ||
+              (json['title'] as String).toLowerCase().endsWith('.webp') ||
+              (json['title'] as String).toLowerCase().endsWith('.bmp') ||
+              (json['title'] as String).toLowerCase().endsWith('.gif')
+          )))),
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
       volume: (json['volume'] as num?)?.toDouble() ?? 1.0,
       isMuted: json['isMuted'] as bool? ?? false,

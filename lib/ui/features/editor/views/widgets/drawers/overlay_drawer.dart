@@ -1223,7 +1223,8 @@ class _OverlayDrawerState extends State<OverlayDrawer> {
   }
 
   Widget _buildItemThumbnail(OverlayClip item) {
-    final thumbPath = item.thumbnailPath ?? (item.isPhoto ? item.localPath : null);
+    final isPhoto = item.isPhoto || item.isPhotoOverlay;
+    final thumbPath = item.thumbnailPath ?? (isPhoto ? item.localPath : null);
     if (thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync()) {
       return Image.file(
         File(thumbPath),
@@ -1235,9 +1236,10 @@ class _OverlayDrawerState extends State<OverlayDrawer> {
   }
 
   Widget _buildFallbackIcon(OverlayClip item) {
+    final isPhoto = item.isPhoto || item.isPhotoOverlay;
     return Center(
       child: Icon(
-        item.isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
+        isPhoto ? Icons.image_rounded : Icons.videocam_rounded,
         size: 24,
         color: AppColors.primary.withValues(alpha: 0.7),
       ),

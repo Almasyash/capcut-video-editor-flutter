@@ -45,7 +45,26 @@ class MediaAsset {
   });
 
   bool get isVideo => type == MediaAssetType.video;
-  bool get isPhoto => type == MediaAssetType.photo;
+  bool get isPhoto =>
+      type == MediaAssetType.photo ||
+      name.toLowerCase().endsWith('.jpg') ||
+      name.toLowerCase().endsWith('.jpeg') ||
+      name.toLowerCase().endsWith('.png') ||
+      name.toLowerCase().endsWith('.webp') ||
+      name.toLowerCase().endsWith('.bmp') ||
+      name.toLowerCase().endsWith('.gif') ||
+      name.toLowerCase().endsWith('.heic') ||
+      name.toLowerCase().endsWith('.avif') ||
+      (localPath != null && (
+          localPath!.toLowerCase().endsWith('.jpg') ||
+          localPath!.toLowerCase().endsWith('.jpeg') ||
+          localPath!.toLowerCase().endsWith('.png') ||
+          localPath!.toLowerCase().endsWith('.webp') ||
+          localPath!.toLowerCase().endsWith('.bmp') ||
+          localPath!.toLowerCase().endsWith('.gif') ||
+          localPath!.toLowerCase().endsWith('.heic') ||
+          localPath!.toLowerCase().endsWith('.avif')
+      ));
   bool get isAudio => type == MediaAssetType.audio;
 
   MediaAsset copyWith({
