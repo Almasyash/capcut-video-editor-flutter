@@ -2,6 +2,7 @@ import 'dart:ui' show ColorFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
+import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/video_preview_section.dart';
 
 void main() {
@@ -345,6 +346,197 @@ void main() {
       expect(clip.adjustments!.temperature, closeTo(-0.2, 1e-4));
       expect(clip.adjustments!.tint, closeTo(0.1, 1e-4));
       expect(clip.adjustments!.isDefault, isFalse);
+    });
+
+    test('timeline boundary hardening: handles zero start, sub-frame precision, and end-trim math', () {
+      const clipZero = OverlayClip(
+        id: 'clip_zero',
+        title: 'Zero Start Overlay',
+        startTime: Duration.zero,
+        duration: Duration(milliseconds: 3000),
+        isPhoto: true,
+      );
+
+      expect(clipZero.startTimeInSeconds, equals(0.0));
+      expect(clipZero.durationInSeconds, equals(3.0));
+      expect(clipZero.endTimeInSeconds, equals(3.0));
+      expect(clipZero.endTimeMs, equals(3000));
+
+      // Sub-frame boundary checking
+      const boundaryTolerance = 0.05; // 50ms buffer used in EditorViewModel
+      bool isVisibleAt(double playhead, OverlayClip c) {
+        return playhead >= (c.startTimeInSeconds - boundaryTolerance) &&
+            playhead <= (c.endTimeInSeconds + boundaryTolerance);
+      }
+
+      // Exactly at start
+      expect(isVisibleAt(0.0, clipZero), isTrue);
+      // Just inside start (1 frame / 16ms inside)
+      expect(isVisibleAt(0.016, clipZero), isTrue);
+      // Midpoint
+      expect(isVisibleAt(1.5, clipZero), isTrue);
+      // Exactly at end
+      expect(isVisibleAt(3.0, clipZero), isTrue);
+      // 1 frame inside end
+      expect(isVisibleAt(2.984, clipZero), isTrue);
+      // 100ms outside end (outside 50ms tolerance)
+      expect(isVisibleAt(3.10, clipZero), isFalse);
+      // Before start (outside 50ms tolerance)
+      expect(isVisibleAt(-0.10, clipZero), isFalse);
+
+      // Very short PIP (100ms)
+      const shortClip = OverlayClip(
+        id: 'short_clip',
+        title: 'Short PIP',
+        startTime: Duration(milliseconds: 1000),
+        duration: Duration(milliseconds: 100),
+        isPhoto: true,
+      );
+      expect(shortClip.startTimeInSeconds, equals(1.0));
+      expect(shortClip.durationInSeconds, equals(0.1));
+      expect(shortClip.endTimeInSeconds, closeTo(1.1, 1e-4));
+      expect(isVisibleAt(1.05, shortClip), isTrue);
+    });
+
+    test('animation duration hardening: user trim preserves timeline duration authority without mutating clip', () {
+      const entranceAnim = PipAnimation(
+        type: 'fade',
+        durationSec: 1.0,
+        easing: 'easeInOut',
+        enabled: true,
+      );
+
+      final clip = OverlayClip(
+        id: 'anim_clip',
+        title: 'Animated Photo',
+        startTime: Duration.zero,
+        duration: const Duration(seconds: 4),
+        isPhoto: true,
+        inAnimation: entranceAnim,
+      );
+
+      expect(clip.inAnimation, isNotNull);
+      expect(clip.inAnimation!.durationSec, equals(1.0));
+      expect(clip.durationInSeconds, equals(4.0));
+
+      // Simulate trimming clip to 0.5s: clip duration becomes 0.5s
+      final trimmedClip = clip.copyWith(
+        duration: const Duration(milliseconds: 500),
+      );
+
+      // The clip duration must strictly reflect user trim (0.5s), NOT be lengthened or shortened by the animation
+      expect(trimmedClip.durationInSeconds, equals(0.5));
+      expect(trimmedClip.inAnimation!.durationSec, equals(1.0));
+      // Effective animation clamp: animation duration cannot exceed the clip duration in playback
+      final effectiveAnimDuration = trimmedClip.inAnimation!.durationSec > trimmedClip.durationInSeconds
+          ? trimmedClip.durationInSeconds
+          : trimmedClip.inAnimation!.durationSec;
+      expect(effectiveAnimDuration, equals(0.5));
+    });
+
+    test('multi-PIP stress & persistence: 3 Images + 2 Videos + 2 Texts serialize and revive cleanly', () {
+      final img1 = const OverlayClip(
+        id: 'img_1',
+        title: 'Image 1 (JPG)',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 5),
+        position: Offset(0.2, 0.3),
+        scale: 0.5,
+        isPhoto: true,
+        localPath: '/data/user/0/cache/img1.jpg',
+      );
+      final img2 = const OverlayClip(
+        id: 'img_2',
+        title: 'Image 2 (PNG Transparent)',
+        startTime: Duration(seconds: 1),
+        duration: Duration(seconds: 4),
+        position: Offset(0.5, 0.5),
+        scale: 0.7,
+        opacity: 0.85,
+        isPhoto: true,
+        localPath: '/data/user/0/cache/img2.png',
+      );
+      final img3 = const OverlayClip(
+        id: 'img_3',
+        title: 'Image 3 (WebP)',
+        startTime: Duration(seconds: 2),
+        duration: Duration(seconds: 3),
+        position: Offset(0.8, 0.7),
+        scale: 0.6,
+        rotation: 0.785, // 45 deg
+        isPhoto: true,
+        localPath: '/data/user/0/cache/img3.webp',
+      );
+      final vid1 = const OverlayClip(
+        id: 'vid_1',
+        title: 'Video PIP 1',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 6),
+        position: Offset(0.3, 0.7),
+        scale: 0.4,
+        isPhoto: false,
+        localPath: '/data/user/0/cache/vid1.mp4',
+      );
+      final vid2 = const OverlayClip(
+        id: 'vid_2',
+        title: 'Video PIP 2',
+        startTime: Duration(seconds: 1),
+        duration: Duration(seconds: 5),
+        position: Offset(0.7, 0.3),
+        scale: 0.45,
+        isPhoto: false,
+        localPath: '/data/user/0/cache/vid2.mp4',
+      );
+
+      final text1 = TextOverlay(
+        id: 'txt_1',
+        text: 'Title Headline',
+        startTime: Duration.zero,
+        duration: const Duration(seconds: 4),
+      );
+      final text2 = TextOverlay(
+        id: 'txt_2',
+        text: 'Subtitle Banner',
+        startTime: const Duration(seconds: 2),
+        duration: const Duration(seconds: 3),
+      );
+
+      final allOverlays = [img1, img2, img3, vid1, vid2];
+      final allTexts = [text1, text2];
+
+      // Verify layer count and distinct z-indices
+      expect(allOverlays.length, equals(5));
+      expect(allTexts.length, equals(2));
+
+      // Verify image vs video distinction
+      final photos = allOverlays.where((o) => o.isPhoto).toList();
+      final videos = allOverlays.where((o) => !o.isPhoto).toList();
+      expect(photos.length, equals(3));
+      expect(videos.length, equals(2));
+      for (final p in photos) {
+        expect(p.isPhoto, isTrue);
+        expect(p.localPath, isNotNull);
+      }
+      for (final v in videos) {
+        expect(v.isPhoto, isFalse);
+        expect(v.localPath, isNotNull);
+      }
+
+      // JSON serialization & deserialization cycle
+      final serializedOverlays = allOverlays.map((o) => o.toJson()).toList();
+      final revivedOverlays = serializedOverlays.map((j) => OverlayClip.fromJson(j)).toList();
+
+      expect(revivedOverlays.length, equals(5));
+      expect(revivedOverlays[0].id, equals('img_1'));
+      expect(revivedOverlays[0].isPhoto, isTrue);
+      expect(revivedOverlays[1].id, equals('img_2'));
+      expect(revivedOverlays[1].opacity, closeTo(0.85, 1e-4));
+      expect(revivedOverlays[2].id, equals('img_3'));
+      expect(revivedOverlays[2].rotation, closeTo(0.785, 1e-4));
+      expect(revivedOverlays[3].id, equals('vid_1'));
+      expect(revivedOverlays[3].isPhoto, isFalse);
+      expect(revivedOverlays[4].id, equals('vid_2'));
+      expect(revivedOverlays[4].isPhoto, isFalse);
     });
   });
 }
