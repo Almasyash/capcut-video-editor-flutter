@@ -2796,13 +2796,7 @@ class PipColorFilterHelper {
     double filterIntensity = 1.0,
     PipAdjustments? adjustments,
   }) {
-    final hasAdjustments = adjustments != null && (
-      adjustments.brightness != 0.0 ||
-      adjustments.contrast != 1.0 ||
-      adjustments.saturation != 1.0 ||
-      adjustments.temperature != 0.0 ||
-      adjustments.tint != 0.0
-    );
+    final hasAdjustments = adjustments != null && !adjustments.isDefault;
     final hasFilter = filterId != null && filterId.isNotEmpty && filterId != 'none';
 
     if (!hasAdjustments && !hasFilter) return null;
@@ -2811,12 +2805,14 @@ class PipColorFilterHelper {
     double rOffset = 0.0, gOffset = 0.0, bOffset = 0.0;
 
     final b = adjustments?.brightness ?? 0.0;
-    final c = adjustments?.contrast ?? 1.0;
-    final s = adjustments?.saturation ?? 1.0;
+    final exp = adjustments?.exposure ?? 0.0;
+    // PipAdjustments contrast and saturation are -1.0 to 1.0 with 0.0 as neutral
+    final c = (1.0 + (adjustments?.contrast ?? 0.0)).clamp(0.0, 3.0);
+    final s = (1.0 + (adjustments?.saturation ?? 0.0)).clamp(0.0, 3.0);
     final temp = adjustments?.temperature ?? 0.0;
     final tint = adjustments?.tint ?? 0.0;
 
-    final brightOffset = b * 255.0;
+    final brightOffset = (b + exp) * 50.0;
     rOffset += temp * 30.0;
     bOffset -= temp * 30.0;
 
@@ -3532,7 +3528,10 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
       if (mediaPath != null && mediaPath.isNotEmpty && File(mediaPath).existsSync()) {
         visual = Image.file(
           File(mediaPath),
+          width: baseWidth,
+          height: baseHeight,
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
             if (frame != null || wasSynchronouslyLoaded) {
               debugPrint('[PIP] Image Decode Success');
@@ -3547,7 +3546,10 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
       } else if (thumbPath != null && thumbPath.isNotEmpty && File(thumbPath).existsSync()) {
         visual = Image.file(
           File(thumbPath),
+          width: baseWidth,
+          height: baseHeight,
           fit: BoxFit.cover,
+          gaplessPlayback: true,
           frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
             if (frame != null || wasSynchronouslyLoaded) {
               debugPrint('[PIP] Image Decode Success');
