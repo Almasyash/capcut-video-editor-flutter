@@ -2833,7 +2833,7 @@ class PipColorFilterHelper {
     PipAdjustments? adjustments,
   }) {
     final hasAdjustments = adjustments != null && !adjustments.isDefault;
-    final hasFilter = filterId != null && filterId.isNotEmpty && filterId != 'none';
+    final hasFilter = filterId != null && filterId.isNotEmpty && filterId != 'none' && filterIntensity > 0.0;
 
     if (!hasAdjustments && !hasFilter) return null;
 
@@ -2908,9 +2908,42 @@ class PipColorFilterHelper {
           gOffset -= 20 * intensity;
           break;
         case 'cinema':
+        case 'cinematic':
           rOffset += 15 * intensity;
           bOffset += 25 * intensity;
           gOffset -= 10 * intensity;
+          break;
+        case 'fade':
+          rScale *= (1.0 - 0.15 * intensity);
+          gScale *= (1.0 - 0.15 * intensity);
+          bScale *= (1.0 - 0.15 * intensity);
+          rOffset += 25 * intensity;
+          gOffset += 25 * intensity;
+          bOffset += 25 * intensity;
+          break;
+        case 'mono':
+          final lumR = 0.2126 * intensity;
+          final lumG = 0.7152 * intensity;
+          final lumB = 0.0722 * intensity;
+          final inv = 1.0 - intensity;
+          return ColorFilter.matrix(<double>[
+            (inv + lumR) * rScale, lumG * gScale, lumB * bScale, 0, brightOffset + cOffset,
+            lumR * rScale, (inv + lumG) * gScale, lumB * bScale, 0, brightOffset + cOffset,
+            lumR * rScale, lumG * gScale, (inv + lumB) * bScale, 0, brightOffset + cOffset,
+            0, 0, 0, 1, 0,
+          ]);
+        case 'dramatic':
+          rScale *= (1.0 + 0.35 * intensity);
+          gScale *= (1.0 + 0.35 * intensity);
+          bScale *= (1.0 + 0.35 * intensity);
+          rOffset -= 15 * intensity;
+          gOffset -= 15 * intensity;
+          bOffset -= 15 * intensity;
+          break;
+        case 'portrait':
+          rOffset += 10 * intensity;
+          gOffset += 5 * intensity;
+          rScale *= (1.0 + 0.1 * intensity);
           break;
       }
     }
