@@ -335,10 +335,10 @@ class EditDrawer extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Slider(
-                    value: currentVolume.clamp(0.0, 1.0),
+                    value: currentVolume.clamp(0.0, 2.0),
                     min: 0.0,
-                    max: 1.0,
-                    divisions: 100,
+                    max: 2.0,
+                    divisions: 200,
                     activeColor: isMuted ? AppColors.textMuted : AppColors.primary,
                     onChanged: isMuted
                         ? null

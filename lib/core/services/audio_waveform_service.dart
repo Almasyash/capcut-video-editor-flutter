@@ -32,8 +32,17 @@ class AudioWaveformService {
     List<double> points;
     try {
       if (file.existsSync() && file.path.toLowerCase().endsWith('.wav')) {
-        final bytes = await file.readAsBytes();
-        points = parseWavBytes(bytes, targetPoints: targetPoints);
+        final length = file.lengthSync();
+        // Prevent loading entire large audio files into RAM
+        if (length > 1024 * 1024) {
+          final raf = await file.open(mode: FileMode.read);
+          final bytes = await raf.read(math.min(512 * 1024, length));
+          await raf.close();
+          points = parseWavBytes(bytes, targetPoints: targetPoints);
+        } else {
+          final bytes = await file.readAsBytes();
+          points = parseWavBytes(bytes, targetPoints: targetPoints);
+        }
       } else if (file.existsSync()) {
         final length = file.lengthSync();
         points = generateOrganicWaveform(
@@ -70,10 +79,20 @@ class AudioWaveformService {
       try {
         final file = File(localPath);
         if (file.existsSync() && file.path.toLowerCase().endsWith('.wav')) {
-          final bytes = file.readAsBytesSync();
-          final points = parseWavBytes(bytes, targetPoints: targetPoints);
-          _cache[cacheKey] = points;
-          return points;
+          final length = file.lengthSync();
+          if (length > 1024 * 1024) {
+            final raf = file.openSync(mode: FileMode.read);
+            final bytes = raf.readSync(math.min(512 * 1024, length));
+            raf.closeSync();
+            final points = parseWavBytes(bytes, targetPoints: targetPoints);
+            _cache[cacheKey] = points;
+            return points;
+          } else {
+            final bytes = file.readAsBytesSync();
+            final points = parseWavBytes(bytes, targetPoints: targetPoints);
+            _cache[cacheKey] = points;
+            return points;
+          }
         }
       } catch (_) {}
     }

@@ -401,7 +401,11 @@ class DeviceMediaService {
           'startTimeMs': track.startTime.inMilliseconds,
           'trimStartMs': track.trimStart.inMilliseconds,
           'trimEndMs': track.effectiveTrimEnd.inMilliseconds,
-          'volume': track.volume,
+          'volume': track.isMuted ? 0.0 : track.volume,
+          'speed': track.speed,
+          'fadeInMs': track.effectiveFadeInDuration.inMilliseconds,
+          'fadeOutMs': track.effectiveFadeOutDuration.inMilliseconds,
+          'isMuted': track.isMuted,
         });
       }
     }
@@ -472,6 +476,10 @@ class DeviceMediaService {
           'trimStartMs': 0,
           'trimEndMs': (overlay.duration.inMilliseconds * overlay.speed).round(),
           'volume': overlay.volume,
+          'speed': overlay.speed,
+          'fadeInMs': (overlay.fadeInDurationSec * 1000).round(),
+          'fadeOutMs': (overlay.fadeOutDurationSec * 1000).round(),
+          'isMuted': overlay.isMuted,
         });
       }
 

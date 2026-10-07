@@ -79,11 +79,11 @@ void main() {
 
   group('2. Layer Model State & Serialization Tests', () {
     test('OverlayClip has default lock=false, visible=true and serializes cleanly', () {
-      final overlay = OverlayClip(
+      const overlay = OverlayClip(
         id: 'ov_1',
         title: 'PIP 1',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 3),
+        duration: Duration(seconds: 3),
         localPath: '/test/image.png',
         isPhoto: true,
       );
@@ -114,11 +114,11 @@ void main() {
     });
 
     test('TextOverlay has default lock=false, visible=true and serializes cleanly', () {
-      final text = TextOverlay(
+      const text = TextOverlay(
         id: 'txt_1',
         text: 'Sample Text',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 4),
+        duration: Duration(seconds: 4),
       );
 
       expect(text.isLocked, isFalse);
@@ -147,14 +147,14 @@ void main() {
     });
 
     test('VideoClip has default lock=false, visible=true and serializes cleanly', () {
-      final clip = VideoClip(
+      const clip = VideoClip(
         id: 'vid_1',
         assetId: 'asset_vid_1',
         title: 'Video 1',
-        originalDuration: const Duration(seconds: 5),
+        originalDuration: Duration(seconds: 5),
         trimStart: Duration.zero,
-        trimEnd: const Duration(seconds: 5),
-        previewGradient: const [Color(0xFF000000), Color(0xFF111111)],
+        trimEnd: Duration(seconds: 5),
+        previewGradient: [Color(0xFF000000), Color(0xFF111111)],
       );
 
       expect(clip.isLocked, isFalse);
@@ -178,11 +178,11 @@ void main() {
     });
 
     test('AudioTrack has default lock=false, visible=true and serializes cleanly', () {
-      final audio = AudioTrack(
+      const audio = AudioTrack(
         id: 'aud_1',
         assetId: 'asset_1',
         name: 'Background Music',
-        duration: const Duration(seconds: 10),
+        duration: Duration(seconds: 10),
       );
 
       expect(audio.isLocked, isFalse);
@@ -222,11 +222,11 @@ void main() {
 
     test('Toggle lock on Overlay Clip', () {
       final vm = EditorViewModel();
-      final overlay = OverlayClip(
+      const overlay = OverlayClip(
         id: 'test_ov',
         title: 'Overlay',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 3),
+        duration: Duration(seconds: 3),
         localPath: '/path/test.png',
         isPhoto: true,
       );
@@ -245,11 +245,11 @@ void main() {
       for (final t in List<TextOverlay>.from(vm.textOverlays)) {
         vm.removeTextOverlay(t.id);
       }
-      final text = TextOverlay(
+      const text = TextOverlay(
         id: 'test_txt',
         text: 'Title',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 3),
+        duration: Duration(seconds: 3),
       );
       vm.addTextOverlay(text);
 
@@ -263,11 +263,11 @@ void main() {
 
     test('Toggle lock on Audio Track', () {
       final vm = EditorViewModel();
-      final audio = AudioTrack(
+      const audio = AudioTrack(
         id: 'test_aud',
         assetId: 'aud_asset',
         name: 'Track 1',
-        duration: const Duration(seconds: 5),
+        duration: Duration(seconds: 5),
       );
       vm.addAudioTrack(audio);
 
@@ -291,11 +291,11 @@ void main() {
       expect(vm.videoClips.first.isVisible, isTrue);
 
       // Overlay visibility
-      vm.addOverlayClip(OverlayClip(
+      vm.addOverlayClip(const OverlayClip(
         id: 'ov_vis',
         title: 'Vis PIP',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 2),
+        duration: Duration(seconds: 2),
       ));
       expect(vm.overlayClips.first.isVisible, isTrue);
       vm.toggleOverlayVisibility('ov_vis');
@@ -305,22 +305,22 @@ void main() {
       for (final t in List<TextOverlay>.from(vm.textOverlays)) {
         vm.removeTextOverlay(t.id);
       }
-      vm.addTextOverlay(TextOverlay(
+      vm.addTextOverlay(const TextOverlay(
         id: 'txt_vis',
         text: 'Hello',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 2),
+        duration: Duration(seconds: 2),
       ));
       expect(vm.textOverlays.first.isVisible, isTrue);
       vm.toggleTextVisibility('txt_vis');
       expect(vm.textOverlays.first.isVisible, isFalse);
 
       // Audio visibility
-      vm.addAudioTrack(AudioTrack(
+      vm.addAudioTrack(const AudioTrack(
         id: 'aud_vis',
         assetId: 'song_asset',
         name: 'Song',
-        duration: const Duration(seconds: 5),
+        duration: Duration(seconds: 5),
       ));
       expect(vm.audioTracks.first.isVisible, isTrue);
       vm.toggleAudioTrackVisibility('aud_vis');
@@ -333,9 +333,9 @@ void main() {
   group('4. EditorViewModel Layer Reordering Tests', () {
     test('Overlay layer reordering: up, down, front, back', () {
       final vm = EditorViewModel();
-      vm.addOverlayClip(OverlayClip(id: 'ov_A', title: 'A', startTime: Duration.zero, duration: const Duration(seconds: 3)));
-      vm.addOverlayClip(OverlayClip(id: 'ov_B', title: 'B', startTime: Duration.zero, duration: const Duration(seconds: 3)));
-      vm.addOverlayClip(OverlayClip(id: 'ov_C', title: 'C', startTime: Duration.zero, duration: const Duration(seconds: 3)));
+      vm.addOverlayClip(const OverlayClip(id: 'ov_A', title: 'A', startTime: Duration.zero, duration: Duration(seconds: 3)));
+      vm.addOverlayClip(const OverlayClip(id: 'ov_B', title: 'B', startTime: Duration.zero, duration: Duration(seconds: 3)));
+      vm.addOverlayClip(const OverlayClip(id: 'ov_C', title: 'C', startTime: Duration.zero, duration: Duration(seconds: 3)));
 
       expect(vm.overlayClips.map((o) => o.id).toList(), ['ov_A', 'ov_B', 'ov_C']);
 
@@ -363,9 +363,9 @@ void main() {
       for (final t in List<TextOverlay>.from(vm.textOverlays)) {
         vm.removeTextOverlay(t.id);
       }
-      vm.addTextOverlay(TextOverlay(id: 'txt_A', text: 'A', startTime: Duration.zero, duration: const Duration(seconds: 3)));
-      vm.addTextOverlay(TextOverlay(id: 'txt_B', text: 'B', startTime: Duration.zero, duration: const Duration(seconds: 3)));
-      vm.addTextOverlay(TextOverlay(id: 'txt_C', text: 'C', startTime: Duration.zero, duration: const Duration(seconds: 3)));
+      vm.addTextOverlay(const TextOverlay(id: 'txt_A', text: 'A', startTime: Duration.zero, duration: Duration(seconds: 3)));
+      vm.addTextOverlay(const TextOverlay(id: 'txt_B', text: 'B', startTime: Duration.zero, duration: Duration(seconds: 3)));
+      vm.addTextOverlay(const TextOverlay(id: 'txt_C', text: 'C', startTime: Duration.zero, duration: Duration(seconds: 3)));
 
       expect(vm.textOverlays.map((t) => t.id).toList(), ['txt_A', 'txt_B', 'txt_C']);
 
@@ -392,11 +392,11 @@ void main() {
   group('5. Multi-Layer Split at Playhead Tests', () {
     test('Split Overlay at Playhead divides clip into two sequential parts', () {
       final vm = EditorViewModel();
-      vm.addOverlayClip(OverlayClip(
+      vm.addOverlayClip(const OverlayClip(
         id: 'ov_split',
         title: 'Split PIP',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 6),
+        duration: Duration(seconds: 6),
       ));
 
       // Move playhead to 2 seconds
@@ -422,11 +422,11 @@ void main() {
       for (final t in List<TextOverlay>.from(vm.textOverlays)) {
         vm.removeTextOverlay(t.id);
       }
-      vm.addTextOverlay(TextOverlay(
+      vm.addTextOverlay(const TextOverlay(
         id: 'txt_split',
         text: 'Long Subtitle',
-        startTime: const Duration(seconds: 1),
-        duration: const Duration(seconds: 5),
+        startTime: Duration(seconds: 1),
+        duration: Duration(seconds: 5),
       ));
 
       // Move playhead to 3 seconds (2 seconds into text)
@@ -449,12 +449,12 @@ void main() {
 
     test('Split Audio at Playhead divides audio track into two sequential parts', () {
       final vm = EditorViewModel();
-      vm.addAudioTrack(AudioTrack(
+      vm.addAudioTrack(const AudioTrack(
         id: 'aud_split',
         assetId: 'split_asset',
         name: 'Voice',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 8),
+        duration: Duration(seconds: 8),
       ));
 
       // Move playhead to 4 seconds
@@ -491,17 +491,17 @@ void main() {
 
     test('Snap boundaries include clips, overlays, texts, and audios', () {
       final vm = EditorViewModel();
-      vm.addOverlayClip(OverlayClip(
+      vm.addOverlayClip(const OverlayClip(
         id: 'ov_snap',
         title: 'Snap OV',
-        startTime: const Duration(seconds: 2),
-        duration: const Duration(seconds: 3), // ends at 5s
+        startTime: Duration(seconds: 2),
+        duration: Duration(seconds: 3), // ends at 5s
       ));
-      vm.addTextOverlay(TextOverlay(
+      vm.addTextOverlay(const TextOverlay(
         id: 'txt_snap',
         text: 'Snap Text',
-        startTime: const Duration(seconds: 7),
-        duration: const Duration(seconds: 2), // ends at 9s
+        startTime: Duration(seconds: 7),
+        duration: Duration(seconds: 2), // ends at 9s
       ));
 
       final bounds = vm.snapBoundaries;
@@ -520,7 +520,7 @@ void main() {
 
     test('Zoom In, Zoom Out, Reset Zoom operate on pixelsPerSecond', () {
       final vm = EditorViewModel();
-      final defaultPps = AppDimensions.defaultPixelsPerSecond;
+      const defaultPps = AppDimensions.defaultPixelsPerSecond;
       expect(vm.pixelsPerSecond, defaultPps);
 
       vm.zoomIn(1.25);
@@ -556,11 +556,11 @@ void main() {
 
     test('duplicateSelectedItem duplicates overlay clip when overlay is selected', () {
       final vm = EditorViewModel();
-      final overlay = OverlayClip(
+      const overlay = OverlayClip(
         id: 'dup_ov',
         title: 'Original PIP',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 3),
+        duration: Duration(seconds: 3),
       );
       vm.addOverlayClip(overlay);
       vm.selectOverlay(0);
@@ -577,11 +577,11 @@ void main() {
       for (final t in List<TextOverlay>.from(vm.textOverlays)) {
         vm.removeTextOverlay(t.id);
       }
-      final text = TextOverlay(
+      const text = TextOverlay(
         id: 'dup_txt',
         text: 'Duplicate Me',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 2),
+        duration: Duration(seconds: 2),
       );
       vm.addTextOverlay(text);
       vm.selectText('dup_txt');
@@ -595,11 +595,11 @@ void main() {
 
     test('duplicateSelectedItem duplicates audio when audio track is selected', () {
       final vm = EditorViewModel();
-      final audio = AudioTrack(
+      const audio = AudioTrack(
         id: 'dup_aud',
         assetId: 'dup_aud_asset',
         name: 'Track',
-        duration: const Duration(seconds: 4),
+        duration: Duration(seconds: 4),
       );
       vm.addAudioTrack(audio);
       vm.selectAudioTrack('dup_aud');

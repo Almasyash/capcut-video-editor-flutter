@@ -1316,7 +1316,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 startTimeMs = (map["startTimeMs"] as? Number)?.toLong() ?: 0L,
                 trimStartMs = (map["trimStartMs"] as? Number)?.toLong() ?: 0L,
                 trimEndMs = (map["trimEndMs"] as? Number)?.toLong() ?: 5000L,
-                volume = (map["volume"] as? Number)?.toDouble() ?: 1.0
+                volume = (map["volume"] as? Number)?.toDouble() ?: 1.0,
+                speed = (map["speed"] as? Number)?.toDouble() ?: 1.0,
+                fadeInMs = (map["fadeInMs"] as? Number)?.toLong() ?: 0L,
+                fadeOutMs = (map["fadeOutMs"] as? Number)?.toLong() ?: 0L,
+                isMuted = map["isMuted"] as? Boolean ?: false
             )
         }
         val rawTexts = call.argument<List<Map<String, Any>>>("textOverlays") ?: emptyList()

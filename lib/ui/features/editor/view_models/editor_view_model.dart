@@ -2580,12 +2580,13 @@ class EditorViewModel extends ChangeNotifier {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
     final clip = _videoClips[_selectedClipIndex!];
-    final clampedVol = volume.clamp(0.0, 1.0);
+    final clampedVol = volume.clamp(0.0, 2.0);
     _videoClips[_selectedClipIndex!] = clip.copyWith(
       volume: clampedVol,
       isMuted: clampedVol == 0.0 ? true : false,
     );
     scheduleAutoSave();
+    TtsService.announce('Video volume ${(clampedVol * 100).round()}%');
     notifyListeners();
   }
 
@@ -2594,8 +2595,10 @@ class EditorViewModel extends ChangeNotifier {
     if (targetIndex == null || targetIndex < 0 || targetIndex >= _videoClips.length) return;
     _saveSnapshot();
     final clip = _videoClips[targetIndex];
-    _videoClips[targetIndex] = clip.copyWith(isMuted: !clip.isMuted);
+    final newMuted = !clip.isMuted;
+    _videoClips[targetIndex] = clip.copyWith(isMuted: newMuted);
     scheduleAutoSave();
+    TtsService.announce(newMuted ? 'Video audio muted' : 'Video audio unmuted');
     notifyListeners();
   }
 
@@ -2849,8 +2852,12 @@ class EditorViewModel extends ChangeNotifier {
     final index = _audioTracks.indexWhere((t) => t.id == track.id);
     if (index != -1) {
       debugPrint('[TIMELINE_TRIM_TRACE] TRIM LEFT: id=${track.id}, startTime=${track.startTimeInSeconds}s (PRESERVED), oldTrimStart=${track.trimStartInSeconds}s, newTrimStart=${newTrimStart.inMilliseconds / 1000.0}s, trimEnd=${track.trimEndInSeconds}s, effectiveDuration=${track.durationInSeconds}s -> ${(track.effectiveTrimEnd.inMilliseconds - newTrimStart.inMilliseconds) / 1000.0 / track.speed}s');
-      _audioTracks[index] = track.copyWith(
+      final updated = track.copyWith(
         trimStart: newTrimStart,
+      );
+      _audioTracks[index] = updated.copyWith(
+        fadeInDuration: updated.effectiveFadeInDuration,
+        fadeOutDuration: updated.effectiveFadeOutDuration,
       );
       _syncAudioPlayback(forceSeek: true);
       notifyListeners();
@@ -2879,8 +2886,12 @@ class EditorViewModel extends ChangeNotifier {
     final index = _audioTracks.indexWhere((t) => t.id == track.id);
     if (index != -1) {
       debugPrint('[TIMELINE_TRIM_TRACE] TRIM RIGHT: id=${track.id}, startTime=${track.startTimeInSeconds}s (PRESERVED), trimStart=${track.trimStartInSeconds}s, oldTrimEnd=${track.trimEndInSeconds}s, newTrimEnd=${newTrimEnd.inMilliseconds / 1000.0}s, effectiveDuration=${track.durationInSeconds}s -> ${(newTrimEnd.inMilliseconds - track.trimStart.inMilliseconds) / 1000.0 / track.speed}s');
-      _audioTracks[index] = track.copyWith(
+      final updated = track.copyWith(
         trimEnd: newTrimEnd,
+      );
+      _audioTracks[index] = updated.copyWith(
+        fadeInDuration: updated.effectiveFadeInDuration,
+        fadeOutDuration: updated.effectiveFadeOutDuration,
       );
       _syncAudioPlayback(forceSeek: true);
       notifyListeners();
@@ -2904,9 +2915,13 @@ class EditorViewModel extends ChangeNotifier {
     );
 
     debugPrint('[TIMELINE_TRIM_TRACE] UPDATE AUDIO TRIM: id=$id, startTime=${track.startTimeInSeconds}s (PRESERVED), trimStart=${clampedTrimStart.inMilliseconds / 1000.0}s, trimEnd=${clampedTrimEnd.inMilliseconds / 1000.0}s');
-    _audioTracks[index] = track.copyWith(
+    final trimmedTrack = track.copyWith(
       trimStart: clampedTrimStart,
       trimEnd: clampedTrimEnd,
+    );
+    _audioTracks[index] = trimmedTrack.copyWith(
+      fadeInDuration: trimmedTrack.effectiveFadeInDuration,
+      fadeOutDuration: trimmedTrack.effectiveFadeOutDuration,
     );
     _syncAudioPlayback(forceSeek: true);
     notifyListeners();
@@ -2998,6 +3013,8 @@ class EditorViewModel extends ChangeNotifier {
       id: '${targetTrack.id}_a_$timestamp',
       title: '${targetTrack.title} (Part 1)',
       trimEnd: splitPoint,
+      fadeInDuration: targetTrack.effectiveFadeInDuration,
+      fadeOutDuration: Duration.zero,
     );
 
     final partB = targetTrack.copyWith(
@@ -3006,6 +3023,8 @@ class EditorViewModel extends ChangeNotifier {
       startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
       trimStart: splitPoint,
       trimEnd: targetTrack.effectiveTrimEnd,
+      fadeInDuration: Duration.zero,
+      fadeOutDuration: targetTrack.effectiveFadeOutDuration,
     );
 
     _audioTracks.removeAt(targetIndex);
@@ -3016,6 +3035,7 @@ class EditorViewModel extends ChangeNotifier {
     _isAudioSelected = true;
     _syncAudioPlayback(forceSeek: true);
     scheduleAutoSave();
+    TtsService.announce('Split audio at playhead');
     notifyListeners();
     return true;
   }
@@ -3036,6 +3056,7 @@ class EditorViewModel extends ChangeNotifier {
     _selectedAudioTrackId = duplicate.id;
     _isAudioSelected = true;
     _syncAudioPlayback(forceSeek: true);
+    TtsService.announce('Duplicated audio track');
     notifyListeners();
     return duplicate;
   }
@@ -3047,11 +3068,13 @@ class EditorViewModel extends ChangeNotifier {
     if (index == -1) return;
 
     _saveSnapshot();
-    final clamped = volume.clamp(0.0, 1.0);
+    final clamped = volume.clamp(0.0, 2.0);
     _audioTracks[index] = _audioTracks[index].copyWith(volume: clamped);
     if (_audioTracks[index].id == selectedAudioTrack?.id) {
-      AudioPlaybackService.instance.setVolume(_audioTracks[index].isMuted ? 0.0 : clamped);
+      AudioPlaybackService.instance.setVolume((_audioTracks[index].isMuted ? 0.0 : clamped).clamp(0.0, 1.0));
     }
+    TtsService.announce('Audio volume ${(clamped * 100).round()}%');
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -3069,8 +3092,89 @@ class EditorViewModel extends ChangeNotifier {
     final newMuted = !_audioTracks[index].isMuted;
     _audioTracks[index] = _audioTracks[index].copyWith(isMuted: newMuted);
     if (_audioTracks[index].id == selectedAudioTrack?.id) {
-      AudioPlaybackService.instance.setVolume(newMuted ? 0.0 : _audioTracks[index].volume);
+      AudioPlaybackService.instance.setVolume(newMuted ? 0.0 : _audioTracks[index].volume.clamp(0.0, 1.0));
     }
+    TtsService.announce(newMuted ? 'Audio track muted' : 'Audio track unmuted');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void setAudioTrackFadeIn(Duration fadeIn, {String? id}) {
+    final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
+    if (targetId == null) return;
+    final index = _audioTracks.indexWhere((t) => t.id == targetId);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final track = _audioTracks[index];
+    final maxFadeIn = (track.effectiveDuration.inMilliseconds - track.effectiveFadeOutDuration.inMilliseconds).clamp(0, track.effectiveDuration.inMilliseconds);
+    final clampedFadeIn = Duration(milliseconds: fadeIn.inMilliseconds.clamp(0, maxFadeIn));
+    _audioTracks[index] = track.copyWith(fadeInDuration: clampedFadeIn);
+    TtsService.announce('Fade in ${(clampedFadeIn.inMilliseconds / 1000.0).toStringAsFixed(1)} seconds');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void setAudioTrackFadeOut(Duration fadeOut, {String? id}) {
+    final targetId = id ?? _selectedAudioTrackId ?? (_audioTracks.isNotEmpty ? _audioTracks.first.id : null);
+    if (targetId == null) return;
+    final index = _audioTracks.indexWhere((t) => t.id == targetId);
+    if (index == -1) return;
+
+    _saveSnapshot();
+    final track = _audioTracks[index];
+    final maxFadeOut = (track.effectiveDuration.inMilliseconds - track.effectiveFadeInDuration.inMilliseconds).clamp(0, track.effectiveDuration.inMilliseconds);
+    final clampedFadeOut = Duration(milliseconds: fadeOut.inMilliseconds.clamp(0, maxFadeOut));
+    _audioTracks[index] = track.copyWith(fadeOutDuration: clampedFadeOut);
+    TtsService.announce('Fade out ${(clampedFadeOut.inMilliseconds / 1000.0).toStringAsFixed(1)} seconds');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void setOverlayVolume(double volume, {int? index}) {
+    final targetIndex = index ?? _selectedOverlayIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _overlayClips.length) return;
+    _saveSnapshot();
+    final clamped = volume.clamp(0.0, 2.0);
+    _overlayClips[targetIndex] = _overlayClips[targetIndex].copyWith(volume: clamped);
+    TtsService.announce('PIP volume ${(clamped * 100).round()}%');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleOverlayMute({int? index}) {
+    final targetIndex = index ?? _selectedOverlayIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _overlayClips.length) return;
+    _saveSnapshot();
+    final overlay = _overlayClips[targetIndex];
+    final newMuted = !overlay.isMuted;
+    _overlayClips[targetIndex] = overlay.copyWith(isMuted: newMuted);
+    TtsService.announce(newMuted ? 'PIP audio muted' : 'PIP audio unmuted');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void setOverlayFadeIn(double durationSec, {int? index}) {
+    final targetIndex = index ?? _selectedOverlayIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _overlayClips.length) return;
+    _saveSnapshot();
+    final overlay = _overlayClips[targetIndex];
+    final maxFadeIn = (overlay.durationInSeconds - overlay.fadeOutDurationSec).clamp(0.0, overlay.durationInSeconds);
+    final clamped = durationSec.clamp(0.0, maxFadeIn);
+    _overlayClips[targetIndex] = overlay.copyWith(fadeInDurationSec: clamped);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void setOverlayFadeOut(double durationSec, {int? index}) {
+    final targetIndex = index ?? _selectedOverlayIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _overlayClips.length) return;
+    _saveSnapshot();
+    final overlay = _overlayClips[targetIndex];
+    final maxFadeOut = (overlay.durationInSeconds - overlay.fadeInDurationSec).clamp(0.0, overlay.durationInSeconds);
+    final clamped = durationSec.clamp(0.0, maxFadeOut);
+    _overlayClips[targetIndex] = overlay.copyWith(fadeOutDurationSec: clamped);
+    scheduleAutoSave();
     notifyListeners();
   }
 
