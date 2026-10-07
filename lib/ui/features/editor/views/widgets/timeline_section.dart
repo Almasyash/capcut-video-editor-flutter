@@ -10,6 +10,7 @@ import 'audio_track_item.dart';
 import 'media_picker_sheet.dart';
 import 'package:capcut_video_editor/domain/models/transition.dart';
 import 'package:capcut_video_editor/domain/enums/transition_type.dart';
+import 'package:capcut_video_editor/core/utils/timeline_coordinate_system.dart';
 import 'timeline_clip_item.dart';
 import 'timeline_overlay_track_item.dart';
 import 'timeline_ruler.dart';
@@ -29,11 +30,15 @@ class TimelineSection extends StatefulWidget {
 }
 
 class _TimelineSectionState extends State<TimelineSection> {
+  static const double _headerWidth = 72.0;
+
   late final ScrollController _horizontalScrollController;
   late final ScrollController _rulerScrollController;
   late final ScrollController _verticalScrollController;
+  late final ScrollController _headerVerticalScrollController;
 
   bool _isUserScrollingHorizontal = false;
+  double _baseZoom = 50.0;
 
   // Track counts to detect newly added layers for auto-scroll
   int _prevAudioTrackCount = 0;
@@ -48,6 +53,7 @@ class _TimelineSectionState extends State<TimelineSection> {
     _horizontalScrollController = ScrollController();
     _rulerScrollController = ScrollController();
     _verticalScrollController = ScrollController();
+    _headerVerticalScrollController = ScrollController();
 
     _prevAudioTrackCount = widget.viewModel.audioTracks.length;
     _prevOverlayClipCount = widget.viewModel.overlayClips.length;
@@ -56,6 +62,7 @@ class _TimelineSectionState extends State<TimelineSection> {
     _prevEffectType = widget.viewModel.activeEffect.type;
 
     _horizontalScrollController.addListener(_syncRulerScroll);
+    _verticalScrollController.addListener(_syncVerticalScroll);
     widget.viewModel.addListener(_onViewModelChanged);
   }
 
@@ -73,10 +80,12 @@ class _TimelineSectionState extends State<TimelineSection> {
   void dispose() {
     widget.viewModel.removeListener(_onViewModelChanged);
     _horizontalScrollController.removeListener(_syncRulerScroll);
+    _verticalScrollController.removeListener(_syncVerticalScroll);
 
     _horizontalScrollController.dispose();
     _rulerScrollController.dispose();
     _verticalScrollController.dispose();
+    _headerVerticalScrollController.dispose();
     super.dispose();
   }
 
@@ -86,6 +95,21 @@ class _TimelineSectionState extends State<TimelineSection> {
         final targetOffset = _horizontalScrollController.offset.clamp(0.0, _rulerScrollController.position.maxScrollExtent);
         if ((_rulerScrollController.offset - targetOffset).abs() > 0.5) {
           _rulerScrollController.jumpTo(targetOffset);
+        }
+      }
+    }
+  }
+
+  void _syncVerticalScroll() {
+    if (_headerVerticalScrollController.hasClients && _verticalScrollController.hasClients) {
+      if (_headerVerticalScrollController.position.hasContentDimensions &&
+          _verticalScrollController.position.hasContentDimensions) {
+        final targetOffset = _verticalScrollController.offset.clamp(
+          0.0,
+          _headerVerticalScrollController.position.maxScrollExtent,
+        );
+        if ((_headerVerticalScrollController.offset - targetOffset).abs() > 0.5) {
+          _headerVerticalScrollController.jumpTo(targetOffset);
         }
       }
     }
@@ -199,7 +223,8 @@ class _TimelineSectionState extends State<TimelineSection> {
   Widget build(BuildContext context) {
     final viewModel = widget.viewModel;
     final screenWidth = MediaQuery.of(context).size.width;
-    final halfScreenWidth = screenWidth / 2;
+    final canvasWidth = math.max(100.0, screenWidth - _headerWidth);
+    final halfCanvasWidth = canvasWidth / 2;
     final totalDuration = viewModel.totalDurationInSeconds;
     final baseTrackWidth = totalDuration > 0.0
         ? totalDuration * viewModel.pixelsPerSecond
@@ -224,177 +249,265 @@ class _TimelineSectionState extends State<TimelineSection> {
       color: AppColors.timelineTrackBg,
       child: Column(
         children: [
-          // 1. Timeline Top Control Bar (Zoom slider, Duration badge, Clear Selection)
+          // 1. Timeline Top Control Bar (Timecode, Zoom controls, Snap, Ripple, Selection)
           _buildTimelineControlBar(viewModel),
 
-          // 2. Pinned Timeline Ruler (Fixed at top of track canvas, click to seek & drag to scrub)
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTapDown: (details) {
-              if (viewModel.isPlaying) viewModel.pause();
-              final localX = details.localPosition.dx;
-              final targetTime = ((_rulerScrollController.hasClients ? _rulerScrollController.offset : 0.0) +
-                      localX -
-                      halfScreenWidth) /
-                  viewModel.pixelsPerSecond;
-              final clampedTime = targetTime.clamp(0.0, viewModel.totalDurationInSeconds);
-              final snappedTime = viewModel.snapToNearestBeat(clampedTime);
-              viewModel.seekTo(snappedTime);
-              if (_horizontalScrollController.hasClients) {
-                _horizontalScrollController.jumpTo(
-                  (snappedTime * viewModel.pixelsPerSecond)
-                      .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                );
-              }
-            },
-            onHorizontalDragStart: (details) {
-              if (viewModel.isPlaying) viewModel.pause();
-              _isUserScrollingHorizontal = true;
-            },
-            onHorizontalDragUpdate: (details) {
-              final deltaSec = (details.primaryDelta ?? 0.0) / viewModel.pixelsPerSecond;
-              final newPlayhead = (viewModel.playheadPosition + deltaSec)
-                  .clamp(0.0, viewModel.totalDurationInSeconds);
-              final snappedPlayhead = viewModel.snapToNearestBeat(newPlayhead);
-              viewModel.seekTo(snappedPlayhead);
-              if (_horizontalScrollController.hasClients) {
-                _horizontalScrollController.jumpTo(
-                  (snappedPlayhead * viewModel.pixelsPerSecond)
-                      .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                );
-              }
-            },
-            onHorizontalDragEnd: (details) {
-              _isUserScrollingHorizontal = false;
-              _lastSyncedPlayhead = viewModel.playheadPosition;
-            },
-            onHorizontalDragCancel: () {
-              _isUserScrollingHorizontal = false;
-              _lastSyncedPlayhead = viewModel.playheadPosition;
-            },
-            child: Container(
-              height: AppDimensions.timelineRulerHeight,
-              width: double.infinity,
-              color: AppColors.timelineRulerBg,
-              child: SingleChildScrollView(
-                controller: _rulerScrollController,
-                scrollDirection: Axis.horizontal,
-                physics: const NeverScrollableScrollPhysics(),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: halfScreenWidth),
-                  child: TimelineRuler(
-                    totalDurationSeconds: totalDuration,
-                    pixelsPerSecond: viewModel.pixelsPerSecond,
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // 3. Multi-Track Vertically & Horizontally Scrollable Timeline Canvas
-          Expanded(
-            child: Stack(
+          // 2. Pinned Timeline Ruler (Fixed corner anchor + scrubbable horizontal ruler)
+          Container(
+            height: AppDimensions.timelineRulerHeight,
+            width: double.infinity,
+            color: AppColors.timelineRulerBg,
+            child: Row(
               children: [
-                // Two-Axis Coordinated Canvas
-                NotificationListener<ScrollNotification>(
-                  onNotification: (notification) {
-                    // Strictly isolate horizontal scrubbing from vertical layer navigation
-                    if (notification.metrics.axis == Axis.horizontal) {
-                      if (notification is ScrollStartNotification && notification.dragDetails != null) {
-                        _isUserScrollingHorizontal = true;
-                        if (viewModel.isPlaying) {
-                          viewModel.pause();
-                        }
-                      } else if (notification is ScrollUpdateNotification && _isUserScrollingHorizontal) {
-                        final rawPlayhead = (_horizontalScrollController.offset / viewModel.pixelsPerSecond)
-                            .clamp(0.0, viewModel.totalDurationInSeconds);
-                        final snappedPlayhead = viewModel.snapToNearestBeat(rawPlayhead);
-                        viewModel.seekTo(snappedPlayhead);
-                      } else if (notification is ScrollEndNotification) {
-                        _isUserScrollingHorizontal = false;
+                // Corner Anchor
+                Container(
+                  width: _headerWidth,
+                  height: AppDimensions.timelineRulerHeight,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF141416),
+                    border: Border(
+                      right: BorderSide(color: AppColors.divider, width: 1.0),
+                      bottom: BorderSide(color: AppColors.divider, width: 0.5),
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(Icons.tune_rounded, size: 13, color: AppColors.textMuted),
+                ),
+
+                // Ruler Scroll Area
+                Expanded(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (details) {
+                      if (viewModel.isPlaying) viewModel.pause();
+                      final localX = details.localPosition.dx;
+                      final targetTime = ((_rulerScrollController.hasClients ? _rulerScrollController.offset : 0.0) +
+                              localX -
+                              halfCanvasWidth) /
+                          viewModel.pixelsPerSecond;
+                      final clampedTime = targetTime.clamp(0.0, viewModel.totalDurationInSeconds);
+                      final snappedTime = viewModel.snapTimelinePosition(clampedTime);
+                      viewModel.seekTo(snappedTime);
+                      if (_horizontalScrollController.hasClients) {
+                        _horizontalScrollController.jumpTo(
+                          (snappedTime * viewModel.pixelsPerSecond)
+                              .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+                        );
                       }
-                    }
-                    return false;
-                  },
-                  child: SingleChildScrollView(
-                    controller: _horizontalScrollController,
-                    scrollDirection: Axis.horizontal,
-                    physics: const BouncingScrollPhysics(),
-                    child: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: halfScreenWidth),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTapDown: (details) {
-                          if (viewModel.isPlaying) viewModel.pause();
-                          final rawTapSec = (details.localPosition.dx / viewModel.pixelsPerSecond)
-                              .clamp(0.0, viewModel.totalDurationInSeconds);
-                          final snappedSec = viewModel.snapToNearestBeat(rawTapSec);
-                          viewModel.seekTo(snappedSec);
-                          if (_horizontalScrollController.hasClients) {
-                            _horizontalScrollController.jumpTo(
-                              (snappedSec * viewModel.pixelsPerSecond)
-                                  .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                            );
-                          }
-                        },
-                        child: SizedBox(
-                          width: math.max(totalTrackWidth, 1.0),
-                          child: SingleChildScrollView(
-                          controller: _verticalScrollController,
-                          scrollDirection: Axis.vertical,
-                          physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(height: 6),
-
-                              // Track 1: Main Video Clips Track
-                              _buildVideoTrack(viewModel),
-
-                              // Track 2+: Secondary Overlay (PIP) Tracks
-                              if (viewModel.overlayClips.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                _buildOverlayTrackRows(viewModel, totalTrackWidth),
-                              ],
-
-                              // Track 3: Video Effects Track
-                              if (viewModel.activeEffect.type != VideoEffectType.none) ...[
-                                const SizedBox(height: 4),
-                                _buildEffectsTrack(viewModel, totalTrackWidth),
-                              ],
-
-                              // Track 4+: Text / Subtitle Tracks
-                              if (viewModel.textOverlays.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                _buildTextTrackRows(viewModel, totalTrackWidth),
-                              ],
-
-                              // Track 5+: Stickers Tracks
-                              if (viewModel.stickerOverlays.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                _buildStickerTrackRows(viewModel, totalTrackWidth),
-                              ],
-
-                              // Track 6+: Background Audio & Sound Effect Tracks & Real-time Voice Recording
-                              if (viewModel.audioTracks.isNotEmpty || viewModel.isRecordingVoice) ...[
-                                const SizedBox(height: 4),
-                                _buildAudioTrackRows(viewModel, totalTrackWidth),
-                              ],
-
-                              // Bottom padding to ensure comfortable scrolling of bottom layers
-                              const SizedBox(height: 56),
-                            ],
-                          ),
+                    },
+                    onHorizontalDragStart: (details) {
+                      if (viewModel.isPlaying) viewModel.pause();
+                      _isUserScrollingHorizontal = true;
+                    },
+                    onHorizontalDragUpdate: (details) {
+                      final deltaSec = (details.primaryDelta ?? 0.0) / viewModel.pixelsPerSecond;
+                      final newPlayhead = (viewModel.playheadPosition + deltaSec)
+                          .clamp(0.0, viewModel.totalDurationInSeconds);
+                      final snappedPlayhead = viewModel.snapTimelinePosition(newPlayhead);
+                      viewModel.seekTo(snappedPlayhead);
+                      if (_horizontalScrollController.hasClients) {
+                        _horizontalScrollController.jumpTo(
+                          (snappedPlayhead * viewModel.pixelsPerSecond)
+                              .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+                        );
+                      }
+                    },
+                    onHorizontalDragEnd: (details) {
+                      _isUserScrollingHorizontal = false;
+                      _lastSyncedPlayhead = viewModel.playheadPosition;
+                    },
+                    onHorizontalDragCancel: () {
+                      _isUserScrollingHorizontal = false;
+                      _lastSyncedPlayhead = viewModel.playheadPosition;
+                    },
+                    child: SingleChildScrollView(
+                      controller: _rulerScrollController,
+                      scrollDirection: Axis.horizontal,
+                      physics: const NeverScrollableScrollPhysics(),
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: halfCanvasWidth),
+                        child: TimelineRuler(
+                          totalDurationSeconds: totalDuration,
+                          pixelsPerSecond: viewModel.pixelsPerSecond,
                         ),
                       ),
                     ),
                   ),
-                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 3. Multi-Track Vertically & Horizontally Scrollable Timeline with Pinned Headers
+          Expanded(
+            child: Stack(
+              children: [
+                Row(
+                  children: [
+                    // Pinned Left Track Headers Column
+                    Container(
+                      width: _headerWidth,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF141416),
+                        border: Border(
+                          right: BorderSide(color: AppColors.divider, width: 1.0),
+                        ),
+                      ),
+                      child: SingleChildScrollView(
+                        controller: _headerVerticalScrollController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const SizedBox(height: 6),
+                            _buildVideoTrackHeader(viewModel),
+                            if (viewModel.overlayClips.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              _buildOverlayTrackHeaders(viewModel),
+                            ],
+                            if (viewModel.activeEffect.type != VideoEffectType.none) ...[
+                              const SizedBox(height: 4),
+                              _buildEffectsTrackHeader(viewModel),
+                            ],
+                            if (viewModel.textOverlays.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              _buildTextTrackHeaders(viewModel),
+                            ],
+                            if (viewModel.stickerOverlays.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              _buildStickerTrackHeaders(viewModel),
+                            ],
+                            if (viewModel.audioTracks.isNotEmpty || viewModel.isRecordingVoice) ...[
+                              const SizedBox(height: 4),
+                              _buildAudioTrackHeaders(viewModel),
+                            ],
+                            const SizedBox(height: 56),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Canvas Area on Right (Pinch-to-zoom + 2-axis scrolling)
+                    Expanded(
+                      child: GestureDetector(
+                        onScaleStart: (details) {
+                          if (details.pointerCount >= 2) {
+                            _baseZoom = viewModel.pixelsPerSecond;
+                          }
+                        },
+                        onScaleUpdate: (details) {
+                          if (details.pointerCount >= 2) {
+                            final newZoom = TimelineCoordinateSystem.clampZoom(
+                              _baseZoom * details.horizontalScale,
+                              min: AppDimensions.minPixelsPerSecond,
+                              max: AppDimensions.maxPixelsPerSecond,
+                            );
+                            viewModel.setZoomScale(newZoom);
+                          }
+                        },
+                        child: NotificationListener<ScrollNotification>(
+                          onNotification: (notification) {
+                            // Strictly isolate horizontal scrubbing from vertical layer navigation
+                            if (notification.metrics.axis == Axis.horizontal) {
+                              if (notification is ScrollStartNotification && notification.dragDetails != null) {
+                                _isUserScrollingHorizontal = true;
+                                if (viewModel.isPlaying) {
+                                  viewModel.pause();
+                                }
+                              } else if (notification is ScrollUpdateNotification && _isUserScrollingHorizontal) {
+                                final rawPlayhead = (_horizontalScrollController.offset / viewModel.pixelsPerSecond)
+                                    .clamp(0.0, viewModel.totalDurationInSeconds);
+                                final snappedPlayhead = viewModel.snapTimelinePosition(rawPlayhead);
+                                viewModel.seekTo(snappedPlayhead);
+                              } else if (notification is ScrollEndNotification) {
+                                _isUserScrollingHorizontal = false;
+                              }
+                            }
+                            return false;
+                          },
+                          child: SingleChildScrollView(
+                            controller: _horizontalScrollController,
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(horizontal: halfCanvasWidth),
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onTapDown: (details) {
+                                  if (viewModel.isPlaying) viewModel.pause();
+                                  final rawTapSec = (details.localPosition.dx / viewModel.pixelsPerSecond)
+                                      .clamp(0.0, viewModel.totalDurationInSeconds);
+                                  final snappedSec = viewModel.snapTimelinePosition(rawTapSec);
+                                  viewModel.seekTo(snappedSec);
+                                  if (_horizontalScrollController.hasClients) {
+                                    _horizontalScrollController.jumpTo(
+                                      (snappedSec * viewModel.pixelsPerSecond)
+                                          .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+                                    );
+                                  }
+                                },
+                                child: SizedBox(
+                                  width: math.max(totalTrackWidth, 1.0),
+                                  child: SingleChildScrollView(
+                                    controller: _verticalScrollController,
+                                    scrollDirection: Axis.vertical,
+                                    physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const SizedBox(height: 6),
+
+                                        // Track 1: Main Video Clips Track
+                                        _buildVideoTrack(viewModel),
+
+                                        // Track 2+: Secondary Overlay (PIP) Tracks
+                                        if (viewModel.overlayClips.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          _buildOverlayTrackRows(viewModel, totalTrackWidth),
+                                        ],
+
+                                        // Track 3: Video Effects Track
+                                        if (viewModel.activeEffect.type != VideoEffectType.none) ...[
+                                          const SizedBox(height: 4),
+                                          _buildEffectsTrack(viewModel, totalTrackWidth),
+                                        ],
+
+                                        // Track 4+: Text / Subtitle Tracks
+                                        if (viewModel.textOverlays.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          _buildTextTrackRows(viewModel, totalTrackWidth),
+                                        ],
+
+                                        // Track 5+: Stickers Tracks
+                                        if (viewModel.stickerOverlays.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          _buildStickerTrackRows(viewModel, totalTrackWidth),
+                                        ],
+
+                                        // Track 6+: Background Audio & Sound Effect Tracks & Real-time Voice Recording
+                                        if (viewModel.audioTracks.isNotEmpty || viewModel.isRecordingVoice) ...[
+                                          const SizedBox(height: 4),
+                                          _buildAudioTrackRows(viewModel, totalTrackWidth),
+                                        ],
+
+                                        // Bottom padding to ensure comfortable scrolling of bottom layers
+                                        const SizedBox(height: 56),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
 
-                // 4. Fixed Center Playhead Needle (White Line + Cyan Marker spanning the canvas)
-                _buildPlayheadNeedle(screenWidth),
+                // 4. Fixed Center Playhead Needle
+                _buildPlayheadNeedle(screenWidth, _headerWidth),
               ],
             ),
           ),
@@ -405,131 +518,702 @@ class _TimelineSectionState extends State<TimelineSection> {
 
   Widget _buildTimelineControlBar(EditorViewModel viewModel) {
     return Container(
-      height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.md),
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.sm),
       decoration: const BoxDecoration(
         color: AppColors.timelineRulerBg,
         border: Border(bottom: BorderSide(color: AppColors.divider, width: 0.5)),
       ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // Zoom Scale Slider
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.zoom_out_rounded, size: 16, color: AppColors.textMuted),
-              SizedBox(
-                width: 80,
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 2,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 8),
-                    activeTrackColor: AppColors.primary,
-                    inactiveTrackColor: AppColors.surfaceHighlight,
-                    thumbColor: AppColors.primary,
-                  ),
-                  child: Slider(
-                    value: viewModel.pixelsPerSecond,
-                    min: AppDimensions.minPixelsPerSecond,
-                    max: AppDimensions.maxPixelsPerSecond,
-                    onChanged: (val) => viewModel.setZoomScale(val),
-                  ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // Frame Timecode Pill: 00:00:12 @ 30fps
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceLight,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: AppColors.divider, width: 0.6),
+              ),
+              child: Text(
+                TimelineCoordinateSystem.formatFrameTimecode(viewModel.playheadPosition, fps: 30, showFpsBadge: true),
+                style: const TextStyle(
+                  fontSize: 9.5,
+                  fontFamily: 'monospace',
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary,
                 ),
               ),
-              const Icon(Icons.zoom_in_rounded, size: 16, color: AppColors.textMuted),
-              if (viewModel.audioTracks.any((t) => t.beats.isNotEmpty)) ...[
-                const SizedBox(width: 8),
-                InkWell(
-                  onTap: () => viewModel.toggleSnapToBeat(),
+            ),
+            const SizedBox(width: 6),
+
+            // Zoom Out Button
+            InkWell(
+              onTap: () => viewModel.zoomOut(),
+              borderRadius: BorderRadius.circular(3),
+              child: const Padding(
+                padding: EdgeInsets.all(2.0),
+                child: Icon(Icons.remove_circle_outline, size: 14, color: AppColors.textMuted),
+              ),
+            ),
+
+            // Zoom Scale Slider
+            SizedBox(
+              width: 55,
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 2,
+                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4),
+                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 7),
+                  activeTrackColor: AppColors.primary,
+                  inactiveTrackColor: AppColors.surfaceHighlight,
+                  thumbColor: AppColors.primary,
+                ),
+                child: Slider(
+                  value: viewModel.pixelsPerSecond,
+                  min: AppDimensions.minPixelsPerSecond,
+                  max: AppDimensions.maxPixelsPerSecond,
+                  onChanged: (val) => viewModel.setZoomScale(val),
+                ),
+              ),
+            ),
+
+            // Zoom In Button
+            InkWell(
+              onTap: () => viewModel.zoomIn(),
+              borderRadius: BorderRadius.circular(3),
+              child: const Padding(
+                padding: EdgeInsets.all(2.0),
+                child: Icon(Icons.add_circle_outline, size: 14, color: AppColors.textMuted),
+              ),
+            ),
+
+            // Reset Zoom (100%)
+            InkWell(
+              onTap: () => viewModel.resetZoom(),
+              borderRadius: BorderRadius.circular(3),
+              child: Container(
+                margin: const EdgeInsets.only(left: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  '100%',
+                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: AppColors.textSecondary),
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 6),
+
+            // SNAP Boundary Toggle Button
+            InkWell(
+              onTap: () => viewModel.toggleSnapToClips(),
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: viewModel.isSnapToClipsEnabled
+                      ? const Color(0xFFFFD600).withOpacity(0.18)
+                      : AppColors.surfaceLight,
                   borderRadius: BorderRadius.circular(4),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: viewModel.isSnapToBeatEnabled
-                          ? const Color(0xFFFFD600).withOpacity(0.18)
-                          : AppColors.surfaceLight,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color: viewModel.isSnapToBeatEnabled
+                  border: Border.all(
+                    color: viewModel.isSnapToClipsEnabled
+                        ? const Color(0xFFFFD600)
+                        : AppColors.divider,
+                    width: 0.6,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.compress_rounded,
+                      size: 11,
+                      color: viewModel.isSnapToClipsEnabled
+                          ? const Color(0xFFFFD600)
+                          : AppColors.textMuted,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      'SNAP',
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.bold,
+                        color: viewModel.isSnapToClipsEnabled
                             ? const Color(0xFFFFD600)
-                            : AppColors.divider,
-                        width: 0.6,
+                            : AppColors.textMuted,
                       ),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.graphic_eq_rounded,
-                          size: 11,
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(width: 4),
+
+            // RIPPLE Toggle Button
+            InkWell(
+              onTap: () => viewModel.toggleRippleEditing(),
+              borderRadius: BorderRadius.circular(4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: viewModel.isRippleEditingEnabled
+                      ? AppColors.primary.withOpacity(0.2)
+                      : AppColors.surfaceLight,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(
+                    color: viewModel.isRippleEditingEnabled
+                        ? AppColors.primary
+                        : AppColors.divider,
+                    width: 0.6,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.waves_rounded,
+                      size: 11,
+                      color: viewModel.isRippleEditingEnabled
+                          ? AppColors.primary
+                          : AppColors.textMuted,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      'RIPPLE',
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.bold,
+                        color: viewModel.isRippleEditingEnabled
+                            ? AppColors.primary
+                            : AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            if (viewModel.audioTracks.any((t) => t.beats.isNotEmpty)) ...[
+              const SizedBox(width: 4),
+              InkWell(
+                onTap: () => viewModel.toggleSnapToBeat(),
+                borderRadius: BorderRadius.circular(4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: viewModel.isSnapToBeatEnabled
+                        ? const Color(0xFFFFD600).withOpacity(0.18)
+                        : AppColors.surfaceLight,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: viewModel.isSnapToBeatEnabled
+                          ? const Color(0xFFFFD600)
+                          : AppColors.divider,
+                      width: 0.6,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.graphic_eq_rounded,
+                        size: 11,
+                        color: viewModel.isSnapToBeatEnabled
+                            ? const Color(0xFFFFD600)
+                            : AppColors.textMuted,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        'BEAT',
+                        style: TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.bold,
                           color: viewModel.isSnapToBeatEnabled
                               ? const Color(0xFFFFD600)
                               : AppColors.textMuted,
                         ),
-                        const SizedBox(width: 3),
-                        Text(
-                          'SNAP',
-                          style: TextStyle(
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
-                            color: viewModel.isSnapToBeatEnabled
-                                ? const Color(0xFFFFD600)
-                                : AppColors.textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
+            ],
+
+            const SizedBox(width: 8),
+
+            // Selection Info or Total Duration
+            if (viewModel.selectedClip != null)
+              _buildSelectionBadge(
+                icon: Icons.content_cut_rounded,
+                color: AppColors.selectionBorder,
+                text: 'Clip: ${TimeFormatter.formatSeconds(viewModel.selectedClip!.durationInSeconds)}',
+                onClear: viewModel.clearSelection,
+              )
+            else if (viewModel.selectedOverlay != null)
+              _buildSelectionBadge(
+                icon: Icons.layers_rounded,
+                color: AppColors.secondary,
+                text: 'PIP: ${TimeFormatter.formatSeconds(viewModel.selectedOverlay!.durationInSeconds)}',
+                onClear: viewModel.clearSelection,
+              )
+            else if (viewModel.isAudioSelected && viewModel.selectedAudioTrack != null)
+              _buildSelectionBadge(
+                icon: Icons.music_note_rounded,
+                color: AppColors.secondary,
+                text: 'Audio: ${TimeFormatter.formatSeconds(viewModel.selectedAudioTrack!.durationInSeconds)}',
+                onClear: viewModel.clearSelection,
+              )
+            else if (viewModel.selectedTextId != null && viewModel.selectedTextOverlay != null)
+              _buildSelectionBadge(
+                icon: Icons.title_rounded,
+                color: AppColors.accentPurple,
+                text: 'Text: "${viewModel.selectedTextOverlay!.text.length > 10 ? '${viewModel.selectedTextOverlay!.text.substring(0, 8)}...' : viewModel.selectedTextOverlay!.text}" (${TimeFormatter.formatSeconds(viewModel.selectedTextOverlay!.durationInSeconds)})',
+                onClear: viewModel.clearSelection,
+              )
+            else if (viewModel.selectedStickerId != null)
+              _buildSelectionBadge(
+                icon: Icons.star_rounded,
+                color: Colors.amber,
+                text: 'Sticker Selected',
+                onClear: viewModel.clearSelection,
+              )
+            else
+              Text(
+                'Total: ${TimeFormatter.formatSeconds(viewModel.totalDurationInSeconds)}',
+                style: const TextStyle(fontSize: 10, color: AppColors.textMuted, fontWeight: FontWeight.w600),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Track Header Builder Methods (Left pinned column) ---
+
+  Widget _buildVideoTrackHeader(EditorViewModel viewModel) {
+    final isLocked = viewModel.videoClips.isNotEmpty && viewModel.videoClips.first.isLocked;
+    return Container(
+      height: AppDimensions.videoTrackHeight,
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B1B1E),
+        border: Border(
+          bottom: BorderSide(color: AppColors.divider.withOpacity(0.4), width: 0.5),
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.videocam_rounded, size: 11, color: AppColors.primary),
+              SizedBox(width: 3),
+              Expanded(
+                child: Text(
+                  'VIDEO',
+                  maxLines: 1,
+                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.white70),
+                ),
+              ),
             ],
           ),
-
-          // Center-Right: Selected Element Duration or Helper
-          if (viewModel.selectedClip != null)
-            _buildSelectionBadge(
-              icon: Icons.content_cut_rounded,
-              color: AppColors.selectionBorder,
-              text: 'Clip: ${TimeFormatter.formatSeconds(viewModel.selectedClip!.durationInSeconds)}',
-              onClear: viewModel.clearSelection,
-            )
-          else if (viewModel.selectedOverlay != null)
-            _buildSelectionBadge(
-              icon: Icons.layers_rounded,
-              color: AppColors.secondary,
-              text: 'PIP: ${TimeFormatter.formatSeconds(viewModel.selectedOverlay!.durationInSeconds)}',
-              onClear: viewModel.clearSelection,
-            )
-          else if (viewModel.isAudioSelected && viewModel.selectedAudioTrack != null)
-            _buildSelectionBadge(
-              icon: Icons.music_note_rounded,
-              color: AppColors.secondary,
-              text: 'Audio: ${TimeFormatter.formatSeconds(viewModel.selectedAudioTrack!.durationInSeconds)}',
-              onClear: viewModel.clearSelection,
-            )
-          else if (viewModel.selectedTextId != null && viewModel.selectedTextOverlay != null)
-            _buildSelectionBadge(
-              icon: Icons.title_rounded,
-              color: AppColors.accentPurple,
-              text: 'Text: "${viewModel.selectedTextOverlay!.text.length > 12 ? '${viewModel.selectedTextOverlay!.text.substring(0, 10)}...' : viewModel.selectedTextOverlay!.text}" (${TimeFormatter.formatSeconds(viewModel.selectedTextOverlay!.durationInSeconds)})',
-              onClear: viewModel.clearSelection,
-            )
-          else if (viewModel.selectedStickerId != null)
-            _buildSelectionBadge(
-              icon: Icons.star_rounded,
-              color: Colors.amber,
-              text: 'Sticker Selected',
-              onClear: viewModel.clearSelection,
-            )
-          else
-            Text(
-              'Total: ${TimeFormatter.formatSeconds(viewModel.totalDurationInSeconds)}',
-              style: const TextStyle(fontSize: 11, color: AppColors.textMuted, fontWeight: FontWeight.w600),
-            ),
+          const Spacer(),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              InkWell(
+                onTap: () {
+                  if (viewModel.videoClips.isNotEmpty) {
+                    final targetIdx = viewModel.selectedClipIndex ?? 0;
+                    viewModel.toggleClipLock(viewModel.videoClips[targetIdx].id);
+                  }
+                },
+                child: Padding(
+                  padding: const EdgeInsets.all(2.0),
+                  child: Icon(
+                    isLocked ? Icons.lock : Icons.lock_open,
+                    size: 12,
+                    color: isLocked ? Colors.amber : AppColors.textMuted,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
+    );
+  }
+
+  void _showOverlayReorderMenu(BuildContext context, EditorViewModel viewModel, String overlayId) async {
+    final renderBox = context.findRenderObject() as RenderBox?;
+    final offset = renderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
+    final size = renderBox?.size ?? Size.zero;
+    final val = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(offset.dx, offset.dy + size.height, offset.dx + size.width, 0),
+      items: const [
+        PopupMenuItem(value: 'front', height: 28, child: Text('Bring to Front', style: TextStyle(fontSize: 11))),
+        PopupMenuItem(value: 'up', height: 28, child: Text('Move Up', style: TextStyle(fontSize: 11))),
+        PopupMenuItem(value: 'down', height: 28, child: Text('Move Down', style: TextStyle(fontSize: 11))),
+        PopupMenuItem(value: 'back', height: 28, child: Text('Send to Back', style: TextStyle(fontSize: 11))),
+      ],
+    );
+    if (val != null) {
+      switch (val) {
+        case 'up':
+          viewModel.moveOverlayUp(overlayId);
+          break;
+        case 'down':
+          viewModel.moveOverlayDown(overlayId);
+          break;
+        case 'front':
+          viewModel.bringOverlayToFront(overlayId);
+          break;
+        case 'back':
+          viewModel.sendOverlayToBack(overlayId);
+          break;
+      }
+    }
+  }
+
+  void _showTextReorderMenu(BuildContext context, EditorViewModel viewModel, String textId) async {
+    final renderBox = context.findRenderObject() as RenderBox?;
+    final offset = renderBox?.localToGlobal(Offset.zero) ?? Offset.zero;
+    final size = renderBox?.size ?? Size.zero;
+    final val = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(offset.dx, offset.dy + size.height, offset.dx + size.width, 0),
+      items: const [
+        PopupMenuItem(value: 'front', height: 28, child: Text('Bring to Front', style: TextStyle(fontSize: 11))),
+        PopupMenuItem(value: 'up', height: 28, child: Text('Move Up', style: TextStyle(fontSize: 11))),
+        PopupMenuItem(value: 'down', height: 28, child: Text('Move Down', style: TextStyle(fontSize: 11))),
+        PopupMenuItem(value: 'back', height: 28, child: Text('Send to Back', style: TextStyle(fontSize: 11))),
+      ],
+    );
+    if (val != null) {
+      switch (val) {
+        case 'up':
+          viewModel.moveTextUp(textId);
+          break;
+        case 'down':
+          viewModel.moveTextDown(textId);
+          break;
+        case 'front':
+          viewModel.bringTextToFront(textId);
+          break;
+        case 'back':
+          viewModel.sendTextToBack(textId);
+          break;
+      }
+    }
+  }
+
+  Widget _buildOverlayTrackHeaders(EditorViewModel viewModel) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: viewModel.overlayClips.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final overlay = entry.value;
+        return Container(
+          height: 38,
+          margin: const EdgeInsets.symmetric(vertical: 2.0),
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B1B1E),
+            border: Border(
+              bottom: BorderSide(color: AppColors.divider.withOpacity(0.4), width: 0.5),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.layers_rounded, size: 9, color: AppColors.secondary),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Text(
+                      'PIP ${idx + 1}',
+                      maxLines: 1,
+                      style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white70),
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  // Lock toggle
+                  InkWell(
+                    onTap: () => viewModel.toggleOverlayLock(overlay.id),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1.0),
+                      child: Icon(
+                        overlay.isLocked ? Icons.lock : Icons.lock_open,
+                        size: 10,
+                        color: overlay.isLocked ? Colors.amber : AppColors.textMuted,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  // Visibility toggle
+                  InkWell(
+                    onTap: () => viewModel.toggleOverlayVisibility(overlay.id),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1.0),
+                      child: Icon(
+                        overlay.isVisible ? Icons.visibility : Icons.visibility_off,
+                        size: 10,
+                        color: overlay.isVisible ? AppColors.textMuted : Colors.redAccent,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  // Layer reorder menu
+                  Builder(
+                    builder: (btnCtx) => InkWell(
+                      onTap: () => _showOverlayReorderMenu(btnCtx, viewModel, overlay.id),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 1.0),
+                        child: Icon(Icons.more_vert, size: 10, color: AppColors.textMuted),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildEffectsTrackHeader(EditorViewModel viewModel) {
+    return Container(
+      height: 34,
+      margin: const EdgeInsets.symmetric(vertical: 2.0),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B1B1E),
+        border: Border(
+          bottom: BorderSide(color: AppColors.divider.withOpacity(0.4), width: 0.5),
+        ),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.auto_fix_high, size: 10, color: Color(0xFF00CEC9)),
+          SizedBox(width: 3),
+          Text('FX', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.white70)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextTrackHeaders(EditorViewModel viewModel) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: viewModel.textOverlays.asMap().entries.map((entry) {
+        final idx = entry.key;
+        final text = entry.value;
+        return Container(
+          height: AppDimensions.textTrackHeight,
+          margin: const EdgeInsets.symmetric(vertical: 2.0),
+          padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B1B1E),
+            border: Border(
+              bottom: BorderSide(color: AppColors.divider.withOpacity(0.4), width: 0.5),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.title_rounded, size: 9, color: AppColors.accentPurple),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Text(
+                      'TEXT ${idx + 1}',
+                      maxLines: 1,
+                      style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white70),
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  // Lock toggle
+                  InkWell(
+                    onTap: () => viewModel.toggleTextLock(text.id),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1.0),
+                      child: Icon(
+                        text.isLocked ? Icons.lock : Icons.lock_open,
+                        size: 10,
+                        color: text.isLocked ? Colors.amber : AppColors.textMuted,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  // Visibility toggle
+                  InkWell(
+                    onTap: () => viewModel.toggleTextVisibility(text.id),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1.0),
+                      child: Icon(
+                        text.isVisible ? Icons.visibility : Icons.visibility_off,
+                        size: 10,
+                        color: text.isVisible ? AppColors.textMuted : Colors.redAccent,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  // Layer reorder menu
+                  Builder(
+                    builder: (btnCtx) => InkWell(
+                      onTap: () => _showTextReorderMenu(btnCtx, viewModel, text.id),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 1.0),
+                        child: Icon(Icons.more_vert, size: 10, color: AppColors.textMuted),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildStickerTrackHeaders(EditorViewModel viewModel) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: viewModel.stickerOverlays.asMap().entries.map((entry) {
+        final idx = entry.key;
+        return Container(
+          height: 32,
+          margin: const EdgeInsets.symmetric(vertical: 2.0),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B1B1E),
+            border: Border(
+              bottom: BorderSide(color: AppColors.divider.withOpacity(0.4), width: 0.5),
+            ),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.star_rounded, size: 10, color: Colors.amber),
+              const SizedBox(width: 3),
+              Expanded(
+                child: Text(
+                  'STICKER ${idx + 1}',
+                  maxLines: 1,
+                  style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildAudioTrackHeaders(EditorViewModel viewModel) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        ...viewModel.audioTracks.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final track = entry.value;
+          return Container(
+            height: AppDimensions.audioTrackHeight,
+            margin: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1B1B1E),
+              border: Border(
+                bottom: BorderSide(color: AppColors.divider.withOpacity(0.4), width: 0.5),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.music_note_rounded, size: 9, color: AppColors.primary),
+                    const SizedBox(width: 2),
+                    Expanded(
+                      child: Text(
+                        'AUDIO ${idx + 1}',
+                        maxLines: 1,
+                        style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    // Lock toggle
+                    InkWell(
+                      onTap: () => viewModel.toggleAudioTrackLock(track.id),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 1.0),
+                        child: Icon(
+                          track.isLocked ? Icons.lock : Icons.lock_open,
+                          size: 11,
+                          color: track.isLocked ? Colors.amber : AppColors.textMuted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    // Mute / Visibility toggle
+                    InkWell(
+                      onTap: () => viewModel.toggleAudioTrackVisibility(track.id),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 1.0),
+                        child: Icon(
+                          track.isVisible ? Icons.volume_up : Icons.volume_off,
+                          size: 11,
+                          color: track.isVisible ? AppColors.textMuted : Colors.redAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+        if (viewModel.isRecordingVoice)
+          Container(
+            height: 38,
+            margin: const EdgeInsets.symmetric(vertical: 2.0),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            decoration: const BoxDecoration(color: Color(0xFF1B1B1E)),
+            child: const Row(
+              children: [
+                Icon(Icons.mic, size: 10, color: Colors.redAccent),
+                SizedBox(width: 3),
+                Text('REC', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
@@ -1162,9 +1846,11 @@ class _TimelineSectionState extends State<TimelineSection> {
     );
   }
 
-  Widget _buildPlayheadNeedle(double screenWidth) {
+  Widget _buildPlayheadNeedle(double screenWidth, double headerWidth) {
+    final canvasWidth = math.max(100.0, screenWidth - headerWidth);
+    final needleX = headerWidth + (canvasWidth / 2);
     return Positioned(
-      left: (screenWidth / 2) - 10,
+      left: needleX - 10,
       top: 0,
       bottom: 0,
       width: 20,
@@ -1178,10 +1864,11 @@ class _TimelineSectionState extends State<TimelineSection> {
           final deltaSec = (details.primaryDelta ?? 0.0) / widget.viewModel.pixelsPerSecond;
           final newPlayhead = (widget.viewModel.playheadPosition + deltaSec)
               .clamp(0.0, widget.viewModel.totalDurationInSeconds);
-          widget.viewModel.seekTo(newPlayhead);
+          final snappedPlayhead = widget.viewModel.snapTimelinePosition(newPlayhead);
+          widget.viewModel.seekTo(snappedPlayhead);
           if (_horizontalScrollController.hasClients) {
             _horizontalScrollController.jumpTo(
-              (newPlayhead * widget.viewModel.pixelsPerSecond)
+              (snappedPlayhead * widget.viewModel.pixelsPerSecond)
                   .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
             );
           }

@@ -94,6 +94,8 @@ class TextOverlay {
   final double scale;
   final double? boxWidth;
   final List<CaptionWord> words;
+  final bool isLocked;
+  final bool isVisible;
 
   const TextOverlay({
     required this.id,
@@ -121,6 +123,8 @@ class TextOverlay {
     this.scale = 1.0,
     this.boxWidth,
     this.words = const [],
+    this.isLocked = false,
+    this.isVisible = true,
   }) : textColor = color ?? textColor;
 
   /// Minimum allowable text scale factor
@@ -272,6 +276,8 @@ class TextOverlay {
     double? scale,
     double? boxWidth,
     List<CaptionWord>? words,
+    bool? isLocked,
+    bool? isVisible,
   }) {
     return TextOverlay(
       id: id ?? this.id,
@@ -298,6 +304,8 @@ class TextOverlay {
       scale: scale ?? this.scale,
       boxWidth: boxWidth ?? this.boxWidth,
       words: words ?? this.words,
+      isLocked: isLocked ?? this.isLocked,
+      isVisible: isVisible ?? this.isVisible,
     );
   }
 
@@ -328,6 +336,8 @@ class TextOverlay {
       'scale': scale,
       'boxWidth': boxWidth,
       'words': words.map((w) => w.toJson()).toList(),
+      'isLocked': isLocked,
+      'isVisible': isVisible,
     };
   }
 
@@ -375,6 +385,8 @@ class TextOverlay {
               ?.map((w) => CaptionWord.fromJson(w as Map<String, dynamic>))
               .toList() ??
           const [],
+      isLocked: json['isLocked'] as bool? ?? false,
+      isVisible: json['isVisible'] as bool? ?? true,
     );
   }
 }

@@ -72,6 +72,7 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
   }
 
   void _onLeftHandleDragStart(DragStartDetails details) {
+    if (widget.overlay.isLocked) return;
     _isDraggingLeft = true;
     _dragStartGlobalX = details.globalPosition.dx;
     _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
@@ -132,6 +133,7 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
   }
 
   void _onRightHandleDragStart(DragStartDetails details) {
+    if (widget.overlay.isLocked) return;
     _isDraggingRight = true;
     _dragStartGlobalX = details.globalPosition.dx;
     _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
@@ -192,6 +194,7 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
   }
 
   void _onBodyDragStart(DragStartDetails details) {
+    if (widget.overlay.isLocked) return;
     _isDraggingBody = true;
     _dragStartGlobalX = details.globalPosition.dx;
     _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
@@ -311,6 +314,16 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
                           ),
                         ),
                       ),
+                      if (overlay.isLocked)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Icon(Icons.lock_rounded, size: 11, color: Color(0xFFFFB300)),
+                        ),
+                      if (!overlay.isVisible)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Icon(Icons.visibility_off_rounded, size: 11, color: Colors.white54),
+                        ),
                     ],
                   ),
                 ),
@@ -319,7 +332,7 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
           ),
 
           // 2. Left Trim Handle
-          if (isSelected)
+          if (isSelected && !overlay.isLocked)
             Positioned(
               left: 0,
               top: 0,
@@ -357,7 +370,7 @@ class _TimelineOverlayTrackItemState extends State<TimelineOverlayTrackItem> {
             ),
 
           // 3. Right Trim Handle
-          if (isSelected)
+          if (isSelected && !overlay.isLocked)
             Positioned(
               right: 0,
               top: 0,

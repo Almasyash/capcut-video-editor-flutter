@@ -22,6 +22,10 @@ class AudioTrack {
   /// Controls whether beat markers are displayed on the waveform and used for magnetic snapping
   final bool showBeats;
 
+  /// Layer Management (Lock & Visibility)
+  final bool isLocked;
+  final bool isVisible;
+
   const AudioTrack({
     required this.id,
     required this.assetId,
@@ -38,6 +42,8 @@ class AudioTrack {
     this.waveformPoints = const [],
     this.beats = const [],
     this.showBeats = true,
+    this.isLocked = false,
+    this.isVisible = true,
   }) : name = title ?? name ?? 'Audio Track';
 
   String get title => name;
@@ -97,6 +103,8 @@ class AudioTrack {
     List<double>? waveformPoints,
     List<double>? beats,
     bool? showBeats,
+    bool? isLocked,
+    bool? isVisible,
   }) {
     return AudioTrack(
       id: id ?? this.id,
@@ -113,6 +121,8 @@ class AudioTrack {
       waveformPoints: waveformPoints ?? this.waveformPoints,
       beats: beats ?? this.beats,
       showBeats: showBeats ?? this.showBeats,
+      isLocked: isLocked ?? this.isLocked,
+      isVisible: isVisible ?? this.isVisible,
     );
   }
 
@@ -132,6 +142,8 @@ class AudioTrack {
       'waveformPoints': waveformPoints,
       'beats': beats,
       'showBeats': showBeats,
+      'isLocked': isLocked,
+      'isVisible': isVisible,
     };
   }
 
@@ -162,6 +174,8 @@ class AudioTrack {
               .toList() ??
           const [],
       showBeats: json['showBeats'] as bool? ?? true,
+      isLocked: json['isLocked'] as bool? ?? false,
+      isVisible: json['isVisible'] as bool? ?? true,
     );
   }
 }

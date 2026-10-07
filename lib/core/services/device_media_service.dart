@@ -384,7 +384,7 @@ class DeviceMediaService {
     // 4. Build serialized audio tracks payload
     final audioPayload = <Map<String, dynamic>>[];
     for (final track in project.audioTracks) {
-      if (track.isMuted) continue;
+      if (track.isMuted || !track.isVisible) continue;
       final asset = assets.firstWhere(
         (a) => a.id == track.assetId,
         orElse: () => MediaAsset(
@@ -409,7 +409,7 @@ class DeviceMediaService {
     // 5. Build serialized text overlays payload
     final textsPayload = <Map<String, dynamic>>[];
     for (final text in project.textOverlays) {
-      if (text.text.trim().isEmpty) continue;
+      if (!text.isVisible || text.text.trim().isEmpty) continue;
       textsPayload.add({
         'id': text.id,
         'text': text.text,
@@ -433,6 +433,7 @@ class DeviceMediaService {
     // 6. Build serialized PIP overlays payload
     final pipOverlaysPayload = <Map<String, dynamic>>[];
     for (final overlay in project.overlayClips) {
+      if (!overlay.isVisible) continue;
       final asset = assets.firstWhere(
         (a) => a.id == overlay.assetId,
         orElse: () => MediaAsset(

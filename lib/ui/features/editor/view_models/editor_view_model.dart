@@ -37,6 +37,7 @@ import 'package:flutter/services.dart';
 import 'package:capcut_video_editor/core/services/audio_beat_service.dart';
 import 'package:capcut_video_editor/core/services/auto_caption_service.dart';
 import 'package:capcut_video_editor/core/services/pip_ai_provider.dart';
+import 'package:capcut_video_editor/core/utils/timeline_coordinate_system.dart';
 
 /// Result returned from every transition mutation.
 class TransitionMutationResult {
@@ -275,6 +276,15 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _isRippleEditingEnabled = false;
+  bool get isRippleEditingEnabled => _isRippleEditingEnabled;
+
+  void toggleRippleEditing([bool? enabled]) {
+    _isRippleEditingEnabled = enabled ?? !_isRippleEditingEnabled;
+    TtsService.announce(_isRippleEditingEnabled ? 'Ripple editing enabled' : 'Ripple editing disabled');
+    notifyListeners();
+  }
+
   double _playheadPosition = 0.0; // In seconds
   bool _isPlaying = false;
   bool _isLooping = false; // Default non-looping playback for video editor
@@ -466,6 +476,7 @@ class EditorViewModel extends ChangeNotifier {
   /// Returns active overlay clips visible at current playhead
   List<OverlayClip> get activeOverlayClipsAtPlayhead {
     return _overlayClips.where((o) {
+      if (!o.isVisible) return false;
       final isSelected = selectedOverlay?.id == o.id;
       final inRange = _playheadPosition >= (o.startTimeInSeconds - 0.05) &&
           _playheadPosition <= (o.endTimeInSeconds + 0.05);
@@ -484,6 +495,7 @@ class EditorViewModel extends ChangeNotifier {
   /// Returns all active text overlays visible at current playhead position
   List<TextOverlay> get activeTextOverlaysAtPlayhead {
     return _textOverlays.where((t) {
+      if (!t.isVisible) return false;
       return _playheadPosition >= t.startTimeInSeconds &&
           _playheadPosition <= (t.startTimeInSeconds + t.durationInSeconds);
     }).toList();
@@ -1361,6 +1373,35 @@ class EditorViewModel extends ChangeNotifier {
       _playheadPosition = deletedStart;
     }
 
+    // Ripple shift subsequent layers when ripple editing is active
+    if (_isRippleEditingEnabled) {
+      final shiftDelta = Duration(milliseconds: (deletedDuration * 1000).round());
+      for (int i = 0; i < _overlayClips.length; i++) {
+        if (_overlayClips[i].startTimeInSeconds >= deletedEnd) {
+          final newStart = _overlayClips[i].startTime - shiftDelta;
+          _overlayClips[i] = _overlayClips[i].copyWith(
+            startTime: newStart < Duration.zero ? Duration.zero : newStart,
+          );
+        }
+      }
+      for (int i = 0; i < _textOverlays.length; i++) {
+        if (_textOverlays[i].startTimeInSeconds >= deletedEnd) {
+          final newStart = _textOverlays[i].startTime - shiftDelta;
+          _textOverlays[i] = _textOverlays[i].copyWith(
+            startTime: newStart < Duration.zero ? Duration.zero : newStart,
+          );
+        }
+      }
+      for (int i = 0; i < _audioTracks.length; i++) {
+        if (_audioTracks[i].startTimeInSeconds >= deletedEnd) {
+          final newStart = _audioTracks[i].startTime - shiftDelta;
+          _audioTracks[i] = _audioTracks[i].copyWith(
+            startTime: newStart < Duration.zero ? Duration.zero : newStart,
+          );
+        }
+      }
+    }
+
     // Update Selection per Phase 13:
     if (_videoClips.isEmpty) {
       _selectedClipIndex = null;
@@ -1900,45 +1941,6 @@ class EditorViewModel extends ChangeNotifier {
     _isAudioSelected = false;
     scheduleAutoSave();
     notifyListeners();
-  }
-
-  bool splitOverlayAtPlayhead() {
-    final overlay = selectedOverlay;
-    if (overlay == null || _selectedOverlayIndex == null) return false;
-
-    if (_playheadPosition <= overlay.startTimeInSeconds + 0.05 ||
-        _playheadPosition >= (overlay.startTimeInSeconds + overlay.durationInSeconds) - 0.05) {
-      return false;
-    }
-
-    _saveSnapshot();
-    final index = _selectedOverlayIndex!;
-    final offsetSec = _playheadPosition - overlay.startTimeInSeconds;
-    final durationPartAMs = (offsetSec * 1000).round();
-    final durationPartBMs = overlay.duration.inMilliseconds - durationPartAMs;
-
-    final timestamp = DateTime.now().microsecondsSinceEpoch;
-    final partA = overlay.copyWith(
-      id: '${overlay.id}_a_$timestamp',
-      title: '${overlay.title} (Part 1)',
-      duration: Duration(milliseconds: durationPartAMs),
-    );
-
-    final partB = overlay.copyWith(
-      id: '${overlay.id}_b_$timestamp',
-      title: '${overlay.title} (Part 2)',
-      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
-      duration: Duration(milliseconds: durationPartBMs),
-    );
-
-    _overlayClips.removeAt(index);
-    _overlayClips.insert(index, partA);
-    _overlayClips.insert(index + 1, partB);
-
-    _selectedOverlayIndex = index + 1;
-    scheduleAutoSave();
-    notifyListeners();
-    return true;
   }
 
   // --- Advanced PIP Editing Operations ---
@@ -3215,6 +3217,60 @@ class EditorViewModel extends ChangeNotifier {
     return targetTimelineSec;
   }
 
+  bool _isSnapToClipsEnabled = true;
+  bool get isSnapToClipsEnabled => _isSnapToClipsEnabled;
+
+  void toggleSnapToClips([bool? enabled]) {
+    _isSnapToClipsEnabled = enabled ?? !_isSnapToClipsEnabled;
+    TtsService.announce(_isSnapToClipsEnabled ? 'Timeline snapping enabled' : 'Timeline snapping disabled');
+    notifyListeners();
+  }
+
+  /// Structural snap boundaries across clips, transitions, overlays, texts, and audios.
+  List<double> get snapBoundaries {
+    final boundaries = <double>{0.0, totalDurationInSeconds};
+    double runningStart = 0.0;
+    for (final clip in _videoClips) {
+      boundaries.add(runningStart);
+      runningStart += clip.durationInSeconds;
+      boundaries.add(runningStart);
+    }
+    for (final ov in _overlayClips) {
+      boundaries.add(ov.startTimeInSeconds);
+      boundaries.add(ov.endTimeInSeconds);
+    }
+    for (final txt in _textOverlays) {
+      boundaries.add(txt.startTimeInSeconds);
+      boundaries.add(txt.endTimeInSeconds);
+    }
+    for (final aud in _audioTracks) {
+      boundaries.add(aud.startTimeInSeconds);
+      boundaries.add(aud.endTimeInSeconds);
+    }
+    final sorted = boundaries.toList()..sort();
+    return sorted;
+  }
+
+  /// Snaps [targetTimelineSec] to nearest boundary (if enabled) and nearest beat (if enabled).
+  double snapTimelinePosition(double targetTimelineSec, {double threshold = 0.08}) {
+    double snapped = targetTimelineSec;
+    if (_isSnapToClipsEnabled) {
+      final boundarySnap = TimelineCoordinateSystem.snapToNearestBoundary(
+        snapped,
+        snapBoundaries,
+        thresholdSeconds: threshold,
+      );
+      if ((boundarySnap - snapped).abs() > 0.001) {
+        HapticFeedback.selectionClick();
+        snapped = boundarySnap;
+      }
+    }
+    if (_isSnapToBeatEnabled) {
+      snapped = snapToNearestBeat(snapped, threshold: threshold);
+    }
+    return snapped;
+  }
+
   // --- Text Overlay Operations ---
 
   void addTextOverlay(TextOverlay overlay) {
@@ -3647,45 +3703,6 @@ class EditorViewModel extends ChangeNotifier {
     return true;
   }
 
-  bool splitTextAtPlayhead() {
-    final text = selectedTextOverlay;
-    if (text == null) return false;
-
-    if (_playheadPosition <= text.startTimeInSeconds + 0.05 ||
-        _playheadPosition >= text.endTimeInSeconds - 0.05) {
-      return false;
-    }
-
-    _saveSnapshot();
-    final index = _textOverlays.indexWhere((t) => t.id == text.id);
-    if (index == -1) return false;
-
-    final offsetSec = _playheadPosition - text.startTimeInSeconds;
-    final splitMs = (offsetSec * text.speed * 1000).round();
-    final newSplitPoint = Duration(milliseconds: text.trimStart.inMilliseconds + splitMs);
-
-    final timestamp = DateTime.now().microsecondsSinceEpoch;
-    final textPartA = text.copyWith(
-      id: '${text.id}_part1_$timestamp',
-      trimEnd: newSplitPoint,
-    );
-
-    final textPartB = text.copyWith(
-      id: '${text.id}_part2_$timestamp',
-      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
-      trimStart: newSplitPoint,
-    );
-
-    _textOverlays.removeAt(index);
-    _textOverlays.insert(index, textPartA);
-    _textOverlays.insert(index + 1, textPartB);
-
-    _selectedTextId = textPartB.id;
-    scheduleAutoSave();
-    notifyListeners();
-    return true;
-  }
-
   TextOverlay? duplicateSelectedText() {
     final text = selectedTextOverlay;
     if (text == null) return null;
@@ -3819,6 +3836,408 @@ class EditorViewModel extends ChangeNotifier {
       return true;
     }
     return false;
+  }
+
+  // --- Advanced Layer Management: Lock / Unlock ---
+
+  void toggleClipLock(String id, [bool? locked]) {
+    final index = _videoClips.indexWhere((c) => c.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _videoClips[index];
+    final newLocked = locked ?? !current.isLocked;
+    _videoClips[index] = current.copyWith(isLocked: newLocked);
+    TtsService.announce(newLocked ? 'Clip locked' : 'Clip unlocked');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleOverlayLock(String id, [bool? locked]) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _overlayClips[index];
+    final newLocked = locked ?? !current.isLocked;
+    _overlayClips[index] = current.copyWith(isLocked: newLocked);
+    TtsService.announce(newLocked ? 'Overlay locked' : 'Overlay unlocked');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleTextLock(String id, [bool? locked]) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _textOverlays[index];
+    final newLocked = locked ?? !current.isLocked;
+    _textOverlays[index] = current.copyWith(isLocked: newLocked);
+    TtsService.announce(newLocked ? 'Text overlay locked' : 'Text overlay unlocked');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleAudioTrackLock(String id, [bool? locked]) {
+    final index = _audioTracks.indexWhere((a) => a.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _audioTracks[index];
+    final newLocked = locked ?? !current.isLocked;
+    _audioTracks[index] = current.copyWith(isLocked: newLocked);
+    TtsService.announce(newLocked ? 'Audio track locked' : 'Audio track unlocked');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  bool toggleSelectedLock() {
+    if (selectedOverlay != null) {
+      toggleOverlayLock(selectedOverlay!.id);
+      return true;
+    } else if (selectedTextOverlay != null) {
+      toggleTextLock(selectedTextOverlay!.id);
+      return true;
+    } else if (selectedAudioTrack != null) {
+      toggleAudioTrackLock(selectedAudioTrack!.id);
+      return true;
+    } else if (selectedClip != null) {
+      toggleClipLock(selectedClip!.id);
+      return true;
+    }
+    return false;
+  }
+
+  // --- Advanced Layer Management: Hide / Show (Visibility) ---
+
+  void toggleClipVisibility(String id, [bool? visible]) {
+    final index = _videoClips.indexWhere((c) => c.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _videoClips[index];
+    final newVisible = visible ?? !current.isVisible;
+    _videoClips[index] = current.copyWith(isVisible: newVisible);
+    TtsService.announce(newVisible ? 'Clip visible' : 'Clip hidden');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleOverlayVisibility(String id, [bool? visible]) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _overlayClips[index];
+    final newVisible = visible ?? !current.isVisible;
+    _overlayClips[index] = current.copyWith(isVisible: newVisible);
+    TtsService.announce(newVisible ? 'Overlay visible' : 'Overlay hidden');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleTextVisibility(String id, [bool? visible]) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _textOverlays[index];
+    final newVisible = visible ?? !current.isVisible;
+    _textOverlays[index] = current.copyWith(isVisible: newVisible);
+    TtsService.announce(newVisible ? 'Text visible' : 'Text hidden');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void toggleAudioTrackVisibility(String id, [bool? visible]) {
+    final index = _audioTracks.indexWhere((a) => a.id == id);
+    if (index == -1) return;
+    _saveSnapshot();
+    final current = _audioTracks[index];
+    final newVisible = visible ?? !current.isVisible;
+    _audioTracks[index] = current.copyWith(isVisible: newVisible);
+    TtsService.announce(newVisible ? 'Audio track visible' : 'Audio track muted');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  bool toggleSelectedVisibility() {
+    if (selectedOverlay != null) {
+      toggleOverlayVisibility(selectedOverlay!.id);
+      return true;
+    } else if (selectedTextOverlay != null) {
+      toggleTextVisibility(selectedTextOverlay!.id);
+      return true;
+    } else if (selectedAudioTrack != null) {
+      toggleAudioTrackVisibility(selectedAudioTrack!.id);
+      return true;
+    } else if (selectedClip != null) {
+      toggleClipVisibility(selectedClip!.id);
+      return true;
+    }
+    return false;
+  }
+
+  // --- Advanced Layer Management: Z-Order & Layer Reordering ---
+
+  void moveOverlayUp(String id) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1 || index >= _overlayClips.length - 1) return;
+    _saveSnapshot();
+    final item = _overlayClips.removeAt(index);
+    _overlayClips.insert(index + 1, item);
+    _selectedOverlayIndex = index + 1;
+    TtsService.announce('Layer moved up');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void moveOverlayDown(String id) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index <= 0) return;
+    _saveSnapshot();
+    final item = _overlayClips.removeAt(index);
+    _overlayClips.insert(index - 1, item);
+    _selectedOverlayIndex = index - 1;
+    TtsService.announce('Layer moved down');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void bringOverlayToFront(String id) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index == -1 || index == _overlayClips.length - 1) return;
+    _saveSnapshot();
+    final item = _overlayClips.removeAt(index);
+    _overlayClips.add(item);
+    _selectedOverlayIndex = _overlayClips.length - 1;
+    TtsService.announce('Layer brought to front');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void sendOverlayToBack(String id) {
+    final index = _overlayClips.indexWhere((o) => o.id == id);
+    if (index <= 0) return;
+    _saveSnapshot();
+    final item = _overlayClips.removeAt(index);
+    _overlayClips.insert(0, item);
+    _selectedOverlayIndex = 0;
+    TtsService.announce('Layer sent to back');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void reorderOverlays(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _overlayClips.length) return;
+    if (newIndex < 0 || newIndex > _overlayClips.length) return;
+    _saveSnapshot();
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    final item = _overlayClips.removeAt(oldIndex);
+    _overlayClips.insert(newIndex, item);
+    _selectedOverlayIndex = newIndex;
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void moveTextUp(String id) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index == -1 || index >= _textOverlays.length - 1) return;
+    _saveSnapshot();
+    final item = _textOverlays.removeAt(index);
+    _textOverlays.insert(index + 1, item);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void moveTextDown(String id) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index <= 0) return;
+    _saveSnapshot();
+    final item = _textOverlays.removeAt(index);
+    _textOverlays.insert(index - 1, item);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void bringTextToFront(String id) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index == -1 || index == _textOverlays.length - 1) return;
+    _saveSnapshot();
+    final item = _textOverlays.removeAt(index);
+    _textOverlays.add(item);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void sendTextToBack(String id) {
+    final index = _textOverlays.indexWhere((t) => t.id == id);
+    if (index <= 0) return;
+    _saveSnapshot();
+    final item = _textOverlays.removeAt(index);
+    _textOverlays.insert(0, item);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void reorderTexts(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _textOverlays.length) return;
+    if (newIndex < 0 || newIndex > _textOverlays.length) return;
+    _saveSnapshot();
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    final item = _textOverlays.removeAt(oldIndex);
+    _textOverlays.insert(newIndex, item);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  // --- Multi-Layer Split at Playhead ---
+
+  bool splitOverlayAtPlayhead([String? overlayId]) {
+    final targetId = overlayId ?? selectedOverlay?.id;
+    if (targetId == null) return false;
+    final index = _overlayClips.indexWhere((o) => o.id == targetId);
+    if (index == -1) return false;
+
+    final original = _overlayClips[index];
+    final startSec = original.startTimeInSeconds;
+    final endSec = original.endTimeInSeconds;
+
+    if (_playheadPosition <= startSec + 0.1 || _playheadPosition >= endSec - 0.1) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final splitTime = _playheadPosition;
+    final partADurMs = ((splitTime - startSec) * 1000).round();
+    final partBDurMs = original.duration.inMilliseconds - partADurMs;
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+
+    final partA = original.copyWith(
+      id: '${original.id}_part1_$timestamp',
+      title: '${original.title} (Part 1)',
+      duration: Duration(milliseconds: partADurMs),
+      clearOutAnimation: false,
+    );
+
+    final partB = original.copyWith(
+      id: '${original.id}_part2_$timestamp',
+      title: '${original.title} (Part 2)',
+      startTime: Duration(milliseconds: (splitTime * 1000).round()),
+      duration: Duration(milliseconds: partBDurMs),
+      clearInAnimation: false,
+    );
+
+    _overlayClips.removeAt(index);
+    _overlayClips.insert(index, partA);
+    _overlayClips.insert(index + 1, partB);
+    _selectedOverlayIndex = index + 1;
+    TtsService.announce('Split overlay at playhead');
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
+  }
+
+  bool splitTextAtPlayhead([String? textId]) {
+    final targetId = textId ?? selectedTextId;
+    if (targetId == null) return false;
+    final index = _textOverlays.indexWhere((t) => t.id == targetId);
+    if (index == -1) return false;
+
+    final original = _textOverlays[index];
+    final startSec = original.startTimeInSeconds;
+    final endSec = startSec + original.durationInSeconds;
+
+    if (_playheadPosition <= startSec + 0.1 || _playheadPosition >= endSec - 0.1) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final splitTime = _playheadPosition;
+    final partADurMs = ((splitTime - startSec) * 1000).round();
+    final partBDurMs = original.duration.inMilliseconds - partADurMs;
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+
+    final partA = original.copyWith(
+      id: '${original.id}_part1_$timestamp',
+      text: original.text,
+      duration: Duration(milliseconds: partADurMs),
+    );
+
+    final partB = original.copyWith(
+      id: '${original.id}_part2_$timestamp',
+      text: original.text,
+      startTime: Duration(milliseconds: (splitTime * 1000).round()),
+      duration: Duration(milliseconds: partBDurMs),
+    );
+
+    _textOverlays.removeAt(index);
+    _textOverlays.insert(index, partA);
+    _textOverlays.insert(index + 1, partB);
+    _selectedTextId = partB.id;
+    TtsService.announce('Split text at playhead');
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
+  }
+
+  bool splitAudioTrackAtPlayhead([String? trackId]) {
+    final targetId = trackId ?? selectedAudioTrackId;
+    if (targetId == null && _audioTracks.isEmpty) return false;
+    final index = targetId != null
+        ? _audioTracks.indexWhere((a) => a.id == targetId)
+        : 0;
+    if (index == -1 || index >= _audioTracks.length) return false;
+
+    final original = _audioTracks[index];
+    final startSec = original.startTimeInSeconds;
+    final endSec = original.endTimeInSeconds;
+
+    if (_playheadPosition <= startSec + 0.1 || _playheadPosition >= endSec - 0.1) {
+      return false;
+    }
+
+    _saveSnapshot();
+    final splitOffsetSec = _playheadPosition - startSec;
+    final splitOffsetMs = (splitOffsetSec * (original.speed > 0 ? original.speed : 1.0) * 1000).round();
+    final splitTrimEndMs = original.trimStart.inMilliseconds + splitOffsetMs;
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+
+    final partA = original.copyWith(
+      id: '${original.id}_part1_$timestamp',
+      name: '${original.title} (Part 1)',
+      trimEnd: Duration(milliseconds: splitTrimEndMs),
+    );
+
+    final partB = original.copyWith(
+      id: '${original.id}_part2_$timestamp',
+      name: '${original.title} (Part 2)',
+      startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
+      trimStart: Duration(milliseconds: splitTrimEndMs),
+    );
+
+    _audioTracks.removeAt(index);
+    _audioTracks.insert(index, partA);
+    _audioTracks.insert(index + 1, partB);
+    _selectedAudioTrackId = partB.id;
+    TtsService.announce('Split audio at playhead');
+    scheduleAutoSave();
+    notifyListeners();
+    return true;
+  }
+
+  bool splitSelectedItemAtPlayhead() {
+    if (selectedOverlay != null) {
+      final res = splitOverlayAtPlayhead();
+      if (res) return true;
+    }
+    if (selectedTextOverlay != null) {
+      final res = splitTextAtPlayhead();
+      if (res) return true;
+    }
+    if (selectedAudioTrack != null) {
+      final res = splitAudioTrackAtPlayhead();
+      if (res) return true;
+    }
+    return splitClipAtPlayhead();
   }
 
   // --- Clipboard Operations (Cut / Copy / Paste) ---
@@ -4079,6 +4498,21 @@ class EditorViewModel extends ChangeNotifier {
   void setZoomScale(double pps) {
     _pixelsPerSecond = pps.clamp(AppDimensions.minPixelsPerSecond, AppDimensions.maxPixelsPerSecond).toDouble();
     notifyListeners();
+  }
+
+  void zoomIn([double factor = 1.25]) {
+    setZoomScale(_pixelsPerSecond * factor);
+    TtsService.announce('Zoom in');
+  }
+
+  void zoomOut([double factor = 0.8]) {
+    setZoomScale(_pixelsPerSecond * factor);
+    TtsService.announce('Zoom out');
+  }
+
+  void resetZoom() {
+    setZoomScale(AppDimensions.defaultPixelsPerSecond);
+    TtsService.announce('Zoom reset');
   }
 
   void setAspectRatio(AspectRatioPreset preset) {

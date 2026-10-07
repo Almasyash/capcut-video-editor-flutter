@@ -346,6 +346,21 @@ if([T2]::E("${path.replaceAll(r'\', r'\\')}","${thumbPath.replaceAll(r'\', r'\\'
                       ),
                     ),
 
+                    // Lock indicator badge
+                    if (widget.clip.isLocked)
+                      Positioned(
+                        top: 4,
+                        right: widget.isSelected ? AppDimensions.trimHandleWidth + 4 : 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.9),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Icon(Icons.lock, size: 10, color: Colors.black),
+                        ),
+                      ),
+
                     // Bottom-Right: Speed Badge if != 1.0 or SpeedCurve is active
                     if (widget.clip.speedCurve != null || (widget.clip.speed - 1.0).abs() > 0.05)
                       Positioned(
@@ -422,8 +437,8 @@ if([T2]::E("${path.replaceAll(r'\', r'\\')}","${thumbPath.replaceAll(r'\', r'\\'
               ),
             ),
 
-            // 2. Left Draggable Trim Handle (Visible when selected)
-            if (widget.isSelected)
+            // 2. Left Draggable Trim Handle (Visible when selected and not locked)
+            if (widget.isSelected && !widget.clip.isLocked)
               Positioned(
                 top: 0,
                 bottom: 0,
@@ -464,8 +479,8 @@ if([T2]::E("${path.replaceAll(r'\', r'\\')}","${thumbPath.replaceAll(r'\', r'\\'
                 ),
               ),
 
-            // 3. Right Draggable Trim Handle (Visible when selected)
-            if (widget.isSelected)
+            // 3. Right Draggable Trim Handle (Visible when selected and not locked)
+            if (widget.isSelected && !widget.clip.isLocked)
               Positioned(
                 top: 0,
                 bottom: 0,

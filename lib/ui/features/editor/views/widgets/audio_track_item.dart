@@ -41,110 +41,137 @@ class AudioTrackItem extends StatelessWidget {
       playheadProgress = activeSec > 0 ? ((currentPlayhead - trackStartSec) / activeSec).clamp(0.0, 1.0) : 0.0;
     }
 
-    return Container(
-      margin: EdgeInsets.only(left: startOffset, top: 4.0, bottom: 4.0),
-      width: trackWidth,
-      height: AppDimensions.audioTrackHeight,
-      child: GestureDetector(
-        onTap: () => viewModel.selectAudioTrack(audioTrack.id),
-        onTapDown: (details) {
-          if (viewModel.isPlaying) viewModel.pause();
-          viewModel.selectAudioTrack(audioTrack.id);
-          final targetTime = (audioTrack.startTimeInSeconds + (details.localPosition.dx / pixelsPerSecond))
-              .clamp(0.0, viewModel.totalDurationInSeconds);
-          viewModel.seekTo(targetTime);
-        },
-        onHorizontalDragUpdate: (details) {
-          // Middle drag: slide audio track position across timeline
-          final deltaSeconds = details.primaryDelta! / pixelsPerSecond;
-          final newStartSec = math.max(0.0, audioTrack.startTimeInSeconds + deltaSeconds);
-          viewModel.moveAudioTrack(
-            audioTrack.id,
-            Duration(milliseconds: (newStartSec * 1000).round()),
-          );
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.audioTrackBg,
-            borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
-            border: Border.all(
-              color: isSelected ? AppColors.selectionBorder : AppColors.primary.withOpacity(0.3),
-              width: isSelected ? 2.0 : 1.0,
+    return Opacity(
+      opacity: audioTrack.isVisible ? 1.0 : 0.45,
+      child: Container(
+        margin: EdgeInsets.only(left: startOffset, top: 4.0, bottom: 4.0),
+        width: trackWidth,
+        height: AppDimensions.audioTrackHeight,
+        child: GestureDetector(
+          onTap: () => viewModel.selectAudioTrack(audioTrack.id),
+          onTapDown: (details) {
+            if (viewModel.isPlaying) viewModel.pause();
+            viewModel.selectAudioTrack(audioTrack.id);
+            final targetTime = (audioTrack.startTimeInSeconds + (details.localPosition.dx / pixelsPerSecond))
+                .clamp(0.0, viewModel.totalDurationInSeconds);
+            viewModel.seekTo(targetTime);
+          },
+          onHorizontalDragUpdate: audioTrack.isLocked
+              ? null
+              : (details) {
+                  // Middle drag: slide audio track position across timeline
+                  final deltaSeconds = details.primaryDelta! / pixelsPerSecond;
+                  final newStartSec = math.max(0.0, audioTrack.startTimeInSeconds + deltaSeconds);
+                  viewModel.moveAudioTrack(
+                    audioTrack.id,
+                    Duration(milliseconds: (newStartSec * 1000).round()),
+                  );
+                },
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.audioTrackBg,
+              borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
+              border: Border.all(
+                color: isSelected ? AppColors.selectionBorder : AppColors.primary.withOpacity(0.3),
+                width: isSelected ? 2.0 : 1.0,
+              ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: AppColors.selectionBorder.withOpacity(0.3),
+                        blurRadius: 6,
+                      ),
+                    ]
+                  : null,
             ),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: AppColors.selectionBorder.withOpacity(0.3),
-                      blurRadius: 6,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Stack(
-            children: [
-              // 1. Audio Waveform Visualization (Trim-accurate, zoom-adaptive, volume-responsive)
-              Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
-                  child: CustomPaint(
-                    painter: _WaveformPainter(
-                      points: audioTrack.waveformPoints,
-                      trimStart: audioTrack.trimStart,
-                      trimEnd: audioTrack.effectiveTrimEnd,
-                      totalDuration: audioTrack.duration,
-                      volume: audioTrack.volume,
-                      speed: audioTrack.speed,
-                      beats: audioTrack.beats,
-                      showBeats: audioTrack.showBeats,
-                      isMuted: audioTrack.isMuted,
-                      playheadProgress: playheadProgress,
-                      activeColor: AppColors.audioTrackWaveform,
-                      unplayedColor: AppColors.audioTrackWaveform.withOpacity(0.55),
-                      mutedColor: AppColors.textMuted.withOpacity(0.3),
+            child: Stack(
+              children: [
+                // 1. Audio Waveform Visualization (Trim-accurate, zoom-adaptive, volume-responsive)
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 6.0),
+                    child: CustomPaint(
+                      painter: _WaveformPainter(
+                        points: audioTrack.waveformPoints,
+                        trimStart: audioTrack.trimStart,
+                        trimEnd: audioTrack.effectiveTrimEnd,
+                        totalDuration: audioTrack.duration,
+                        volume: audioTrack.volume,
+                        speed: audioTrack.speed,
+                        beats: audioTrack.beats,
+                        showBeats: audioTrack.showBeats,
+                        isMuted: audioTrack.isMuted,
+                        playheadProgress: playheadProgress,
+                        activeColor: AppColors.audioTrackWaveform,
+                        unplayedColor: AppColors.audioTrackWaveform.withOpacity(0.55),
+                        mutedColor: AppColors.textMuted.withOpacity(0.3),
+                      ),
                     ),
                   ),
                 ),
-              ),
 
-              // 2. Title & Music Info Overlay
-              Positioned(
-                top: 4,
-                left: 14,
-                right: 14,
-                child: Row(
-                  children: [
-                    Icon(
-                      audioTrack.isMuted ? Icons.volume_off_rounded : Icons.music_note_rounded,
-                      size: 13,
-                      color: audioTrack.isMuted ? AppColors.error : AppColors.primary,
-                    ),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        '${audioTrack.title} • ${audioTrack.speed > 1.05 || audioTrack.speed < 0.95 ? '${audioTrack.speed.toStringAsFixed(1)}x • ' : ''}${audioTrack.artist}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: audioTrack.isMuted ? AppColors.textMuted : AppColors.textPrimary,
+                // 2. Title & Music Info Overlay
+                Positioned(
+                  top: 4,
+                  left: 14,
+                  right: 14,
+                  child: Row(
+                    children: [
+                      Icon(
+                        audioTrack.isMuted ? Icons.volume_off_rounded : Icons.music_note_rounded,
+                        size: 13,
+                        color: audioTrack.isMuted ? AppColors.error : AppColors.primary,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          '${audioTrack.title} • ${audioTrack.speed > 1.05 || audioTrack.speed < 0.95 ? '${audioTrack.speed.toStringAsFixed(1)}x • ' : ''}${audioTrack.artist}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: audioTrack.isMuted ? AppColors.textMuted : AppColors.textPrimary,
+                          ),
                         ),
                       ),
-                    ),
-                    Text(
-                      audioTrack.isMuted ? 'MUTED' : '${(audioTrack.volume * 100).round()}%',
-                      style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                        color: audioTrack.isMuted ? AppColors.error : AppColors.textSecondary,
+                      if (audioTrack.isLocked) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withOpacity(0.85),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Icon(Icons.lock, size: 9, color: Colors.black),
+                        ),
+                      ],
+                      if (!audioTrack.isVisible) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Icon(Icons.visibility_off, size: 9, color: Colors.white70),
+                        ),
+                      ],
+                      const SizedBox(width: 4),
+                      Text(
+                        audioTrack.isMuted ? 'MUTED' : '${(audioTrack.volume * 100).round()}%',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: audioTrack.isMuted ? AppColors.error : AppColors.textSecondary,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
 
-              // 3. Left & Right Interactive Amber Trim Handles when Selected (preserving timeline startTime)
-              if (isSelected) ...[
+                // 3. Left & Right Interactive Amber Trim Handles when Selected (preserving timeline startTime)
+                if (isSelected && !audioTrack.isLocked) ...[
                 Positioned(
                   left: 0,
                   top: 0,
@@ -194,7 +221,8 @@ class AudioTrackItem extends StatelessWidget {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildTrimHandle({required bool isLeft, required ValueChanged<double> onDrag}) {

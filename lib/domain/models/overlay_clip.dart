@@ -385,11 +385,17 @@ class OverlayClip {
   // Split Screen Preset
   final String? splitScreenPreset;
 
+  // Layer Management (Lock & Visibility)
+  final bool isLocked;
+  final bool isVisible;
+
   const OverlayClip({
     required this.id,
     required this.title,
     required this.startTime,
     required this.duration,
+    this.isLocked = false,
+    this.isVisible = true,
     this.position = const Offset(0.5, 0.5),
     this.scale = 0.45,
     this.opacity = 1.0,
@@ -568,12 +574,16 @@ class OverlayClip {
     double? chromaSpill,
     PipAudioEffects? audioEffects,
     String? splitScreenPreset,
+    bool? isLocked,
+    bool? isVisible,
   }) {
     return OverlayClip(
       id: id ?? this.id,
       title: title ?? this.title,
       startTime: startTime ?? this.startTime,
       duration: duration ?? this.duration,
+      isLocked: isLocked ?? this.isLocked,
+      isVisible: isVisible ?? this.isVisible,
       position: position ?? this.position,
       scale: scale ?? this.scale,
       opacity: opacity ?? this.opacity,
@@ -671,6 +681,8 @@ class OverlayClip {
       'chromaSpill': chromaSpill,
       'audioEffects': audioEffects.toJson(),
       if (splitScreenPreset != null) 'splitScreenPreset': splitScreenPreset,
+      'isLocked': isLocked,
+      'isVisible': isVisible,
     };
   }
 
@@ -699,6 +711,8 @@ class OverlayClip {
       title: json['title'] as String? ?? 'Overlay',
       startTime: Duration(milliseconds: (json['startTimeMs'] as num?)?.toInt() ?? 0),
       duration: Duration(milliseconds: (json['durationMs'] as num?)?.toInt() ?? 3000),
+      isLocked: json['isLocked'] as bool? ?? false,
+      isVisible: json['isVisible'] as bool? ?? true,
       position: Offset(
         (json['posX'] as num?)?.toDouble() ?? 0.5,
         (json['posY'] as num?)?.toDouble() ?? 0.5,

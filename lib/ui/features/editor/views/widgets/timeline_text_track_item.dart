@@ -69,6 +69,7 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
   }
 
   void _onLeftHandleDragStart(DragStartDetails details) {
+    if (widget.text.isLocked) return;
     _isDraggingLeft = true;
     _dragStartGlobalX = details.globalPosition.dx;
     _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
@@ -129,6 +130,7 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
   }
 
   void _onRightHandleDragStart(DragStartDetails details) {
+    if (widget.text.isLocked) return;
     _isDraggingRight = true;
     _dragStartGlobalX = details.globalPosition.dx;
     _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
@@ -189,6 +191,7 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
   }
 
   void _onBodyDragStart(DragStartDetails details) {
+    if (widget.text.isLocked) return;
     _isDraggingBody = true;
     _dragStartGlobalX = details.globalPosition.dx;
     _dragStartScrollOffset = (widget.scrollController?.hasClients == true)
@@ -308,6 +311,16 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
                           ),
                         ),
                       ),
+                      if (text.isLocked)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Icon(Icons.lock_rounded, size: 11, color: Color(0xFFFFB300)),
+                        ),
+                      if (!text.isVisible)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: Icon(Icons.visibility_off_rounded, size: 11, color: Colors.white54),
+                        ),
                     ],
                   ),
                 ),
@@ -316,7 +329,7 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
           ),
 
           // 2. Left Trim Handle (visible and interactive when selected)
-          if (isSelected)
+          if (isSelected && !text.isLocked)
             Positioned(
               left: 0,
               top: 0,
@@ -354,7 +367,7 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
             ),
 
           // 3. Right Trim Handle (visible and interactive when selected)
-          if (isSelected)
+          if (isSelected && !text.isLocked)
             Positioned(
               right: 0,
               top: 0,

@@ -2256,6 +2256,13 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
       return;
     }
 
+    if (widget.text.isLocked) {
+      if (!widget.isSelected) {
+        widget.viewModel.selectText(widget.text.id);
+      }
+      return;
+    }
+
     if (!widget.isSelected) {
       widget.viewModel.selectText(widget.text.id);
     }
@@ -2289,6 +2296,7 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (widget.text.isLocked) return;
     if (!_activePointers.containsKey(event.pointer)) return;
     _activePointers[event.pointer] = event.position;
 
@@ -2589,7 +2597,34 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
 
                 // 2. Interactive Bounding Box Handles (when selected)
                 if (isSelected) ...[
-                  // Top-Left: Edit text & font button
+                  if (text.isLocked)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        alignment: Alignment.center,
+                        color: Colors.transparent,
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFB300),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.4),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                          child: const Icon(Icons.lock_rounded, size: 14, color: Colors.black),
+                        ),
+                      ),
+                    )
+                  else ...[
+                    // Top-Left: Edit text & font button
                   Positioned(
                     top: 0,
                     left: 0,
@@ -2779,6 +2814,7 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
                         ),
                       ),
                     ),
+                  ],
                 ],
               ],
             ),
@@ -2990,6 +3026,13 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    if (widget.overlay.isLocked) {
+      if (!widget.isSelected) {
+        widget.viewModel.selectOverlayById(widget.overlay.id);
+      }
+      return;
+    }
+
     if (!widget.isSelected) {
       widget.viewModel.selectOverlayById(widget.overlay.id);
     }
@@ -3026,6 +3069,7 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (widget.overlay.isLocked) return;
     if (!_activePointers.containsKey(event.pointer)) return;
     _activePointers[event.pointer] = event.position;
 
@@ -3396,7 +3440,33 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
 
                     // 2. Interactive Selection Handles
                     if (isSelected) ...[
-                      // Top-Left: Flip Horizontal Button
+                      if (overlay.isLocked)
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: Container(
+                            width: 32,
+                            height: 32,
+                            alignment: Alignment.center,
+                            child: Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFB300),
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.5),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                              child: const Icon(Icons.lock_rounded, size: 14, color: Colors.black),
+                            ),
+                          ),
+                        )
+                      else ...[
+                        // Top-Left: Flip Horizontal Button
                       Positioned(
                         top: 0,
                         left: 0,
@@ -3488,6 +3558,7 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
                         ),
                       ),
                     ],
+                  ],
                   ],
                 ),
               ),

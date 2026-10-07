@@ -43,6 +43,10 @@ class VideoClip {
   /// Spatial rotation angle in radians (default 0.0)
   final double rotationAngle;
 
+  /// Layer Management (Lock & Visibility)
+  final bool isLocked;
+  final bool isVisible;
+
   const VideoClip({
     required this.id,
     required this.assetId,
@@ -50,6 +54,8 @@ class VideoClip {
     required this.originalDuration,
     required this.trimStart,
     required this.trimEnd,
+    this.isLocked = false,
+    this.isVisible = true,
     this.speed = 1.0,
     this.speedCurve,
     this.volume = 1.0,
@@ -113,6 +119,8 @@ class VideoClip {
     VideoMask? mask,
     bool clearMask = false,
     BlendMode? blendMode,
+    bool? isLocked,
+    bool? isVisible,
   }) {
     return VideoClip(
       id: id ?? this.id,
@@ -121,6 +129,8 @@ class VideoClip {
       originalDuration: originalDuration ?? this.originalDuration,
       trimStart: trimStart ?? this.trimStart,
       trimEnd: trimEnd ?? this.trimEnd,
+      isLocked: isLocked ?? this.isLocked,
+      isVisible: isVisible ?? this.isVisible,
       speed: speed ?? this.speed,
       speedCurve: clearSpeedCurve ? null : (speedCurve ?? this.speedCurve),
       volume: volume ?? this.volume,
@@ -168,6 +178,8 @@ class VideoClip {
       if (keyframes.isNotEmpty) 'keyframes': keyframes.map((k) => k.toJson()).toList(),
       if (mask != null) 'mask': mask!.toJson(),
       'blendMode': blendMode.index,
+      'isLocked': isLocked,
+      'isVisible': isVisible,
     };
   }
 
@@ -179,6 +191,8 @@ class VideoClip {
       originalDuration: Duration(milliseconds: (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
       trimStart: Duration(milliseconds: (json['trimStartMs'] as num?)?.toInt() ?? 0),
       trimEnd: Duration(milliseconds: (json['trimEndMs'] as num?)?.toInt() ?? (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
+      isLocked: json['isLocked'] as bool? ?? false,
+      isVisible: json['isVisible'] as bool? ?? true,
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
       speedCurve: json['speedCurve'] != null
           ? SpeedCurve.fromJson(json['speedCurve'] as Map<String, dynamic>)
