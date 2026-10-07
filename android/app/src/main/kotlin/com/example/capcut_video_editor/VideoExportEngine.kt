@@ -84,7 +84,22 @@ data class ExportAudioTrack(
     val startTimeMs: Long,
     val trimStartMs: Long,
     val trimEndMs: Long,
-    val volume: Double
+    val volume: Double,
+    val speed: Double = 1.0,
+    val fadeInMs: Long = 0L,
+    val fadeOutMs: Long = 0L,
+    val isMuted: Boolean = false
+)
+
+data class AudioSourceSpec(
+    val path: String,
+    val timelineStartMs: Long,
+    val trimStartMs: Long,
+    val trimEndMs: Long,
+    val volume: Double,
+    val speed: Double = 1.0,
+    val fadeInMs: Long = 0L,
+    val fadeOutMs: Long = 0L
 )
 
 data class ExportTextOverlay(
@@ -1241,40 +1256,56 @@ class VideoExportEngine(private val context: Context) {
 
         val muxer = MediaMuxer(tempOutputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-        // Check for audio track source
+        // Gather all active audio sources across video clips, audio tracks, and PIP overlays
+        val audioSources = ArrayList<AudioSourceSpec>()
+
+        // 1. Primary video clips audio
+        for (i in clips.indices) {
+            val clip = clips[i]
+            if (!clip.isPhoto && clip.volume > 0.0 && !clip.path.isNullOrBlank() && File(clip.path).exists()) {
+                audioSources.add(
+                    AudioSourceSpec(
+                        path = clip.path,
+                        timelineStartMs = clipStartTimes[i],
+                        trimStartMs = clip.trimStartMs,
+                        trimEndMs = clip.trimEndMs,
+                        volume = clip.volume,
+                        speed = clip.speed,
+                        fadeInMs = 0L,
+                        fadeOutMs = 0L
+                    )
+                )
+            }
+        }
+
+        // 2. Audio tracks & PIP audio
+        for (track in audioTracks) {
+            if (!track.isMuted && track.volume > 0.0 && track.path.isNotBlank() && File(track.path).exists()) {
+                audioSources.add(
+                    AudioSourceSpec(
+                        path = track.path,
+                        timelineStartMs = track.startTimeMs,
+                        trimStartMs = track.trimStartMs,
+                        trimEndMs = track.trimEndMs,
+                        volume = track.volume,
+                        speed = track.speed,
+                        fadeInMs = track.fadeInMs,
+                        fadeOutMs = track.fadeOutMs
+                    )
+                )
+            }
+        }
+
         var audioExtractor: MediaExtractor? = null
         var audioFormat: MediaFormat? = null
-        var initialAudioPtsUs = 0L
+        var tempMixedAudioFile: File? = null
 
-        val primaryAudioTrack = audioTracks.firstOrNull { it.path.isNotBlank() && File(it.path).exists() && it.volume > 0.0 }
-        val primaryClip = clips.firstOrNull { it.path != null && File(it.path).exists() && !it.isPhoto && it.volume > 0.0 }
-        val primaryAudioSource = primaryAudioTrack?.path ?: primaryClip?.path
-
-        if (primaryAudioSource != null) {
-            try {
-                val extractor = MediaExtractor()
-                extractor.setDataSource(primaryAudioSource)
-                for (i in 0 until extractor.trackCount) {
-                    val format = extractor.getTrackFormat(i)
-                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                    if (mime.startsWith("audio/")) {
-                        extractor.selectTrack(i)
-                        audioFormat = format
-                        audioExtractor = extractor
-                        break
-                    }
-                }
-                if (audioFormat == null) {
-                    extractor.release()
-                } else if (primaryAudioTrack != null && primaryAudioTrack.trimStartMs > 0L) {
-                    audioExtractor?.seekTo(primaryAudioTrack.trimStartMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                    initialAudioPtsUs = audioExtractor?.sampleTime ?: 0L
-                } else if (primaryClip != null && primaryClip.trimStartMs > 0L) {
-                    audioExtractor?.seekTo(primaryClip.trimStartMs * 1000L, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
-                    initialAudioPtsUs = audioExtractor?.sampleTime ?: 0L
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Audio track setup skipped: ${e.message}")
+        if (audioSources.isNotEmpty()) {
+            val (mixedExt, mixedFile) = mixAndEncodeAudio(audioSources, totalDurationMs, tempDir)
+            if (mixedExt != null && mixedFile != null) {
+                audioExtractor = mixedExt
+                tempMixedAudioFile = mixedFile
+                audioFormat = mixedExt.getTrackFormat(0)
             }
         }
 
@@ -1909,13 +1940,15 @@ class VideoExportEngine(private val context: Context) {
                             break
                         }
                         val rawSampleTimeUs = audioExtractor.sampleTime
-                        val presentationTimeUs = (rawSampleTimeUs - initialAudioPtsUs).coerceAtLeast(0L)
+                        val presentationTimeUs = rawSampleTimeUs.coerceAtLeast(0L)
                         if (presentationTimeUs > totalDurationMs * 1000L) {
                             break
                         }
                         audioBufferInfo.presentationTimeUs = presentationTimeUs
                         audioBufferInfo.flags = audioExtractor.sampleFlags
-                        muxer.writeSampleData(drainThread.audioTrackIndex, audioBuffer, audioBufferInfo)
+                        if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                            muxer.writeSampleData(drainThread.audioTrackIndex, audioBuffer, audioBufferInfo)
+                        }
                         audioExtractor.advance()
                     }
                 } catch (audioEx: Exception) {
@@ -2068,6 +2101,7 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
             // Now release EGL and input surface
             try { inputSurface.release() } catch (e: Exception) {}
             try { audioExtractor?.release() } catch (e: Exception) {}
+            try { tempMixedAudioFile?.delete() } catch (e: Exception) {}
             photoBitmaps.values.forEach { try { it.recycle() } catch (e: Exception) {} }
             photoBitmaps.clear()
         }
@@ -2118,6 +2152,388 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
                 "muxWriteMs" to totalMuxWriteNs / 1_000_000.0
             )
         )
+    }
+
+    /**
+     * Decodes, mixes, normalizes, and AAC-encodes multi-track audio streams (video audio, music, voice, PIP audio)
+     * with sample-accurate timeline positioning, volume gain (0-200%), fade-in/out envelopes, and soft-limiter clamping.
+     * Returns a Pair of MediaExtractor pointing to the mixed temporary AAC/M4A file and the temporary File itself.
+     */
+    private fun mixAndEncodeAudio(
+        sources: List<AudioSourceSpec>,
+        totalDurationMs: Long,
+        tempDir: File
+    ): Pair<MediaExtractor?, File?> {
+        if (sources.isEmpty() || totalDurationMs <= 0L) {
+            return Pair(null, null)
+        }
+
+        val targetSampleRate = 44100
+        val targetChannels = 2 // stereo
+        val totalFrames = ((totalDurationMs * targetSampleRate) / 1000L).toInt().coerceAtLeast(1)
+
+        val masterLeft = FloatArray(totalFrames)
+        val masterRight = FloatArray(totalFrames)
+        var anySourceMixed = false
+
+        for (source in sources) {
+            if (source.volume <= 0.0 || source.path.isBlank()) continue
+            val file = File(source.path)
+            if (!file.exists()) continue
+
+            var extractor: MediaExtractor? = null
+            var decoder: MediaCodec? = null
+            try {
+                extractor = MediaExtractor()
+                extractor.setDataSource(source.path)
+
+                var audioTrackIdx = -1
+                var trackFormat: MediaFormat? = null
+                for (i in 0 until extractor.trackCount) {
+                    val fmt = extractor.getTrackFormat(i)
+                    val mime = fmt.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("audio/")) {
+                        audioTrackIdx = i
+                        trackFormat = fmt
+                        break
+                    }
+                }
+
+                if (audioTrackIdx == -1 || trackFormat == null) {
+                    extractor.release()
+                    continue
+                }
+
+                extractor.selectTrack(audioTrackIdx)
+                val mime = trackFormat.getString(MediaFormat.KEY_MIME) ?: ""
+                val srcSampleRate = if (trackFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                    trackFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                } else targetSampleRate
+                val srcChannels = if (trackFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                    trackFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                } else 2
+
+                val decodedLeft = ArrayList<Float>()
+                val decodedRight = ArrayList<Float>()
+
+                // Seek to trimStart if specified
+                if (source.trimStartMs > 0L) {
+                    extractor.seekTo(source.trimStartMs * 1000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                }
+
+                val trimStartUs = source.trimStartMs * 1000L
+                val trimEndUs = source.trimEndMs * 1000L
+
+                if (mime == "audio/raw" || mime.contains("pcm")) {
+                    // Raw PCM from uncompressed WAV
+                    val rawBuffer = ByteBuffer.allocateDirect(16384)
+                    while (true) {
+                        val sampleSize = extractor.readSampleData(rawBuffer, 0)
+                        if (sampleSize < 0) break
+                        val pts = extractor.sampleTime
+                        if (trimEndUs > 0L && pts > trimEndUs) break
+
+                        if (trimStartUs <= 0L || pts >= trimStartUs) {
+                            rawBuffer.position(0)
+                            rawBuffer.limit(sampleSize)
+                            rawBuffer.order(ByteOrder.LITTLE_ENDIAN)
+                            val shortBuf = rawBuffer.asShortBuffer()
+                            val numSamples = shortBuf.remaining()
+                            if (srcChannels == 1) {
+                                for (s in 0 until numSamples) {
+                                    val v = shortBuf.get().toFloat()
+                                    decodedLeft.add(v)
+                                    decodedRight.add(v)
+                                }
+                            } else if (srcChannels >= 2) {
+                                val frames = numSamples / srcChannels
+                                for (f in 0 until frames) {
+                                    val l = shortBuf.get().toFloat()
+                                    val r = shortBuf.get().toFloat()
+                                    for (c in 2 until srcChannels) {
+                                        shortBuf.get()
+                                    }
+                                    decodedLeft.add(l)
+                                    decodedRight.add(r)
+                                }
+                            }
+                        }
+                        extractor.advance()
+                    }
+                } else {
+                    // Compressed audio (AAC, MP3, OGG, Opus, FLAC) decoded via MediaCodec
+                    decoder = MediaCodec.createDecoderByType(mime)
+                    decoder.configure(trackFormat, null, null, 0)
+                    decoder.start()
+
+                    val inBufferInfo = MediaCodec.BufferInfo()
+                    var inputEos = false
+                    var outputEos = false
+                    val timeoutUs = 10_000L
+
+                    while (!outputEos) {
+                        if (!inputEos) {
+                            val inIdx = decoder.dequeueInputBuffer(timeoutUs)
+                            if (inIdx >= 0) {
+                                val inBuffer = decoder.getInputBuffer(inIdx)
+                                if (inBuffer != null) {
+                                    val sampleSize = extractor.readSampleData(inBuffer, 0)
+                                    if (sampleSize < 0) {
+                                        decoder.queueInputBuffer(inIdx, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                        inputEos = true
+                                    } else {
+                                        val sampleTime = extractor.sampleTime
+                                        if (trimEndUs > 0L && sampleTime > trimEndUs + 200_000L) {
+                                            decoder.queueInputBuffer(inIdx, 0, 0, sampleTime, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                            inputEos = true
+                                        } else {
+                                            decoder.queueInputBuffer(inIdx, 0, sampleSize, sampleTime, 0)
+                                            extractor.advance()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        val outIdx = decoder.dequeueOutputBuffer(inBufferInfo, timeoutUs)
+                        if (outIdx >= 0) {
+                            if ((inBufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                                outputEos = true
+                            }
+                            if (inBufferInfo.size > 0) {
+                                val outBuffer = decoder.getOutputBuffer(outIdx)
+                                if (outBuffer != null) {
+                                    outBuffer.position(inBufferInfo.offset)
+                                    outBuffer.limit(inBufferInfo.offset + inBufferInfo.size)
+                                    outBuffer.order(ByteOrder.LITTLE_ENDIAN)
+                                    val shortBuf = outBuffer.asShortBuffer()
+                                    val numSamples = shortBuf.remaining()
+
+                                    val pts = inBufferInfo.presentationTimeUs
+                                    if (trimEndUs <= 0L || pts <= trimEndUs) {
+                                        if (srcChannels == 1) {
+                                            for (s in 0 until numSamples) {
+                                                val v = shortBuf.get().toFloat()
+                                                decodedLeft.add(v)
+                                                decodedRight.add(v)
+                                            }
+                                        } else if (srcChannels == 2) {
+                                            val frames = numSamples / 2
+                                            for (f in 0 until frames) {
+                                                decodedLeft.add(shortBuf.get().toFloat())
+                                                decodedRight.add(shortBuf.get().toFloat())
+                                            }
+                                        } else {
+                                            val frames = numSamples / srcChannels
+                                            for (f in 0 until frames) {
+                                                val l = shortBuf.get().toFloat()
+                                                val r = shortBuf.get().toFloat()
+                                                for (c in 2 until srcChannels) {
+                                                    shortBuf.get()
+                                                }
+                                                decodedLeft.add(l)
+                                                decodedRight.add(r)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            decoder.releaseOutputBuffer(outIdx, false)
+                        } else if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                            // format updated
+                        } else if (outIdx == MediaCodec.INFO_TRY_AGAIN_LATER && inputEos) {
+                            break
+                        }
+                    }
+                }
+
+                if (decodedLeft.isNotEmpty()) {
+                    anySourceMixed = true
+                    val srcFrameCount = decodedLeft.size
+                    val timelineStartFrame = ((source.timelineStartMs * targetSampleRate) / 1000L).toInt()
+                    val clipDurationMs = if (source.trimEndMs > source.trimStartMs) {
+                        source.trimEndMs - source.trimStartMs
+                    } else {
+                        (srcFrameCount * 1000L) / srcSampleRate
+                    }
+                    val targetDurationFrames = ((clipDurationMs * targetSampleRate) / 1000L).toInt()
+
+                    var fadeInFrames = ((source.fadeInMs * targetSampleRate) / 1000L).toInt()
+                    var fadeOutFrames = ((source.fadeOutMs * targetSampleRate) / 1000L).toInt()
+                    if (fadeInFrames + fadeOutFrames > targetDurationFrames && targetDurationFrames > 0) {
+                        val scale = targetDurationFrames.toDouble() / (fadeInFrames + fadeOutFrames).toDouble()
+                        fadeInFrames = (fadeInFrames * scale).toInt()
+                        fadeOutFrames = (fadeOutFrames * scale).toInt()
+                    }
+
+                    val maxMixFrames = min(targetDurationFrames, totalFrames - timelineStartFrame)
+
+                    for (f in 0 until maxMixFrames) {
+                        val masterFrame = timelineStartFrame + f
+                        if (masterFrame < 0 || masterFrame >= totalFrames) continue
+
+                        // Sample rate conversion / interpolation
+                        val srcIdxFloat = (f.toDouble() * srcSampleRate) / targetSampleRate
+                        val srcIdx0 = srcIdxFloat.toInt().coerceIn(0, srcFrameCount - 1)
+                        val srcIdx1 = (srcIdx0 + 1).coerceIn(0, srcFrameCount - 1)
+                        val frac = (srcIdxFloat - srcIdx0).toFloat()
+
+                        val rawL = decodedLeft[srcIdx0] * (1f - frac) + decodedLeft[srcIdx1] * frac
+                        val rawR = decodedRight[srcIdx0] * (1f - frac) + decodedRight[srcIdx1] * frac
+
+                        // Fade envelope
+                        var fade = 1.0
+                        if (fadeInFrames > 0 && f < fadeInFrames) {
+                            fade = (f.toDouble() / fadeInFrames).coerceIn(0.0, 1.0)
+                        } else if (fadeOutFrames > 0 && f > (targetDurationFrames - fadeOutFrames)) {
+                            fade = ((targetDurationFrames - f).toDouble() / fadeOutFrames).coerceIn(0.0, 1.0)
+                        }
+
+                        val gain = (source.volume * fade).toFloat()
+                        masterLeft[masterFrame] += rawL * gain
+                        masterRight[masterFrame] += rawR * gain
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Audio source decode error for ${source.path}: ${e.message}")
+            } finally {
+                try {
+                    decoder?.stop()
+                    decoder?.release()
+                } catch (_: Exception) {}
+                try {
+                    extractor?.release()
+                } catch (_: Exception) {}
+            }
+        }
+
+        if (!anySourceMixed) {
+            return Pair(null, null)
+        }
+
+        // Convert master floating point samples to 16-bit PCM ShortArray with limiter / soft clamping
+        val masterPcm = ShortArray(totalFrames * 2)
+        for (i in 0 until totalFrames) {
+            val l = masterLeft[i].coerceIn(-32768f, 32767f).toInt().toShort()
+            val r = masterRight[i].coerceIn(-32768f, 32767f).toInt().toShort()
+            masterPcm[i * 2] = l
+            masterPcm[i * 2 + 1] = r
+        }
+
+        // Encode master PCM into temporary AAC/M4A file
+        var tempM4aFile: File? = null
+        var mixedExtractor: MediaExtractor? = null
+        try {
+            tempM4aFile = File.createTempFile("export_mixed_audio_", ".m4a", tempDir)
+            val audioMuxer = MediaMuxer(tempM4aFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+            val aacFormat = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, targetSampleRate, targetChannels).apply {
+                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                setInteger(MediaFormat.KEY_BIT_RATE, 192000)
+                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
+            }
+
+            val aacEncoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            aacEncoder.configure(aacFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            aacEncoder.start()
+
+            var audioTrackIndex = -1
+            var audioMuxerStarted = false
+            val bufferInfo = MediaCodec.BufferInfo()
+
+            var pcmShortOffset = 0
+            val totalShorts = masterPcm.size
+            val shortsPerChunk = 2048 // 1024 stereo frames
+            var encodeEos = false
+
+            while (!encodeEos) {
+                // Feed PCM input
+                if (pcmShortOffset < totalShorts) {
+                    val inIdx = aacEncoder.dequeueInputBuffer(10_000L)
+                    if (inIdx >= 0) {
+                        val inBuf = aacEncoder.getInputBuffer(inIdx)
+                        if (inBuf != null) {
+                            inBuf.clear()
+                            val count = min(shortsPerChunk, totalShorts - pcmShortOffset)
+                            inBuf.order(ByteOrder.LITTLE_ENDIAN)
+                            for (k in 0 until count) {
+                                inBuf.putShort(masterPcm[pcmShortOffset + k])
+                            }
+                            val ptsUs = ((pcmShortOffset / 2).toLong() * 1_000_000L) / targetSampleRate
+                            pcmShortOffset += count
+                            val flags = if (pcmShortOffset >= totalShorts) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0
+                            aacEncoder.queueInputBuffer(inIdx, 0, count * 2, ptsUs, flags)
+                        }
+                    }
+                }
+
+                // Drain AAC output
+                val outStatus = aacEncoder.dequeueOutputBuffer(bufferInfo, 10_000L)
+                if (outStatus == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    if (!audioMuxerStarted) {
+                        audioTrackIndex = audioMuxer.addTrack(aacEncoder.outputFormat)
+                        audioMuxer.start()
+                        audioMuxerStarted = true
+                    }
+                } else if (outStatus >= 0) {
+                    val outBuf = aacEncoder.getOutputBuffer(outStatus)
+                    if (outBuf != null && bufferInfo.size > 0 && audioMuxerStarted) {
+                        if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                            outBuf.position(bufferInfo.offset)
+                            outBuf.limit(bufferInfo.offset + bufferInfo.size)
+                            audioMuxer.writeSampleData(audioTrackIndex, outBuf, bufferInfo)
+                        }
+                    }
+                    aacEncoder.releaseOutputBuffer(outStatus, false)
+                    if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                        encodeEos = true
+                    }
+                }
+            }
+
+            try {
+                aacEncoder.stop()
+                aacEncoder.release()
+            } catch (_: Exception) {}
+
+            try {
+                if (audioMuxerStarted) {
+                    audioMuxer.stop()
+                }
+                audioMuxer.release()
+            } catch (_: Exception) {}
+
+            // Open extractor on the generated M4A file
+            val ext = MediaExtractor()
+            ext.setDataSource(tempM4aFile.absolutePath)
+            var found = false
+            for (i in 0 until ext.trackCount) {
+                val fmt = ext.getTrackFormat(i)
+                val m = fmt.getString(MediaFormat.KEY_MIME) ?: ""
+                if (m.startsWith("audio/")) {
+                    ext.selectTrack(i)
+                    found = true
+                    break
+                }
+            }
+
+            if (found) {
+                mixedExtractor = ext
+                Log.i(TAG, "Multi-track audio mix & AAC encode completed: ${masterPcm.size / 2} frames (${totalDurationMs}ms)")
+            } else {
+                ext.release()
+                tempM4aFile.delete()
+                tempM4aFile = null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to mix and encode audio: ${e.message}", e)
+            try {
+                tempM4aFile?.delete()
+            } catch (_: Exception) {}
+            tempM4aFile = null
+        }
+
+        return Pair(mixedExtractor, tempM4aFile)
     }
 
     private fun registerToMediaStore(sourceFile: File, customName: String?): Map<String, String> {

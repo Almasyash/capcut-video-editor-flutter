@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/core/constants/app_colors.dart';
 import 'package:capcut_video_editor/core/constants/app_dimensions.dart';
@@ -835,10 +836,12 @@ class ActionToolbar extends StatelessWidget {
 
   void _showVolumeDialog(BuildContext context) {
     final audio = viewModel.selectedAudioTrack;
+    final overlay = viewModel.selectedOverlay;
     final clip = viewModel.selectedClip;
-    if (audio == null && clip == null) return;
+    if (audio == null && clip == null && overlay == null) return;
 
     final isAudio = audio != null;
+    final isOverlay = overlay != null && !isAudio;
 
     showModalBottomSheet(
       context: context,
@@ -849,8 +852,28 @@ class ActionToolbar extends StatelessWidget {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            final double currentVolume = isAudio ? (viewModel.selectedAudioTrack?.volume ?? 0.8) : (viewModel.selectedClip?.volume ?? 1.0);
-            final bool isMuted = isAudio ? (viewModel.selectedAudioTrack?.isMuted ?? false) : (viewModel.selectedClip?.isMuted ?? false);
+            final double currentVolume = isAudio
+                ? (viewModel.selectedAudioTrack?.volume ?? 0.8)
+                : (isOverlay
+                    ? (viewModel.selectedOverlay?.volume ?? 1.0)
+                    : (viewModel.selectedClip?.volume ?? 1.0));
+            final bool isMuted = isAudio
+                ? (viewModel.selectedAudioTrack?.isMuted ?? false)
+                : (isOverlay
+                    ? (viewModel.selectedOverlay?.isMuted ?? false)
+                    : (viewModel.selectedClip?.isMuted ?? false));
+
+            final double fadeInSec = isAudio
+                ? (viewModel.selectedAudioTrack?.effectiveFadeInDuration.inMilliseconds ?? 0) / 1000.0
+                : (isOverlay ? (viewModel.selectedOverlay?.fadeInDurationSec ?? 0.0) : 0.0);
+
+            final double fadeOutSec = isAudio
+                ? (viewModel.selectedAudioTrack?.effectiveFadeOutDuration.inMilliseconds ?? 0) / 1000.0
+                : (isOverlay ? (viewModel.selectedOverlay?.fadeOutDurationSec ?? 0.0) : 0.0);
+
+            final double maxFadeLimit = isAudio
+                ? math.max(0.0, (viewModel.selectedAudioTrack?.effectiveDuration.inMilliseconds ?? 1000) / 1000.0)
+                : (isOverlay ? (viewModel.selectedOverlay?.durationInSeconds ?? 10.0) : 10.0);
 
             return Padding(
               padding: const EdgeInsets.all(AppDimensions.lg),
@@ -862,7 +885,9 @@ class ActionToolbar extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        isAudio ? 'Audio Track Volume' : 'Clip Volume',
+                        isAudio
+                            ? 'Audio Track Volume & Fades'
+                            : (isOverlay ? 'PIP Audio Volume & Fades' : 'Clip Volume'),
                         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
                       ),
                       Row(
@@ -877,6 +902,8 @@ class ActionToolbar extends StatelessWidget {
                             onPressed: () {
                               if (isAudio) {
                                 viewModel.toggleAudioMute(audio.id);
+                              } else if (isOverlay) {
+                                viewModel.toggleOverlayMute();
                               } else {
                                 viewModel.toggleClipMute();
                               }
@@ -897,11 +924,12 @@ class ActionToolbar extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  // Volume Slider (0% to 200%)
                   Slider(
-                    value: currentVolume.clamp(0.0, 1.0),
+                    value: currentVolume.clamp(0.0, 2.0),
                     min: 0.0,
-                    max: 1.0,
-                    divisions: 100,
+                    max: 2.0,
+                    divisions: 200,
                     activeColor: isMuted ? AppColors.textMuted : AppColors.primary,
                     onChanged: isMuted
                         ? null
@@ -909,11 +937,62 @@ class ActionToolbar extends StatelessWidget {
                             setSheetState(() {});
                             if (isAudio) {
                               viewModel.updateAudioVolume(audio.id, val);
+                            } else if (isOverlay) {
+                              viewModel.setOverlayVolume(val);
                             } else {
                               viewModel.setClipVolume(val);
                             }
                           },
                   ),
+                  if (isAudio || isOverlay) ...[
+                    const Divider(color: AppColors.divider, height: 24),
+                    // Fade In Duration
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Fade In:', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                        Text('${fadeInSec.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary)),
+                      ],
+                    ),
+                    Slider(
+                      value: fadeInSec.clamp(0.0, math.min(10.0, maxFadeLimit)),
+                      min: 0.0,
+                      max: math.min(10.0, maxFadeLimit > 0 ? maxFadeLimit : 1.0),
+                      divisions: 50,
+                      activeColor: AppColors.secondary,
+                      onChanged: (val) {
+                        setSheetState(() {});
+                        if (isAudio) {
+                          viewModel.setAudioTrackFadeIn(Duration(milliseconds: (val * 1000).round()), id: audio.id);
+                        } else if (isOverlay) {
+                          viewModel.setOverlayFadeIn(val);
+                        }
+                      },
+                    ),
+                    // Fade Out Duration
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Fade Out:', style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+                        Text('${fadeOutSec.toStringAsFixed(1)}s', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.secondary)),
+                      ],
+                    ),
+                    Slider(
+                      value: fadeOutSec.clamp(0.0, math.min(10.0, maxFadeLimit)),
+                      min: 0.0,
+                      max: math.min(10.0, maxFadeLimit > 0 ? maxFadeLimit : 1.0),
+                      divisions: 50,
+                      activeColor: AppColors.secondary,
+                      onChanged: (val) {
+                        setSheetState(() {});
+                        if (isAudio) {
+                          viewModel.setAudioTrackFadeOut(Duration(milliseconds: (val * 1000).round()), id: audio.id);
+                        } else if (isOverlay) {
+                          viewModel.setOverlayFadeOut(val);
+                        }
+                      },
+                    ),
+                  ],
                   const SizedBox(height: 16),
                 ],
               ),

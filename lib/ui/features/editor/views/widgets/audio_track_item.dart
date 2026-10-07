@@ -68,6 +68,7 @@ class AudioTrackItem extends StatelessWidget {
                   );
                 },
           child: Container(
+            clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               color: AppColors.audioTrackBg,
               borderRadius: BorderRadius.circular(AppDimensions.radiusSm),
@@ -101,6 +102,8 @@ class AudioTrackItem extends StatelessWidget {
                         beats: audioTrack.beats,
                         showBeats: audioTrack.showBeats,
                         isMuted: audioTrack.isMuted,
+                        fadeInDuration: audioTrack.effectiveFadeInDuration,
+                        fadeOutDuration: audioTrack.effectiveFadeOutDuration,
                         playheadProgress: playheadProgress,
                         activeColor: AppColors.audioTrackWaveform,
                         unplayedColor: AppColors.audioTrackWaveform.withOpacity(0.55),
@@ -115,58 +118,69 @@ class AudioTrackItem extends StatelessWidget {
                   top: 4,
                   left: 14,
                   right: 14,
-                  child: Row(
-                    children: [
-                      Icon(
-                        audioTrack.isMuted ? Icons.volume_off_rounded : Icons.music_note_rounded,
-                        size: 13,
-                        color: audioTrack.isMuted ? AppColors.error : AppColors.primary,
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Text(
-                          '${audioTrack.title} • ${audioTrack.speed > 1.05 || audioTrack.speed < 0.95 ? '${audioTrack.speed.toStringAsFixed(1)}x • ' : ''}${audioTrack.artist}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: audioTrack.isMuted ? AppColors.textMuted : AppColors.textPrimary,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      if (constraints.maxWidth < 20) {
+                        return const SizedBox.shrink();
+                      }
+                      return Row(
+                        children: [
+                          Icon(
+                            audioTrack.isMuted ? Icons.volume_off_rounded : Icons.music_note_rounded,
+                            size: 13,
+                            color: audioTrack.isMuted ? AppColors.error : AppColors.primary,
                           ),
-                        ),
-                      ),
-                      if (audioTrack.isLocked) ...[
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.withOpacity(0.85),
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const Icon(Icons.lock, size: 9, color: Colors.black),
-                        ),
-                      ],
-                      if (!audioTrack.isVisible) ...[
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                          child: const Icon(Icons.visibility_off, size: 9, color: Colors.white70),
-                        ),
-                      ],
-                      const SizedBox(width: 4),
-                      Text(
-                        audioTrack.isMuted ? 'MUTED' : '${(audioTrack.volume * 100).round()}%',
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                          color: audioTrack.isMuted ? AppColors.error : AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
+                          if (constraints.maxWidth > 55) ...[
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                '${audioTrack.title} • ${audioTrack.speed > 1.05 || audioTrack.speed < 0.95 ? '${audioTrack.speed.toStringAsFixed(1)}x • ' : ''}${audioTrack.artist}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: audioTrack.isMuted ? AppColors.textMuted : AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            if (audioTrack.isLocked) ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withOpacity(0.85),
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Icon(Icons.lock, size: 9, color: Colors.black),
+                              ),
+                            ],
+                            if (!audioTrack.isVisible) ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.white24,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                                child: const Icon(Icons.visibility_off, size: 9, color: Colors.white70),
+                              ),
+                            ],
+                          ],
+                          if (constraints.maxWidth > 85) ...[
+                            const SizedBox(width: 4),
+                            Text(
+                              audioTrack.isMuted ? 'MUTED' : '${(audioTrack.volume * 100).round()}%',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: audioTrack.isMuted ? AppColors.error : AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
                   ),
                 ),
 
@@ -265,6 +279,8 @@ class _WaveformPainter extends CustomPainter {
   final List<double> beats;
   final bool showBeats;
   final bool isMuted;
+  final Duration fadeInDuration;
+  final Duration fadeOutDuration;
   final double playheadProgress;
   final Color activeColor;
   final Color unplayedColor;
@@ -280,6 +296,8 @@ class _WaveformPainter extends CustomPainter {
     this.beats = const [],
     this.showBeats = true,
     this.isMuted = false,
+    this.fadeInDuration = Duration.zero,
+    this.fadeOutDuration = Duration.zero,
     this.playheadProgress = 0.0,
     Color? color,
     Color? activeColor,
@@ -413,6 +431,48 @@ class _WaveformPainter extends CustomPainter {
         }
       }
     }
+
+    // 7. Draw Visual Fade-In and Fade-Out Ramps
+    final effectiveDurMs = (trimEnd.inMilliseconds - trimStart.inMilliseconds).clamp(1, 100000000);
+    if (fadeInDuration > Duration.zero) {
+      final inRatio = (fadeInDuration.inMilliseconds / effectiveDurMs).clamp(0.0, 1.0);
+      final inWidth = inRatio * size.width;
+      if (inWidth > 1.0) {
+        final inPath = Path()
+          ..moveTo(0, 0)
+          ..lineTo(inWidth, 0)
+          ..lineTo(0, size.height)
+          ..close();
+        final inPaint = Paint()
+          ..color = Colors.black.withOpacity(0.3)
+          ..style = PaintingStyle.fill;
+        canvas.drawPath(inPath, inPaint);
+        final inLinePaint = Paint()
+          ..color = AppColors.primary.withOpacity(0.75)
+          ..strokeWidth = 1.5;
+        canvas.drawLine(Offset(0, size.height), Offset(inWidth, 0), inLinePaint);
+      }
+    }
+
+    if (fadeOutDuration > Duration.zero) {
+      final outRatio = (fadeOutDuration.inMilliseconds / effectiveDurMs).clamp(0.0, 1.0);
+      final outWidth = outRatio * size.width;
+      if (outWidth > 1.0) {
+        final outPath = Path()
+          ..moveTo(size.width - outWidth, 0)
+          ..lineTo(size.width, 0)
+          ..lineTo(size.width, size.height)
+          ..close();
+        final outPaint = Paint()
+          ..color = Colors.black.withOpacity(0.3)
+          ..style = PaintingStyle.fill;
+        canvas.drawPath(outPath, outPaint);
+        final outLinePaint = Paint()
+          ..color = AppColors.secondary.withOpacity(0.75)
+          ..strokeWidth = 1.5;
+        canvas.drawLine(Offset(size.width - outWidth, 0), Offset(size.width, size.height), outLinePaint);
+      }
+    }
   }
 
   @override
@@ -426,6 +486,8 @@ class _WaveformPainter extends CustomPainter {
         oldDelegate.beats != beats ||
         oldDelegate.showBeats != showBeats ||
         oldDelegate.isMuted != isMuted ||
+        oldDelegate.fadeInDuration != fadeInDuration ||
+        oldDelegate.fadeOutDuration != fadeOutDuration ||
         (oldDelegate.playheadProgress - playheadProgress).abs() > 0.005 ||
         oldDelegate.activeColor != activeColor ||
         oldDelegate.unplayedColor != unplayedColor;

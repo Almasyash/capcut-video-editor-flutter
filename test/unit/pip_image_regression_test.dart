@@ -1,5 +1,3 @@
-import 'dart:ui' show ColorFilter;
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:capcut_video_editor/domain/models/overlay_clip.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
@@ -53,7 +51,7 @@ void main() {
       // contrast = 0.0 is the neutral slider position.
       // In PipColorFilterHelper, c = (1.0 + (adjustments?.contrast ?? 0.0)).clamp(0.0, 3.0);
       // When contrast is 0.0, c must equal 1.0, and cOffset = 128.0 * (1.0 - c) must equal 0.0 (not 128.0!).
-      final adjustments = const PipAdjustments(
+      const adjustments = PipAdjustments(
         contrast: 0.0,
         brightness: 0.2, // trigger non-default so a filter is produced
       );
@@ -74,7 +72,7 @@ void main() {
       // saturation = 0.0 is the neutral slider position.
       // In PipColorFilterHelper, s = (1.0 + (adjustments?.saturation ?? 0.0)).clamp(0.0, 3.0);
       // When saturation is 0.0, s must equal 1.0, preserving all color channels.
-      final adjustments = const PipAdjustments(
+      const adjustments = PipAdjustments(
         saturation: 0.0,
         brightness: 0.2, // trigger non-default so a filter is produced
       );
@@ -173,29 +171,29 @@ void main() {
       const pathPng = '/data/user/0/cache/image.png';
       const pathWebp = '/data/user/0/cache/image.webp';
 
-      final clipJpg = OverlayClip(
+      const clipJpg = OverlayClip(
         id: 'ov_jpg',
         title: 'JPG',
         localPath: pathJpg,
         isPhoto: true,
         startTime: Duration.zero,
-        duration: const Duration(seconds: 3),
+        duration: Duration(seconds: 3),
       );
-      final clipPng = OverlayClip(
+      const clipPng = OverlayClip(
         id: 'ov_png',
         title: 'PNG',
         localPath: pathPng,
         isPhoto: true,
         startTime: Duration.zero,
-        duration: const Duration(seconds: 3),
+        duration: Duration(seconds: 3),
       );
-      final clipWebp = OverlayClip(
+      const clipWebp = OverlayClip(
         id: 'ov_webp',
         title: 'WebP',
         localPath: pathWebp,
         isPhoto: true,
         startTime: Duration.zero,
-        duration: const Duration(seconds: 3),
+        duration: Duration(seconds: 3),
       );
 
       expect(clipJpg.localPath, equals(pathJpg));
@@ -340,12 +338,12 @@ void main() {
       expect(clip.flipHorizontal, isFalse);
       expect(clip.flipVertical, isTrue);
       expect(clip.adjustments, isNotNull);
-      expect(clip.adjustments!.brightness, closeTo(-0.15, 1e-4));
-      expect(clip.adjustments!.contrast, closeTo(0.25, 1e-4));
-      expect(clip.adjustments!.saturation, closeTo(-0.1, 1e-4));
-      expect(clip.adjustments!.temperature, closeTo(-0.2, 1e-4));
-      expect(clip.adjustments!.tint, closeTo(0.1, 1e-4));
-      expect(clip.adjustments!.isDefault, isFalse);
+      expect(clip.adjustments.brightness, closeTo(-0.15, 1e-4));
+      expect(clip.adjustments.contrast, closeTo(0.25, 1e-4));
+      expect(clip.adjustments.saturation, closeTo(-0.1, 1e-4));
+      expect(clip.adjustments.temperature, closeTo(-0.2, 1e-4));
+      expect(clip.adjustments.tint, closeTo(0.1, 1e-4));
+      expect(clip.adjustments.isDefault, isFalse);
     });
 
     test('timeline boundary hardening: handles zero start, sub-frame precision, and end-trim math', () {
@@ -406,11 +404,11 @@ void main() {
         enabled: true,
       );
 
-      final clip = OverlayClip(
+      const clip = OverlayClip(
         id: 'anim_clip',
         title: 'Animated Photo',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 4),
+        duration: Duration(seconds: 4),
         isPhoto: true,
         inAnimation: entranceAnim,
       );
@@ -435,7 +433,7 @@ void main() {
     });
 
     test('multi-PIP stress & persistence: 3 Images + 2 Videos + 2 Texts serialize and revive cleanly', () {
-      final img1 = const OverlayClip(
+      const img1 = OverlayClip(
         id: 'img_1',
         title: 'Image 1 (JPG)',
         startTime: Duration.zero,
@@ -445,7 +443,7 @@ void main() {
         isPhoto: true,
         localPath: '/data/user/0/cache/img1.jpg',
       );
-      final img2 = const OverlayClip(
+      const img2 = OverlayClip(
         id: 'img_2',
         title: 'Image 2 (PNG Transparent)',
         startTime: Duration(seconds: 1),
@@ -456,7 +454,7 @@ void main() {
         isPhoto: true,
         localPath: '/data/user/0/cache/img2.png',
       );
-      final img3 = const OverlayClip(
+      const img3 = OverlayClip(
         id: 'img_3',
         title: 'Image 3 (WebP)',
         startTime: Duration(seconds: 2),
@@ -467,7 +465,7 @@ void main() {
         isPhoto: true,
         localPath: '/data/user/0/cache/img3.webp',
       );
-      final vid1 = const OverlayClip(
+      const vid1 = OverlayClip(
         id: 'vid_1',
         title: 'Video PIP 1',
         startTime: Duration.zero,
@@ -477,7 +475,7 @@ void main() {
         isPhoto: false,
         localPath: '/data/user/0/cache/vid1.mp4',
       );
-      final vid2 = const OverlayClip(
+      const vid2 = OverlayClip(
         id: 'vid_2',
         title: 'Video PIP 2',
         startTime: Duration(seconds: 1),
@@ -488,17 +486,17 @@ void main() {
         localPath: '/data/user/0/cache/vid2.mp4',
       );
 
-      final text1 = TextOverlay(
+      const text1 = TextOverlay(
         id: 'txt_1',
         text: 'Title Headline',
         startTime: Duration.zero,
-        duration: const Duration(seconds: 4),
+        duration: Duration(seconds: 4),
       );
-      final text2 = TextOverlay(
+      const text2 = TextOverlay(
         id: 'txt_2',
         text: 'Subtitle Banner',
-        startTime: const Duration(seconds: 2),
-        duration: const Duration(seconds: 3),
+        startTime: Duration(seconds: 2),
+        duration: Duration(seconds: 3),
       );
 
       final allOverlays = [img1, img2, img3, vid1, vid2];

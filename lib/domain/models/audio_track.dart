@@ -11,9 +11,11 @@ class AudioTrack {
   final Duration duration; // Original total duration of the media file
   final Duration trimStart; // Non-destructive start offset within source file
   final Duration? trimEnd; // Non-destructive end offset within source file
-  final double volume; // 0.0 to 1.0
+  final double volume; // 0.0 to 2.0 (0% to 200%)
   final double speed; // Playback speed multiplier (e.g. 0.5, 1.0, 2.0)
   final bool isMuted;
+  final Duration fadeInDuration;
+  final Duration fadeOutDuration;
   final List<double> waveformPoints;
 
   /// List of musical beat timestamps (in seconds relative to original audio source)
@@ -39,6 +41,8 @@ class AudioTrack {
     this.volume = 0.8,
     this.speed = 1.0,
     this.isMuted = false,
+    this.fadeInDuration = Duration.zero,
+    this.fadeOutDuration = Duration.zero,
     this.waveformPoints = const [],
     this.beats = const [],
     this.showBeats = true,
@@ -87,6 +91,18 @@ class AudioTrack {
     return visible;
   }
 
+  /// Effective clamped fade-in duration ensuring fadeIn + fadeOut <= effectiveDuration
+  Duration get effectiveFadeInDuration {
+    final maxMs = effectiveDuration.inMilliseconds;
+    return Duration(milliseconds: fadeInDuration.inMilliseconds.clamp(0, maxMs));
+  }
+
+  /// Effective clamped fade-out duration ensuring fadeIn + fadeOut <= effectiveDuration
+  Duration get effectiveFadeOutDuration {
+    final remMs = (effectiveDuration.inMilliseconds - effectiveFadeInDuration.inMilliseconds).clamp(0, effectiveDuration.inMilliseconds);
+    return Duration(milliseconds: fadeOutDuration.inMilliseconds.clamp(0, remMs));
+  }
+
   AudioTrack copyWith({
     String? id,
     String? assetId,
@@ -100,6 +116,8 @@ class AudioTrack {
     double? volume,
     double? speed,
     bool? isMuted,
+    Duration? fadeInDuration,
+    Duration? fadeOutDuration,
     List<double>? waveformPoints,
     List<double>? beats,
     bool? showBeats,
@@ -118,6 +136,8 @@ class AudioTrack {
       volume: volume ?? this.volume,
       speed: speed ?? this.speed,
       isMuted: isMuted ?? this.isMuted,
+      fadeInDuration: fadeInDuration ?? this.fadeInDuration,
+      fadeOutDuration: fadeOutDuration ?? this.fadeOutDuration,
       waveformPoints: waveformPoints ?? this.waveformPoints,
       beats: beats ?? this.beats,
       showBeats: showBeats ?? this.showBeats,
@@ -139,6 +159,8 @@ class AudioTrack {
       'volume': volume,
       'speed': speed,
       'isMuted': isMuted,
+      'fadeInMs': fadeInDuration.inMilliseconds,
+      'fadeOutMs': fadeOutDuration.inMilliseconds,
       'waveformPoints': waveformPoints,
       'beats': beats,
       'showBeats': showBeats,
@@ -165,6 +187,8 @@ class AudioTrack {
       volume: (json['volume'] as num?)?.toDouble() ?? 0.8,
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
       isMuted: json['isMuted'] as bool? ?? false,
+      fadeInDuration: Duration(milliseconds: (json['fadeInMs'] as num?)?.toInt() ?? 0),
+      fadeOutDuration: Duration(milliseconds: (json['fadeOutMs'] as num?)?.toInt() ?? 0),
       waveformPoints: (json['waveformPoints'] as List<dynamic>?)
               ?.map((e) => (e as num).toDouble())
               .toList() ??
