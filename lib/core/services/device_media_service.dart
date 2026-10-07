@@ -379,7 +379,7 @@ class DeviceMediaService {
         'vignetteRadius': project.colorAdjustments.vignetteRadius,
         'vignetteSoftness': project.colorAdjustments.vignetteSoftness,
         'sharpness': project.colorAdjustments.sharpness,
-        'filterId': project.activeFilter.type.name,
+        'filterId': project.activeFilter.id,
         'filterIntensity': project.activeFilter.intensity,
       });
     }

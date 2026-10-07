@@ -302,6 +302,25 @@ object ColorGradingHelper {
                     tempB += (40.0f / 255.0f) * fi
                     tintG -= (20.0f / 255.0f) * fi
                 }
+                "moody" -> {
+                    rScale *= (1.0f - 0.1f * fi)
+                    gScale *= (1.0f - 0.1f * fi)
+                    bScale *= (1.0f - 0.05f * fi)
+                    totalOffset -= (10.0f / 255.0f) * fi
+                }
+                "teal_orange", "tealandorange" -> {
+                    tempR += (20.0f / 255.0f) * fi
+                    tempB -= (15.0f / 255.0f) * fi
+                    rScale *= (1.0f + 0.2f * fi)
+                    bScale *= (1.0f - 0.2f * fi)
+                }
+                "warm_sunset", "warmsunset" -> {
+                    tempR += (15.0f / 255.0f) * fi
+                    tempB -= (10.0f / 255.0f) * fi
+                    rScale *= (1.0f + 0.25f * fi)
+                    gScale *= (1.0f + 0.1f * fi)
+                    bScale *= (1.0f - 0.25f * fi)
+                }
             }
         }
 
