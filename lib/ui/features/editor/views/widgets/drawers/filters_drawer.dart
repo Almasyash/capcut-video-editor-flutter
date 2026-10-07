@@ -67,6 +67,7 @@ class FiltersDrawer extends StatelessWidget {
                       divisions: 100,
                       activeColor: AppColors.primary,
                       onChanged: (val) => viewModel.setFilterIntensity(val),
+                      onChangeEnd: (val) => viewModel.commitFilterIntensity(val),
                     ),
                   ),
                   Text('${(active.intensity * 100).round()}%', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primary)),

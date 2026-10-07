@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
 
-/// Color grading and filter presets
+/// Professional color grading and filter presets
 enum FilterType {
   none,
+  vivid,
+  warm,
+  cool,
+  vintage,
+  cinematic,
+  fade,
+  mono,
+  blackAndWhite,
+  sepia,
+  dramatic,
+  portrait,
+  // Backward compatibility presets
   moody,
   cyberpunk,
-  cinematic,
-  blackAndWhite,
-  vintage,
   tealAndOrange,
   warmSunset,
 }
@@ -17,7 +26,28 @@ class EditorFilter {
   final String name;
   final IconData icon;
   final List<Color> previewColors;
-  final double intensity; // 0.0 to 1.0
+  final double intensity; // 0.0 to 1.0 (default 0.8)
+
+  String get id {
+    switch (type) {
+      case FilterType.none: return 'none';
+      case FilterType.vivid: return 'vivid';
+      case FilterType.warm: return 'warm';
+      case FilterType.cool: return 'cool';
+      case FilterType.vintage: return 'vintage';
+      case FilterType.cinematic: return 'cinema';
+      case FilterType.fade: return 'fade';
+      case FilterType.mono: return 'mono';
+      case FilterType.blackAndWhite: return 'black_white';
+      case FilterType.sepia: return 'sepia';
+      case FilterType.dramatic: return 'dramatic';
+      case FilterType.portrait: return 'portrait';
+      case FilterType.moody: return 'moody';
+      case FilterType.cyberpunk: return 'cyberpunk';
+      case FilterType.tealAndOrange: return 'teal_orange';
+      case FilterType.warmSunset: return 'warm_sunset';
+    }
+  }
 
   const EditorFilter({
     required this.type,
@@ -39,25 +69,96 @@ class EditorFilter {
       name: name ?? this.name,
       icon: icon ?? this.icon,
       previewColors: previewColors ?? this.previewColors,
-      intensity: intensity ?? this.intensity,
+      intensity: (intensity ?? this.intensity).clamp(0.0, 1.0),
     );
   }
 
   static const List<EditorFilter> presets = [
     EditorFilter(
       type: FilterType.none,
-      name: 'Normal',
+      name: 'None',
       icon: Icons.filter_none_rounded,
       previewColors: [Colors.grey, Colors.blueGrey],
       intensity: 0.0,
     ),
     EditorFilter(
+      type: FilterType.vivid,
+      name: 'Vivid',
+      icon: Icons.auto_awesome_rounded,
+      previewColors: [Color(0xFFFF0844), Color(0xFFFFB199)],
+      intensity: 0.8,
+    ),
+    EditorFilter(
+      type: FilterType.warm,
+      name: 'Warm',
+      icon: Icons.wb_sunny_rounded,
+      previewColors: [Color(0xFFF6D365), Color(0xFFFDA085)],
+      intensity: 0.8,
+    ),
+    EditorFilter(
+      type: FilterType.cool,
+      name: 'Cool',
+      icon: Icons.ac_unit_rounded,
+      previewColors: [Color(0xFF89F7FE), Color(0xFF66A6FF)],
+      intensity: 0.8,
+    ),
+    EditorFilter(
+      type: FilterType.vintage,
+      name: 'Vintage',
+      icon: Icons.camera_roll_rounded,
+      previewColors: [Color(0xFFD38312), Color(0xFFA83279)],
+      intensity: 0.75,
+    ),
+    EditorFilter(
       type: FilterType.cinematic,
-      name: 'Cinematic',
+      name: 'Cinema',
       icon: Icons.movie_filter_rounded,
       previewColors: [Color(0xFF0F2027), Color(0xFF203A43), Color(0xFF2C5364)],
       intensity: 0.8,
     ),
+    EditorFilter(
+      type: FilterType.fade,
+      name: 'Fade',
+      icon: Icons.gradient_rounded,
+      previewColors: [Color(0xFFBDC3C7), Color(0xFF2C3E50)],
+      intensity: 0.7,
+    ),
+    EditorFilter(
+      type: FilterType.mono,
+      name: 'Mono',
+      icon: Icons.filter_b_and_w_rounded,
+      previewColors: [Color(0xFF434343), Color(0xFF000000)],
+      intensity: 0.9,
+    ),
+    EditorFilter(
+      type: FilterType.blackAndWhite,
+      name: 'B&W',
+      icon: Icons.monochrome_photos_rounded,
+      previewColors: [Colors.black, Colors.white],
+      intensity: 1.0,
+    ),
+    EditorFilter(
+      type: FilterType.sepia,
+      name: 'Sepia',
+      icon: Icons.photo_filter_rounded,
+      previewColors: [Color(0xFF704214), Color(0xFFC39B77)],
+      intensity: 0.85,
+    ),
+    EditorFilter(
+      type: FilterType.dramatic,
+      name: 'Dramatic',
+      icon: Icons.flash_on_rounded,
+      previewColors: [Color(0xFF141E30), Color(0xFF243B55)],
+      intensity: 0.85,
+    ),
+    EditorFilter(
+      type: FilterType.portrait,
+      name: 'Portrait',
+      icon: Icons.face_rounded,
+      previewColors: [Color(0xFFFF9A9E), Color(0xFFFECFEF)],
+      intensity: 0.75,
+    ),
+    // Additional backward compatibility presets
     EditorFilter(
       type: FilterType.moody,
       name: 'Moody Dark',
@@ -80,87 +181,140 @@ class EditorFilter {
       intensity: 0.8,
     ),
     EditorFilter(
-      type: FilterType.vintage,
-      name: 'Vintage Film',
-      icon: Icons.camera_roll_rounded,
-      previewColors: [Color(0xFFD38312), Color(0xFFA83279)],
-      intensity: 0.75,
-    ),
-    EditorFilter(
       type: FilterType.warmSunset,
       name: 'Warm Sunset',
       icon: Icons.flare_rounded,
       previewColors: [Color(0xFFFF512F), Color(0xFFDD2476)],
       intensity: 0.8,
     ),
-    EditorFilter(
-      type: FilterType.blackAndWhite,
-      name: 'B&W Classic',
-      icon: Icons.monochrome_photos_rounded,
-      previewColors: [Colors.black, Colors.white],
-      intensity: 1.0,
-    ),
   ];
 
-  ColorFilter? getColorFilter() {
-    if (type == FilterType.none || intensity <= 0.0) return null;
+  ColorFilter? getColorFilter([double? customIntensity]) {
+    final effIntensity = customIntensity ?? intensity;
+    if (type == FilterType.none || effIntensity <= 0.0) return null;
+
+    final i = effIntensity.clamp(0.0, 1.0);
+    final inv = 1.0 - i;
 
     switch (type) {
+      case FilterType.none:
+        return null;
+
+      case FilterType.vivid:
+        return ColorFilter.matrix(<double>[
+          inv + i * 1.3, 0, 0, 0, 5 * i,
+          0, inv + i * 1.3, 0, 0, 5 * i,
+          0, 0, inv + i * 1.3, 0, 5 * i,
+          0, 0, 0, 1, 0,
+        ]);
+
+      case FilterType.warm:
+        return ColorFilter.matrix(<double>[
+          inv + i * 1.15, 0, 0, 0, 20 * i,
+          0, inv + i * 1.05, 0, 0, 5 * i,
+          0, 0, inv + i * 0.85, 0, -15 * i,
+          0, 0, 0, 1, 0,
+        ]);
+
+      case FilterType.cool:
+        return ColorFilter.matrix(<double>[
+          inv + i * 0.85, 0, 0, 0, -15 * i,
+          0, inv + i * 1.0, 0, 0, 0,
+          0, 0, inv + i * 1.25, 0, 25 * i,
+          0, 0, 0, 1, 0,
+        ]);
+
+      case FilterType.vintage:
+        return ColorFilter.matrix(<double>[
+          inv + i * 1.1, 0, 0, 0, 15 * i,
+          0, inv + i * 1.0, 0, 0, 10 * i,
+          0, 0, inv + i * 0.8, 0, -10 * i,
+          0, 0, 0, 1, 0,
+        ]);
+
+      case FilterType.cinematic:
+        return ColorFilter.matrix(<double>[
+          inv + i * 1.15, 0, 0, 0, 5 * i,
+          0, inv + i * 1.1, 0, 0, -5 * i,
+          0, 0, inv + i * 1.25, 0, 15 * i,
+          0, 0, 0, 1, 0,
+        ]);
+
+      case FilterType.fade:
+        return ColorFilter.matrix(<double>[
+          inv + i * 0.85, 0, 0, 0, 30 * i,
+          0, inv + i * 0.85, 0, 0, 30 * i,
+          0, 0, inv + i * 0.85, 0, 30 * i,
+          0, 0, 0, 1, 0,
+        ]);
+
+      case FilterType.mono:
       case FilterType.blackAndWhite:
         const lumR = 0.2126;
         const lumG = 0.7152;
         const lumB = 0.0722;
-        final invI = 1.0 - intensity;
         return ColorFilter.matrix(<double>[
-          invI + intensity * lumR, intensity * lumG, intensity * lumB, 0, 0,
-          intensity * lumR, invI + intensity * lumG, intensity * lumB, 0, 0,
-          intensity * lumR, intensity * lumG, invI + intensity * lumB, 0, 0,
+          inv + i * lumR, i * lumG, i * lumB, 0, 0,
+          i * lumR, inv + i * lumG, i * lumB, 0, 0,
+          i * lumR, i * lumG, inv + i * lumB, 0, 0,
           0, 0, 0, 1, 0,
         ]);
-      case FilterType.cyberpunk:
+
+      case FilterType.sepia:
         return ColorFilter.matrix(<double>[
-          1.2 * intensity + (1 - intensity), 0, 0.4 * intensity, 0, 10 * intensity,
-          0, 1.0, 0.3 * intensity, 0, 0,
-          0.3 * intensity, 0, 1.4 * intensity + (1 - intensity), 0, 20 * intensity,
+          inv + i * 0.393, i * 0.769, i * 0.189, 0, 10 * i,
+          i * 0.349, inv + i * 0.686, i * 0.168, 0, 5 * i,
+          i * 0.272, i * 0.534, inv + i * 0.131, 0, 0,
           0, 0, 0, 1, 0,
         ]);
-      case FilterType.tealAndOrange:
+
+      case FilterType.dramatic:
         return ColorFilter.matrix(<double>[
-          1.2 * intensity + (1 - intensity), 0, 0, 0, 20 * intensity,
-          0, 1.0, 0, 0, 5 * intensity,
-          0, 0, 0.8 * intensity + (1 - intensity), 0, -15 * intensity,
+          inv + i * 1.35, 0, 0, 0, -15 * i,
+          0, inv + i * 1.35, 0, 0, -15 * i,
+          0, 0, inv + i * 1.35, 0, -15 * i,
           0, 0, 0, 1, 0,
         ]);
-      case FilterType.warmSunset:
+
+      case FilterType.portrait:
         return ColorFilter.matrix(<double>[
-          1.25 * intensity + (1 - intensity), 0, 0, 0, 15 * intensity,
-          0, 1.1 * intensity + (1 - intensity), 0, 0, 5 * intensity,
-          0, 0, 0.75 * intensity + (1 - intensity), 0, -10 * intensity,
+          inv + i * 1.1, 0, 0, 0, 10 * i,
+          0, inv + i * 1.05, 0, 0, 5 * i,
+          0, 0, inv + i * 0.95, 0, 0,
           0, 0, 0, 1, 0,
         ]);
+
       case FilterType.moody:
         return ColorFilter.matrix(<double>[
-          0.9, 0, 0, 0, -10 * intensity,
-          0, 0.9, 0, 0, -10 * intensity,
-          0, 0, 0.95, 0, 5 * intensity,
+          inv + i * 0.9, 0, 0, 0, -10 * i,
+          0, inv + i * 0.9, 0, 0, -10 * i,
+          0, 0, inv + i * 0.95, 0, 5 * i,
           0, 0, 0, 1, 0,
         ]);
-      case FilterType.vintage:
+
+      case FilterType.cyberpunk:
         return ColorFilter.matrix(<double>[
-          1.1 * intensity + (1 - intensity), 0, 0, 0, 10 * intensity,
-          0, 1.0, 0, 0, 10 * intensity,
-          0, 0, 0.8 * intensity + (1 - intensity), 0, 20 * intensity,
+          inv + i * 1.2, 0, i * 0.4, 0, 10 * i,
+          0, 1.0, i * 0.3, 0, 0,
+          i * 0.3, 0, inv + i * 1.4, 0, 20 * i,
           0, 0, 0, 1, 0,
         ]);
-      case FilterType.cinematic:
+
+      case FilterType.tealAndOrange:
         return ColorFilter.matrix(<double>[
-          1.1 * intensity + (1 - intensity), 0, 0, 0, -5 * intensity,
-          0, 1.15 * intensity + (1 - intensity), 0, 0, 0,
-          0, 0, 1.25 * intensity + (1 - intensity), 0, 10 * intensity,
+          inv + i * 1.2, 0, 0, 0, 20 * i,
+          0, 1.0, 0, 0, 5 * i,
+          0, 0, inv + i * 0.8, 0, -15 * i,
           0, 0, 0, 1, 0,
         ]);
-      case FilterType.none:
-        return null;
+
+      case FilterType.warmSunset:
+        return ColorFilter.matrix(<double>[
+          inv + i * 1.25, 0, 0, 0, 15 * i,
+          0, inv + i * 1.1, 0, 0, 5 * i,
+          0, 0, inv + i * 0.75, 0, -10 * i,
+          0, 0, 0, 1, 0,
+        ]);
     }
   }
 

@@ -49,7 +49,23 @@ data class ExportClip(
     val xPos: Double = 0.0,
     val yPos: Double = 0.0,
     val scale: Double = 1.0,
-    val rotationAngle: Double = 0.0
+    val rotationAngle: Double = 0.0,
+    val brightness: Double = 0.0,
+    val contrast: Double = 0.0,
+    val saturation: Double = 0.0,
+    val exposure: Double = 0.0,
+    val temperature: Double = 0.0,
+    val tint: Double = 0.0,
+    val highlights: Double = 0.0,
+    val shadows: Double = 0.0,
+    val blacks: Double = 0.0,
+    val whites: Double = 0.0,
+    val vignette: Double = 0.0,
+    val vignetteRadius: Double = 0.8,
+    val vignetteSoftness: Double = 0.5,
+    val sharpness: Double = 0.0,
+    val filterId: String? = null,
+    val filterIntensity: Double = 1.0
 ) {
     val activeDurationMs: Long
         get() {
@@ -57,6 +73,12 @@ data class ExportClip(
             val sp = if (speed > 0.0) speed else 1.0
             return (trimmed / sp).toLong()
         }
+
+    val hasColorGrading: Boolean
+        get() = (brightness != 0.0 || contrast != 0.0 || saturation != 0.0 || exposure != 0.0 ||
+                temperature != 0.0 || tint != 0.0 || highlights != 0.0 || shadows != 0.0 ||
+                blacks != 0.0 || whites != 0.0 ||
+                (filterId != null && filterId != "none" && filterIntensity > 0.0))
 
     val safeScale: Double
         get() = if (!scale.isFinite() || scale <= 0.0) 1.0 else scale.coerceIn(0.05, 20.0)
@@ -168,6 +190,8 @@ data class ExportPipOverlay(
     val exposure: Double = 0.0,
     val temperature: Double = 0.0,
     val tint: Double = 0.0,
+    val vignette: Double = 0.0,
+    val sharpness: Double = 0.0,
     val outlineEnabled: Boolean = false,
     val outlineColor: Int = 0,
     val outlineWidth: Double = 2.0,
@@ -181,7 +205,138 @@ data class ExportPipOverlay(
     val glowColor: Int = 0,
     val glowRadius: Double = 12.0,
     val glowIntensity: Double = 0.7
-)
+) {
+    val hasColorGrading: Boolean
+        get() = (brightness != 0.0 || contrast != 0.0 || saturation != 0.0 || exposure != 0.0 ||
+                temperature != 0.0 || tint != 0.0 || (filterId != null && filterId != "none" && filterIntensity > 0.0))
+}
+
+object ColorGradingHelper {
+    fun calculateMatrixAndOffset(
+        brightness: Float,
+        contrast: Float,
+        saturation: Float,
+        exposure: Float,
+        temperature: Float,
+        tint: Float,
+        highlights: Float,
+        shadows: Float,
+        blacks: Float,
+        whites: Float,
+        filterId: String?,
+        filterIntensity: Float,
+        outMatrix: FloatArray,
+        outOffset: FloatArray
+    ) {
+        val b = (brightness + exposure) * (50.0f / 255.0f)
+        val c = (1.0f + contrast).coerceIn(0.0f, 3.0f)
+        val s = (1.0f + saturation).coerceIn(0.0f, 3.0f)
+
+        var tempR = if (temperature > 0f) temperature * (25.0f / 255.0f) else 0f
+        var tempB = if (temperature < 0f) -temperature * (25.0f / 255.0f) else 0f
+        var tintG = if (tint < 0f) -tint * (20.0f / 255.0f) else 0f
+        var tintM = if (tint > 0f) tint * (20.0f / 255.0f) else 0f
+
+        val highOffset = (highlights + whites) * (15.0f / 255.0f)
+        val shadowOffset = (shadows + blacks) * (15.0f / 255.0f)
+        var totalOffset = b + highOffset + shadowOffset
+
+        var rScale = 1.0f
+        var gScale = 1.0f
+        var bScale = 1.0f
+
+        if (filterId != null && filterId.isNotEmpty() && filterId != "none" && filterIntensity > 0.0f) {
+            val fi = filterIntensity.coerceIn(0.0f, 1.0f)
+            when (filterId.lowercase()) {
+                "vivid" -> {
+                    rScale *= (1.0f + 0.3f * fi)
+                    gScale *= (1.0f + 0.3f * fi)
+                    bScale *= (1.0f + 0.3f * fi)
+                    totalOffset += (5.0f / 255.0f) * fi
+                }
+                "warm" -> {
+                    tempR += (35.0f / 255.0f) * fi
+                    tempB -= (20.0f / 255.0f) * fi
+                    rScale *= (1.0f + 0.15f * fi)
+                }
+                "cool" -> {
+                    tempB += (35.0f / 255.0f) * fi
+                    tempR -= (15.0f / 255.0f) * fi
+                    bScale *= (1.0f + 0.25f * fi)
+                }
+                "vintage" -> {
+                    tempR += (20.0f / 255.0f) * fi
+                    tempB -= (20.0f / 255.0f) * fi
+                    rScale *= (1.0f + 0.1f * fi)
+                }
+                "cinema", "cinematic" -> {
+                    tempR += (15.0f / 255.0f) * fi
+                    tempB += (25.0f / 255.0f) * fi
+                    tintG -= (10.0f / 255.0f) * fi
+                    rScale *= (1.0f + 0.15f * fi)
+                }
+                "fade" -> {
+                    rScale *= (1.0f - 0.15f * fi)
+                    gScale *= (1.0f - 0.15f * fi)
+                    bScale *= (1.0f - 0.15f * fi)
+                    totalOffset += (30.0f / 255.0f) * fi
+                }
+                "sepia" -> {
+                    tempR += (30.0f / 255.0f) * fi
+                    tempB -= (20.0f / 255.0f) * fi
+                    tintG += (10.0f / 255.0f) * fi
+                }
+                "dramatic" -> {
+                    rScale *= (1.0f + 0.35f * fi)
+                    gScale *= (1.0f + 0.35f * fi)
+                    bScale *= (1.0f + 0.35f * fi)
+                    totalOffset -= (15.0f / 255.0f) * fi
+                }
+                "portrait" -> {
+                    tempR += (10.0f / 255.0f) * fi
+                    tintG += (5.0f / 255.0f) * fi
+                    rScale *= (1.0f + 0.1f * fi)
+                }
+                "cyberpunk" -> {
+                    tempR += (40.0f / 255.0f) * fi
+                    tempB += (40.0f / 255.0f) * fi
+                    tintG -= (20.0f / 255.0f) * fi
+                }
+            }
+        }
+
+        val isMono = filterId?.lowercase() in listOf("mono", "blackandwhite", "black_white", "bw", "grayscale")
+        val effS = if (isMono) s * (1.0f - filterIntensity.coerceIn(0f, 1f)) else s
+
+        val lumR = 0.2126f * (1.0f - effS)
+        val lumG = 0.7152f * (1.0f - effS)
+        val lumB = 0.0722f * (1.0f - effS)
+
+        val m00 = (lumR + effS) * c * rScale
+        val m01 = lumG * c * rScale
+        val m02 = lumB * c * rScale
+
+        val m10 = lumR * c * gScale
+        val m11 = (lumG + effS) * c * gScale
+        val m12 = lumB * c * gScale
+
+        val m20 = lumR * c * bScale
+        val m21 = lumG * c * bScale
+        val m22 = (lumB + effS) * c * bScale
+
+        val cOffset = (128.0f / 255.0f) * (1.0f - c)
+
+        outMatrix[0] = m00; outMatrix[1] = m10; outMatrix[2] = m20; outMatrix[3] = 0f
+        outMatrix[4] = m01; outMatrix[5] = m11; outMatrix[6] = m21; outMatrix[7] = 0f
+        outMatrix[8] = m02; outMatrix[9] = m12; outMatrix[10] = m22; outMatrix[11] = 0f
+        outMatrix[12] = 0f; outMatrix[13] = 0f; outMatrix[14] = 0f; outMatrix[15] = 1f
+
+        outOffset[0] = totalOffset + tempR + tintM + cOffset
+        outOffset[1] = totalOffset + tintG + cOffset
+        outOffset[2] = totalOffset + tempB + tintM + cOffset
+        outOffset[3] = 0f
+    }
+}
 
 /**
  * High-performance hardware video export engine using Android MediaExtractor,
@@ -466,6 +621,14 @@ class VideoExportEngine(private val context: Context) {
         private var oesTexCoordLoc = 0
         private var oesMVPLoc = 0
         private var oesSTLoc = 0
+        private var oesColorMatrixLoc = 0
+        private var oesColorOffsetLoc = 0
+        private var oesHasColorGradingLoc = 0
+        private var oesVignetteLoc = 0
+        private var oesVignetteRadiusLoc = 0
+        private var oesVignetteSoftnessLoc = 0
+        private var oesSharpenLoc = 0
+        private var oesTexelSizeLoc = 0
 
         private var tex2DProgram = 0
         private var tex2DPosLoc = 0
@@ -473,6 +636,14 @@ class VideoExportEngine(private val context: Context) {
         private var tex2DMVPLoc = 0
         private var tex2DSTLoc = 0
         private var tex2DAlphaLoc = 0
+        private var tex2DColorMatrixLoc = 0
+        private var tex2DColorOffsetLoc = 0
+        private var tex2DHasColorGradingLoc = 0
+        private var tex2DVignetteLoc = 0
+        private var tex2DVignetteRadiusLoc = 0
+        private var tex2DVignetteSoftnessLoc = 0
+        private var tex2DSharpenLoc = 0
+        private var tex2DTexelSizeLoc = 0
 
         private var solidProgram = 0
         private var solidPosLoc = 0
@@ -609,8 +780,37 @@ class VideoExportEngine(private val context: Context) {
                 precision mediump float;
                 varying vec2 vTextureCoord;
                 uniform samplerExternalOES sTexture;
+                uniform mat4 uColorMatrix;
+                uniform vec4 uColorOffset;
+                uniform float uHasColorGrading;
+                uniform float uVignette;
+                uniform float uVignetteRadius;
+                uniform float uVignetteSoftness;
+                uniform float uSharpen;
+                uniform vec2 uTexelSize;
+
                 void main() {
-                    gl_FragColor = texture2D(sTexture, vTextureCoord);
+                    vec4 col;
+                    if (uSharpen > 0.0) {
+                        vec4 c = texture2D(sTexture, vTextureCoord);
+                        vec4 up = texture2D(sTexture, vTextureCoord + vec2(0.0, uTexelSize.y));
+                        vec4 down = texture2D(sTexture, vTextureCoord - vec2(0.0, uTexelSize.y));
+                        vec4 left = texture2D(sTexture, vTextureCoord - vec2(uTexelSize.x, 0.0));
+                        vec4 right = texture2D(sTexture, vTextureCoord + vec2(uTexelSize.x, 0.0));
+                        col = clamp(c + (c * 4.0 - up - down - left - right) * uSharpen, 0.0, 1.0);
+                    } else {
+                        col = texture2D(sTexture, vTextureCoord);
+                    }
+                    if (uHasColorGrading > 0.5) {
+                        col = clamp(uColorMatrix * col + uColorOffset, 0.0, 1.0);
+                    }
+                    if (uVignette > 0.0) {
+                        vec2 uv = vTextureCoord - vec2(0.5);
+                        float dist = length(uv) * 1.41421356;
+                        float vig = smoothstep(uVignetteRadius, uVignetteRadius - max(uVignetteSoftness, 0.001), dist);
+                        col.rgb = mix(col.rgb, col.rgb * vig, uVignette);
+                    }
+                    gl_FragColor = col;
                 }
             """.trimIndent()
 
@@ -619,6 +819,14 @@ class VideoExportEngine(private val context: Context) {
             oesTexCoordLoc = GLES20.glGetAttribLocation(oesProgram, "aTextureCoord")
             oesMVPLoc = GLES20.glGetUniformLocation(oesProgram, "uMVPMatrix")
             oesSTLoc = GLES20.glGetUniformLocation(oesProgram, "uSTMatrix")
+            oesColorMatrixLoc = GLES20.glGetUniformLocation(oesProgram, "uColorMatrix")
+            oesColorOffsetLoc = GLES20.glGetUniformLocation(oesProgram, "uColorOffset")
+            oesHasColorGradingLoc = GLES20.glGetUniformLocation(oesProgram, "uHasColorGrading")
+            oesVignetteLoc = GLES20.glGetUniformLocation(oesProgram, "uVignette")
+            oesVignetteRadiusLoc = GLES20.glGetUniformLocation(oesProgram, "uVignetteRadius")
+            oesVignetteSoftnessLoc = GLES20.glGetUniformLocation(oesProgram, "uVignetteSoftness")
+            oesSharpenLoc = GLES20.glGetUniformLocation(oesProgram, "uSharpen")
+            oesTexelSizeLoc = GLES20.glGetUniformLocation(oesProgram, "uTexelSize")
 
             // 2. Texture2D Program
             val tex2DVS = """
@@ -638,8 +846,36 @@ class VideoExportEngine(private val context: Context) {
                 varying vec2 vTextureCoord;
                 uniform sampler2D sTexture;
                 uniform float uAlpha;
+                uniform mat4 uColorMatrix;
+                uniform vec4 uColorOffset;
+                uniform float uHasColorGrading;
+                uniform float uVignette;
+                uniform float uVignetteRadius;
+                uniform float uVignetteSoftness;
+                uniform float uSharpen;
+                uniform vec2 uTexelSize;
+
                 void main() {
-                    vec4 col = texture2D(sTexture, vTextureCoord);
+                    vec4 col;
+                    if (uSharpen > 0.0) {
+                        vec4 c = texture2D(sTexture, vTextureCoord);
+                        vec4 up = texture2D(sTexture, vTextureCoord + vec2(0.0, uTexelSize.y));
+                        vec4 down = texture2D(sTexture, vTextureCoord - vec2(0.0, uTexelSize.y));
+                        vec4 left = texture2D(sTexture, vTextureCoord - vec2(uTexelSize.x, 0.0));
+                        vec4 right = texture2D(sTexture, vTextureCoord + vec2(uTexelSize.x, 0.0));
+                        col = clamp(c + (c * 4.0 - up - down - left - right) * uSharpen, 0.0, 1.0);
+                    } else {
+                        col = texture2D(sTexture, vTextureCoord);
+                    }
+                    if (uHasColorGrading > 0.5) {
+                        col = clamp(uColorMatrix * col + uColorOffset, 0.0, 1.0);
+                    }
+                    if (uVignette > 0.0) {
+                        vec2 uv = vTextureCoord - vec2(0.5);
+                        float dist = length(uv) * 1.41421356;
+                        float vig = smoothstep(uVignetteRadius, uVignetteRadius - max(uVignetteSoftness, 0.001), dist);
+                        col.rgb = mix(col.rgb, col.rgb * vig, uVignette);
+                    }
                     gl_FragColor = vec4(col.rgb, col.a * uAlpha);
                 }
             """.trimIndent()
@@ -650,6 +886,14 @@ class VideoExportEngine(private val context: Context) {
             tex2DMVPLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMVPMatrix")
             tex2DSTLoc = GLES20.glGetUniformLocation(tex2DProgram, "uSTMatrix")
             tex2DAlphaLoc = GLES20.glGetUniformLocation(tex2DProgram, "uAlpha")
+            tex2DColorMatrixLoc = GLES20.glGetUniformLocation(tex2DProgram, "uColorMatrix")
+            tex2DColorOffsetLoc = GLES20.glGetUniformLocation(tex2DProgram, "uColorOffset")
+            tex2DHasColorGradingLoc = GLES20.glGetUniformLocation(tex2DProgram, "uHasColorGrading")
+            tex2DVignetteLoc = GLES20.glGetUniformLocation(tex2DProgram, "uVignette")
+            tex2DVignetteRadiusLoc = GLES20.glGetUniformLocation(tex2DProgram, "uVignetteRadius")
+            tex2DVignetteSoftnessLoc = GLES20.glGetUniformLocation(tex2DProgram, "uVignetteSoftness")
+            tex2DSharpenLoc = GLES20.glGetUniformLocation(tex2DProgram, "uSharpen")
+            tex2DTexelSizeLoc = GLES20.glGetUniformLocation(tex2DProgram, "uTexelSize")
 
             // 3. Solid Color Program
             val solidVS = """
@@ -874,7 +1118,15 @@ class VideoExportEngine(private val context: Context) {
             textureId: Int,
             mvpMatrix: FloatArray,
             stMatrix: FloatArray,
-            quadBuffer: FloatBuffer
+            quadBuffer: FloatBuffer,
+            colorMatrix: FloatArray? = null,
+            colorOffset: FloatArray? = null,
+            vignette: Float = 0f,
+            vignetteRadius: Float = 0.8f,
+            vignetteSoftness: Float = 0.5f,
+            sharpen: Float = 0f,
+            texW: Float = width.toFloat(),
+            texH: Float = height.toFloat()
         ) {
             GLES20.glUseProgram(oesProgram)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -882,6 +1134,24 @@ class VideoExportEngine(private val context: Context) {
 
             GLES20.glUniformMatrix4fv(oesMVPLoc, 1, false, mvpMatrix, 0)
             GLES20.glUniformMatrix4fv(oesSTLoc, 1, false, stMatrix, 0)
+
+            if (colorMatrix != null && colorOffset != null && oesHasColorGradingLoc >= 0) {
+                GLES20.glUniform1f(oesHasColorGradingLoc, 1.0f)
+                GLES20.glUniformMatrix4fv(oesColorMatrixLoc, 1, false, colorMatrix, 0)
+                GLES20.glUniform4fv(oesColorOffsetLoc, 1, colorOffset, 0)
+            } else if (oesHasColorGradingLoc >= 0) {
+                GLES20.glUniform1f(oesHasColorGradingLoc, 0.0f)
+            }
+
+            if (oesVignetteLoc >= 0) {
+                GLES20.glUniform1f(oesVignetteLoc, vignette)
+                GLES20.glUniform1f(oesVignetteRadiusLoc, vignetteRadius)
+                GLES20.glUniform1f(oesVignetteSoftnessLoc, vignetteSoftness)
+            }
+            if (oesSharpenLoc >= 0) {
+                GLES20.glUniform1f(oesSharpenLoc, sharpen)
+                GLES20.glUniform2f(oesTexelSizeLoc, 1.0f / max(texW, 1.0f), 1.0f / max(texH, 1.0f))
+            }
 
             quadBuffer.position(0)
             GLES20.glVertexAttribPointer(oesPosLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, quadBuffer)
@@ -900,7 +1170,15 @@ class VideoExportEngine(private val context: Context) {
             textureId: Int,
             mvpMatrix: FloatArray,
             quadBuffer: FloatBuffer,
-            alpha: Float = 1.0f
+            alpha: Float = 1.0f,
+            colorMatrix: FloatArray? = null,
+            colorOffset: FloatArray? = null,
+            vignette: Float = 0f,
+            vignetteRadius: Float = 0.8f,
+            vignetteSoftness: Float = 0.5f,
+            sharpen: Float = 0f,
+            texW: Float = width.toFloat(),
+            texH: Float = height.toFloat()
         ) {
             GLES20.glUseProgram(tex2DProgram)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -910,6 +1188,24 @@ class VideoExportEngine(private val context: Context) {
             GLES20.glUniformMatrix4fv(tex2DSTLoc, 1, false, tex2DSTMatrix, 0)
             if (tex2DAlphaLoc >= 0) {
                 GLES20.glUniform1f(tex2DAlphaLoc, alpha)
+            }
+
+            if (colorMatrix != null && colorOffset != null && tex2DHasColorGradingLoc >= 0) {
+                GLES20.glUniform1f(tex2DHasColorGradingLoc, 1.0f)
+                GLES20.glUniformMatrix4fv(tex2DColorMatrixLoc, 1, false, colorMatrix, 0)
+                GLES20.glUniform4fv(tex2DColorOffsetLoc, 1, colorOffset, 0)
+            } else if (tex2DHasColorGradingLoc >= 0) {
+                GLES20.glUniform1f(tex2DHasColorGradingLoc, 0.0f)
+            }
+
+            if (tex2DVignetteLoc >= 0) {
+                GLES20.glUniform1f(tex2DVignetteLoc, vignette)
+                GLES20.glUniform1f(tex2DVignetteRadiusLoc, vignetteRadius)
+                GLES20.glUniform1f(tex2DVignetteSoftnessLoc, vignetteSoftness)
+            }
+            if (tex2DSharpenLoc >= 0) {
+                GLES20.glUniform1f(tex2DSharpenLoc, sharpen)
+                GLES20.glUniform2f(tex2DTexelSizeLoc, 1.0f / max(texW, 1.0f), 1.0f / max(texH, 1.0f))
             }
 
             quadBuffer.position(0)
@@ -967,7 +1263,13 @@ class VideoExportEngine(private val context: Context) {
             cornerBlX: Float = 0f,
             cornerBlY: Float = 1f,
             cornerBrX: Float = 1f,
-            cornerBrY: Float = 1f
+            cornerBrY: Float = 1f,
+            colorMatrix: FloatArray? = null,
+            colorOffset: FloatArray? = null,
+            vignette: Float = 0f,
+            vignetteRadius: Float = 0.8f,
+            vignetteSoftness: Float = 0.5f,
+            sharpen: Float = 0f
         ) {
             val halfW = (baseW * scale) / 2.0f
             val halfH = (baseH * scale) / 2.0f
@@ -1012,7 +1314,20 @@ class VideoExportEngine(private val context: Context) {
 
             GLES20.glEnable(GLES20.GL_BLEND)
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-            render2DTexture(textureId, projMatrix, reusableOverlayQuadBuffer, alpha = opacity)
+            render2DTexture(
+                textureId,
+                projMatrix,
+                reusableOverlayQuadBuffer,
+                alpha = opacity,
+                colorMatrix = colorMatrix,
+                colorOffset = colorOffset,
+                vignette = vignette,
+                vignetteRadius = vignetteRadius,
+                vignetteSoftness = vignetteSoftness,
+                sharpen = sharpen,
+                texW = baseW * scale,
+                texH = baseH * scale
+            )
             GLES20.glDisable(GLES20.GL_BLEND)
         }
 
@@ -1631,11 +1946,57 @@ class VideoExportEngine(private val context: Context) {
             totalProcessNs += (processEnd - processStart - decodeDurationNs)
 
             val renderStart = System.nanoTime()
+            val clipColorMatrix = if (clip.hasColorGrading) FloatArray(16) else null
+            val clipColorOffset = if (clip.hasColorGrading) FloatArray(4) else null
+            if (clip.hasColorGrading && clipColorMatrix != null && clipColorOffset != null) {
+                ColorGradingHelper.calculateMatrixAndOffset(
+                    brightness = clip.brightness.toFloat(),
+                    contrast = clip.contrast.toFloat(),
+                    saturation = clip.saturation.toFloat(),
+                    exposure = clip.exposure.toFloat(),
+                    temperature = clip.temperature.toFloat(),
+                    tint = clip.tint.toFloat(),
+                    highlights = clip.highlights.toFloat(),
+                    shadows = clip.shadows.toFloat(),
+                    blacks = clip.blacks.toFloat(),
+                    whites = clip.whites.toFloat(),
+                    filterId = clip.filterId,
+                    filterIntensity = clip.filterIntensity.toFloat(),
+                    outMatrix = clipColorMatrix,
+                    outOffset = clipColorOffset
+                )
+            }
+
             if (isVideo && decoder != null) {
-                inputSurface.renderOESTexture(decoder.textureId, mvpMatrix, decoder.stMatrix, inputSurface.reusableQuadBuffer)
+                inputSurface.renderOESTexture(
+                    decoder.textureId,
+                    mvpMatrix,
+                    decoder.stMatrix,
+                    inputSurface.reusableQuadBuffer,
+                    colorMatrix = clipColorMatrix,
+                    colorOffset = clipColorOffset,
+                    vignette = clip.vignette.toFloat(),
+                    vignetteRadius = clip.vignetteRadius.toFloat(),
+                    vignetteSoftness = clip.vignetteSoftness.toFloat(),
+                    sharpen = clip.sharpness.toFloat(),
+                    texW = contentW.toFloat(),
+                    texH = contentH.toFloat()
+                )
             } else if (isPhoto && path != null && photoTextures.containsKey(path)) {
                 val tex = photoTextures[path] ?: 0
-                inputSurface.render2DTexture(tex, mvpMatrix, inputSurface.reusableQuadBuffer)
+                inputSurface.render2DTexture(
+                    tex,
+                    mvpMatrix,
+                    inputSurface.reusableQuadBuffer,
+                    colorMatrix = clipColorMatrix,
+                    colorOffset = clipColorOffset,
+                    vignette = clip.vignette.toFloat(),
+                    vignetteRadius = clip.vignetteRadius.toFloat(),
+                    vignetteSoftness = clip.vignetteSoftness.toFloat(),
+                    sharpen = clip.sharpness.toFloat(),
+                    texW = contentW.toFloat(),
+                    texH = contentH.toFloat()
+                )
             } else {
                 inputSurface.renderSolidColor(clip.color, mvpMatrix, inputSurface.fullQuadBuffer)
             }
@@ -1840,6 +2201,27 @@ class VideoExportEngine(private val context: Context) {
                                 val effCenterX = centerX + animOffsetX
                                 val effCenterY = centerY + animOffsetY
 
+                                val pipColorMatrix = if (pip.hasColorGrading) FloatArray(16) else null
+                                val pipColorOffset = if (pip.hasColorGrading) FloatArray(4) else null
+                                if (pip.hasColorGrading && pipColorMatrix != null && pipColorOffset != null) {
+                                    ColorGradingHelper.calculateMatrixAndOffset(
+                                        brightness = pip.brightness.toFloat(),
+                                        contrast = pip.contrast.toFloat(),
+                                        saturation = pip.saturation.toFloat(),
+                                        exposure = pip.exposure.toFloat(),
+                                        temperature = pip.temperature.toFloat(),
+                                        tint = pip.tint.toFloat(),
+                                        highlights = 0f,
+                                        shadows = 0f,
+                                        blacks = 0f,
+                                        whites = 0f,
+                                        filterId = pip.filterId,
+                                        filterIntensity = pip.filterIntensity.toFloat(),
+                                        outMatrix = pipColorMatrix,
+                                        outOffset = pipColorOffset
+                                    )
+                                }
+
                                 inputSurface.renderPipOverlay(
                                     textureId = texId,
                                     dstCenterX = effCenterX,
@@ -1862,7 +2244,11 @@ class VideoExportEngine(private val context: Context) {
                                     cornerBlX = pip.cornerBottomLeftX.toFloat(),
                                     cornerBlY = pip.cornerBottomLeftY.toFloat(),
                                     cornerBrX = pip.cornerBottomRightX.toFloat(),
-                                    cornerBrY = pip.cornerBottomRightY.toFloat()
+                                    cornerBrY = pip.cornerBottomRightY.toFloat(),
+                                    colorMatrix = pipColorMatrix,
+                                    colorOffset = pipColorOffset,
+                                    vignette = pip.vignette.toFloat(),
+                                    sharpen = pip.sharpness.toFloat()
                                 )
                             }
                         }

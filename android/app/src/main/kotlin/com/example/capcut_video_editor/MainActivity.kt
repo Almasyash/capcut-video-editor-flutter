@@ -1296,7 +1296,23 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 xPos = (map["xPos"] as? Number)?.toDouble() ?: 0.0,
                 yPos = (map["yPos"] as? Number)?.toDouble() ?: 0.0,
                 scale = (map["scale"] as? Number)?.toDouble() ?: 1.0,
-                rotationAngle = (map["rotationAngle"] as? Number)?.toDouble() ?: 0.0
+                rotationAngle = (map["rotationAngle"] as? Number)?.toDouble() ?: 0.0,
+                brightness = (map["brightness"] as? Number)?.toDouble() ?: 0.0,
+                contrast = (map["contrast"] as? Number)?.toDouble() ?: 0.0,
+                saturation = (map["saturation"] as? Number)?.toDouble() ?: 0.0,
+                exposure = (map["exposure"] as? Number)?.toDouble() ?: 0.0,
+                temperature = (map["temperature"] as? Number)?.toDouble() ?: 0.0,
+                tint = (map["tint"] as? Number)?.toDouble() ?: 0.0,
+                highlights = (map["highlights"] as? Number)?.toDouble() ?: 0.0,
+                shadows = (map["shadows"] as? Number)?.toDouble() ?: 0.0,
+                blacks = (map["blacks"] as? Number)?.toDouble() ?: 0.0,
+                whites = (map["whites"] as? Number)?.toDouble() ?: 0.0,
+                vignette = (map["vignette"] as? Number)?.toDouble() ?: 0.0,
+                vignetteRadius = (map["vignetteRadius"] as? Number)?.toDouble() ?: 0.8,
+                vignetteSoftness = (map["vignetteSoftness"] as? Number)?.toDouble() ?: 0.5,
+                sharpness = (map["sharpness"] as? Number)?.toDouble() ?: 0.0,
+                filterId = map["filterId"] as? String,
+                filterIntensity = (map["filterIntensity"] as? Number)?.toDouble() ?: 1.0
             )
         }
 
@@ -1394,6 +1410,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 exposure = (map["exposure"] as? Number)?.toDouble() ?: 0.0,
                 temperature = (map["temperature"] as? Number)?.toDouble() ?: 0.0,
                 tint = (map["tint"] as? Number)?.toDouble() ?: 0.0,
+                vignette = (map["vignette"] as? Number)?.toDouble() ?: 0.0,
+                sharpness = (map["sharpness"] as? Number)?.toDouble() ?: 0.0,
                 outlineEnabled = map["outlineEnabled"] as? Boolean ?: false,
                 outlineColor = (map["outlineColor"] as? Number)?.toInt() ?: 0,
                 outlineWidth = (map["outlineWidth"] as? Number)?.toDouble() ?: 2.0,

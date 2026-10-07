@@ -365,6 +365,22 @@ class DeviceMediaService {
         'yPos': clip.yPos,
         'scale': clip.scale,
         'rotationAngle': clip.rotationAngle,
+        'brightness': project.colorAdjustments.brightness,
+        'contrast': project.colorAdjustments.contrast - 1.0,
+        'saturation': project.colorAdjustments.saturation - 1.0,
+        'exposure': project.colorAdjustments.exposure,
+        'temperature': project.colorAdjustments.temperature,
+        'tint': project.colorAdjustments.tint,
+        'highlights': project.colorAdjustments.highlights,
+        'shadows': project.colorAdjustments.shadows,
+        'blacks': project.colorAdjustments.blacks,
+        'whites': project.colorAdjustments.whites,
+        'vignette': project.colorAdjustments.vignette,
+        'vignetteRadius': project.colorAdjustments.vignetteRadius,
+        'vignetteSoftness': project.colorAdjustments.vignetteSoftness,
+        'sharpness': project.colorAdjustments.sharpness,
+        'filterId': project.activeFilter.type.name,
+        'filterIntensity': project.activeFilter.intensity,
       });
     }
 
@@ -531,6 +547,8 @@ class DeviceMediaService {
         'exposure': overlay.adjustments.exposure,
         'temperature': overlay.adjustments.temperature,
         'tint': overlay.adjustments.tint,
+        'vignette': overlay.adjustments.vignette,
+        'sharpness': overlay.adjustments.sharpness,
         'outlineEnabled': overlay.outline?.enabled ?? false,
         'outlineColor': overlay.outline?.color.value ?? 0xFF00C6FF,
         'outlineWidth': overlay.outline?.width ?? 2.0,
@@ -558,6 +576,8 @@ class DeviceMediaService {
       'audioTracks': audioPayload,
       'textOverlays': textsPayload,
       'pipOverlays': pipOverlaysPayload,
+      'colorAdjustments': project.colorAdjustments.toJson(),
+      'activeFilter': project.activeFilter.toJson(),
     };
 
     // 5. Invoke platform channel or handle mock/test environment

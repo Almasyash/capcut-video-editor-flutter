@@ -4561,6 +4561,7 @@ class EditorViewModel extends ChangeNotifier {
   void setFilter(EditorFilter filter) {
     _saveSnapshot();
     _activeFilter = filter;
+    TtsService.announce('Filter ${filter.name} selected');
     notifyListeners();
   }
 
@@ -4569,9 +4570,17 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void commitFilterIntensity(double intensity) {
+    _saveSnapshot();
+    _activeFilter = _activeFilter.copyWith(intensity: intensity.clamp(0.0, 1.0));
+    TtsService.announce('Filter intensity ${(_activeFilter.intensity * 100).round()}%');
+    notifyListeners();
+  }
+
   void setEffect(VideoEffect effect) {
     _saveSnapshot();
     _activeEffect = effect;
+    TtsService.announce(effect.type == VideoEffectType.none ? 'Effect removed' : 'Added effect ${effect.name}');
     notifyListeners();
   }
 
@@ -4580,8 +4589,21 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void commitColorAdjustments(ColorAdjustments adjustments, {String? propertyName}) {
+    _saveSnapshot();
+    _colorAdjustments = adjustments;
+    if (propertyName != null) {
+      TtsService.announce('$propertyName adjusted');
+    } else {
+      TtsService.announce('Color adjustments updated');
+    }
+    notifyListeners();
+  }
+
   void resetColorAdjustments() {
+    _saveSnapshot();
     _colorAdjustments = const ColorAdjustments();
+    TtsService.announce('Color adjustments reset');
     notifyListeners();
   }
 
