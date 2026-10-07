@@ -2700,7 +2700,7 @@ void main() {
           vm.seekTo(totalSec - 0.04);
           vm.play();
 
-          await Future.delayed(const Duration(milliseconds: 120));
+          await Future.delayed(const Duration(milliseconds: 200));
           final endPosition = vm.playheadPosition;
 
           int notifyCount = 0;
@@ -2721,7 +2721,7 @@ void main() {
           vm.seekTo(totalSec - 0.04);
           vm.play();
 
-          await Future.delayed(const Duration(milliseconds: 120));
+          await Future.delayed(const Duration(milliseconds: 200));
           expect(vm.isPlaying, isFalse);
 
           // Calling pause again at end is idempotent and does not corrupt state

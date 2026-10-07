@@ -26,6 +26,7 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/interactive
 import 'package:capcut_video_editor/core/utils/chroma_key_helper.dart';
 import 'package:capcut_video_editor/core/utils/font_helper.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
 
 /// Top Video Preview Screen containing the live video canvas, aspect-ratio viewport,
 /// color grading LUT filters, adjustments, Picture-in-Picture (PIP) layers,
@@ -502,16 +503,17 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
             else if (activeClip != null)
               _buildMainVideoCanvas(activeClip, filter, adjustments)
             else
-              const Center(
-                child: Text(
-                  'No media on timeline',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+              _buildEmptyMediaPlaceholder(filter, adjustments),
+
+            // 2. Visual Effects Overlay (Glitch, VHS, RGB, Sparkle, ZoomBlur, Shake, FilmGrain)
+            if (viewModel.activeEffect.type != VideoEffectType.none)
+              Positioned.fill(
+                child: VideoEffectOverlayWidget(
+                  effect: viewModel.activeEffect,
+                  currentTime: viewModel.currentTimeInSeconds,
+                  isPlaying: viewModel.isPlaying,
                 ),
               ),
-
-            // 2. Visual Effects Overlay (Glitch, VHS, RGB, Sparkle)
-            if (viewModel.activeEffect.type != VideoEffectType.none)
-              _buildEffectOverlay(viewModel.activeEffect),
 
             // 3. Active Stickers Overlays
             ...activeStickers.map((sticker) => _buildStickerOverlay(sticker)),
@@ -1187,6 +1189,23 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       );
     }
 
+    if (viewModel.activeEffect.type == VideoEffectType.shake) {
+      final t = viewModel.currentTimeInSeconds;
+      final dx = math.sin(t * 37.0) * 3.5;
+      final dy = math.cos(t * 43.0) * 2.5;
+      videoContent = Transform.translate(
+        offset: Offset(dx, dy),
+        child: videoContent,
+      );
+    } else if (viewModel.activeEffect.type == VideoEffectType.zoomBlur) {
+      final t = viewModel.currentTimeInSeconds;
+      final s = 1.0 + 0.03 * ((math.sin(t * 10.0) + 1.0) / 2.0);
+      videoContent = Transform.scale(
+        scale: s,
+        child: videoContent,
+      );
+    }
+
     return videoContent;
   }
 
@@ -1495,6 +1514,23 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       );
     }
 
+    if (viewModel.activeEffect.type == VideoEffectType.shake) {
+      final t = viewModel.currentTimeInSeconds;
+      final dx = math.sin(t * 37.0) * 3.5;
+      final dy = math.cos(t * 43.0) * 2.5;
+      visualChild = Transform.translate(
+        offset: Offset(dx, dy),
+        child: visualChild,
+      );
+    } else if (viewModel.activeEffect.type == VideoEffectType.zoomBlur) {
+      final t = viewModel.currentTimeInSeconds;
+      final s = 1.0 + 0.03 * ((math.sin(t * 10.0) + 1.0) / 2.0);
+      visualChild = Transform.scale(
+        scale: s,
+        child: visualChild,
+      );
+    }
+
     final isSelected = activeClip is VideoClip && activeClip.id == viewModel.selectedClipId;
 
     Widget videoContent;
@@ -1769,56 +1805,103 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     );
   }
 
-  Widget _buildEffectOverlay(VideoEffect effect) {
-    switch (effect.type) {
-      case VideoEffectType.glitch:
-        return IgnorePointer(
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  Colors.transparent,
-                  AppColors.primary.withOpacity(0.12),
-                  AppColors.secondary.withOpacity(0.12),
-                  Colors.transparent,
-                ],
-                stops: const [0.0, 0.45, 0.55, 1.0],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+  Widget _buildEmptyMediaPlaceholder(ColorFilter? filter, ColorFilter? adjustments) {
+    Widget content = Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF141720),
+            Color(0xFF0F1116),
+            Color(0xFF1A1D28),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    colors: [AppColors.primary, AppColors.secondary],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withOpacity(0.35),
+                      blurRadius: 16,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.video_library_rounded,
+                  size: 32,
+                  color: Colors.white,
+                ),
               ),
-            ),
+              const SizedBox(height: 14),
+              const Text(
+                'No media on timeline',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Add clips to start color grading & editing',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                onPressed: () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (ctx) => MediaPickerSheet(viewModel: viewModel),
+                  );
+                },
+                icon: const Icon(Icons.add_photo_alternate_rounded, size: 16),
+                label: const Text('Add Media Clip', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                ),
+              ),
+            ],
           ),
-        );
-      case VideoEffectType.vhs:
-        return IgnorePointer(
-          child: Container(
-            color: Colors.transparent,
-            child: CustomPaint(
-              painter: _VhsScanlinePainter(),
-            ),
-          ),
-        );
-      case VideoEffectType.rgbSplit:
-        return IgnorePointer(
-          child: Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.cyanAccent.withOpacity(0.3), width: 3),
-            ),
-          ),
-        );
-      case VideoEffectType.sparkle:
-        return const IgnorePointer(
-          child: Align(
-            alignment: Alignment.topRight,
-            child: Padding(
-              padding: EdgeInsets.all(12.0),
-              child: Icon(Icons.auto_awesome, color: Colors.amberAccent, size: 28),
-            ),
-          ),
-        );
-      default:
-        return const SizedBox.shrink();
+        ),
+      ),
+    );
+
+    if (filter != null) {
+      content = ColorFiltered(colorFilter: filter, child: content);
     }
+    if (adjustments != null) {
+      content = ColorFiltered(colorFilter: adjustments, child: content);
+    }
+
+    return content;
   }
 
   Widget _buildTextOverlay(
@@ -2046,20 +2129,387 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
   }
 }
 
-class _VhsScanlinePainter extends CustomPainter {
+/// Professional GPU-accelerated video effects overlay widget supporting
+/// animated Glitch Art, VHS Cam, RGB Split, Zoom Blur, Sparkles, Camera Shake, and 35mm Film Grain.
+class VideoEffectOverlayWidget extends StatefulWidget {
+  final VideoEffect effect;
+  final double currentTime;
+  final bool isPlaying;
+
+  const VideoEffectOverlayWidget({
+    super.key,
+    required this.effect,
+    required this.currentTime,
+    required this.isPlaying,
+  });
+
+  @override
+  State<VideoEffectOverlayWidget> createState() => _VideoEffectOverlayWidgetState();
+}
+
+class _VideoEffectOverlayWidgetState extends State<VideoEffectOverlayWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _anim = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.effect.type == VideoEffectType.none) {
+      return const SizedBox.shrink();
+    }
+
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _anim,
+        builder: (context, _) {
+          final t = _anim.value;
+          final timeSec = widget.currentTime;
+
+          switch (widget.effect.type) {
+            case VideoEffectType.glitch:
+              return CustomPaint(
+                painter: _GlitchPainter(progress: t),
+                size: Size.infinite,
+              );
+            case VideoEffectType.vhs:
+              return _buildVhsEffect(t, timeSec);
+            case VideoEffectType.rgbSplit:
+              return CustomPaint(
+                painter: _RgbSplitPainter(progress: t),
+                size: Size.infinite,
+              );
+            case VideoEffectType.zoomBlur:
+              return CustomPaint(
+                painter: _ZoomBlurPainter(progress: t),
+                size: Size.infinite,
+              );
+            case VideoEffectType.sparkle:
+              return CustomPaint(
+                painter: _SparklePainter(progress: t),
+                size: Size.infinite,
+              );
+            case VideoEffectType.shake:
+              return CustomPaint(
+                painter: _ShakeOverlayPainter(progress: t),
+                size: Size.infinite,
+              );
+            case VideoEffectType.filmGrain:
+              return CustomPaint(
+                painter: _FilmGrainPainter(seed: ((t * 200).toInt() + (timeSec * 30).toInt()) & 0x7FFFFFFF),
+                size: Size.infinite,
+              );
+            case VideoEffectType.none:
+              return const SizedBox.shrink();
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildVhsEffect(double t, double timeSec) {
+    final minutes = (timeSec / 60).floor().toString().padLeft(2, '0');
+    final seconds = (timeSec % 60).floor().toString().padLeft(2, '0');
+    final frames = ((timeSec % 1) * 30).floor().toString().padLeft(2, '0');
+    final timecode = '$minutes:$seconds:$frames';
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CustomPaint(
+          painter: _VhsScanlinePainter(progress: t),
+          size: Size.infinite,
+        ),
+        Positioned(
+          top: 14,
+          left: 14,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF00FF66),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  const Text(
+                    'PLAY ▶',
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      color: Color(0xFF00FF66),
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.5,
+                      shadows: [
+                        Shadow(color: Colors.black, blurRadius: 4, offset: Offset(1, 1)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'SP  $timecode',
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                  shadows: [
+                    Shadow(color: Colors.black, blurRadius: 4, offset: Offset(1, 1)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GlitchPainter extends CustomPainter {
+  final double progress;
+  _GlitchPainter({required this.progress});
+
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.white.withOpacity(0.04)
+    final rand = math.Random((progress * 100).toInt());
+    // Horizontal chromatic glitch blocks
+    for (int i = 0; i < 6; i++) {
+      if (rand.nextDouble() > 0.35) {
+        final top = rand.nextDouble() * size.height;
+        final h = 4.0 + rand.nextDouble() * 16.0;
+        final offset = (rand.nextDouble() - 0.5) * 22.0;
+        final isCyan = rand.nextBool();
+        final paint = Paint()
+          ..color = isCyan ? const Color(0x5500E5FF) : const Color(0x55FF007F)
+          ..blendMode = BlendMode.screen;
+        canvas.drawRect(
+          Rect.fromLTWH(offset, top, size.width, h),
+          paint,
+        );
+      }
+    }
+    // High-frequency scanline noise
+    final linePaint = Paint()
+      ..color = Colors.white.withOpacity(0.08)
       ..strokeWidth = 1.0;
-
-    for (double y = 0; y < size.height; y += 4.0) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    for (double y = 0; y < size.height; y += 6.0) {
+      if (rand.nextDouble() > 0.3) {
+        canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  bool shouldRepaint(covariant _GlitchPainter oldDelegate) => true;
+}
+
+class _VhsScanlinePainter extends CustomPainter {
+  final double progress;
+  _VhsScanlinePainter({this.progress = 0.0});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final linePaint = Paint()
+      ..color = Colors.white.withOpacity(0.05)
+      ..strokeWidth = 1.0;
+
+    for (double y = 0; y < size.height; y += 4.0) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
+    }
+
+    // VHS Tracking line distortion roll
+    final trackY = ((progress * 1.2) % 1.0) * size.height;
+    final trackPaint = Paint()
+      ..color = Colors.white.withOpacity(0.18)
+      ..style = PaintingStyle.fill;
+    canvas.drawRect(Rect.fromLTWH(0, trackY, size.width, 10.0), trackPaint);
+
+    final trackPaint2 = Paint()
+      ..color = const Color(0x3300FFFF)
+      ..style = PaintingStyle.fill;
+    canvas.drawRect(Rect.fromLTWH(0, trackY - 4.0, size.width, 4.0), trackPaint2);
+  }
+
+  @override
+  bool shouldRepaint(covariant _VhsScanlinePainter oldDelegate) => oldDelegate.progress != progress;
+}
+
+class _RgbSplitPainter extends CustomPainter {
+  final double progress;
+  _RgbSplitPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final split = 3.0 + 2.5 * math.sin(progress * 2 * math.pi);
+    // Outer edge red fringe
+    final redPaint = Paint()
+      ..color = const Color(0x44FF0055)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = split * 2;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), redPaint);
+
+    // Cyan chromatic displacement lines
+    final cyanPaint = Paint()
+      ..color = const Color(0x3300FFFF)
+      ..strokeWidth = 1.5;
+    for (double y = 10; y < size.height; y += 24.0) {
+      final offset = math.sin((y / 20.0) + progress * 6) * split;
+      canvas.drawLine(Offset(offset, y), Offset(size.width + offset, y), cyanPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _RgbSplitPainter oldDelegate) => true;
+}
+
+class _ZoomBlurPainter extends CustomPainter {
+  final double progress;
+  _ZoomBlurPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final maxRadius = math.max(size.width, size.height) * 0.7;
+    final pulse = 0.5 + 0.5 * math.sin(progress * 2 * math.pi);
+
+    for (int i = 1; i <= 4; i++) {
+      final r = maxRadius * (i / 4.0) * (0.95 + 0.05 * pulse);
+      final paint = Paint()
+        ..color = const Color(0x227C4DFF)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0 * i;
+      canvas.drawCircle(center, r, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ZoomBlurPainter oldDelegate) => true;
+}
+
+class _SparklePainter extends CustomPainter {
+  final double progress;
+  _SparklePainter({required this.progress});
+
+  static const List<Offset> _points = [
+    Offset(0.20, 0.25),
+    Offset(0.75, 0.20),
+    Offset(0.45, 0.38),
+    Offset(0.18, 0.65),
+    Offset(0.82, 0.60),
+    Offset(0.60, 0.78),
+    Offset(0.35, 0.82),
+    Offset(0.88, 0.35),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (int i = 0; i < _points.length; i++) {
+      final pt = _points[i];
+      final phase = (progress + (i / _points.length)) % 1.0;
+      final scale = math.sin(phase * math.pi).clamp(0.0, 1.0);
+      if (scale <= 0.05) continue;
+
+      final center = Offset(pt.dx * size.width, pt.dy * size.height);
+      final radius = 10.0 * scale;
+
+      final starPaint = Paint()
+        ..color = (i % 2 == 0 ? const Color(0xFFFFD700) : Colors.white).withOpacity(0.85 * scale)
+        ..style = PaintingStyle.fill;
+
+      // 4-pointed star
+      final path = Path();
+      path.moveTo(center.dx, center.dy - radius);
+      path.quadraticBezierTo(center.dx, center.dy, center.dx + radius, center.dy);
+      path.quadraticBezierTo(center.dx, center.dy, center.dx, center.dy + radius);
+      path.quadraticBezierTo(center.dx, center.dy, center.dx - radius, center.dy);
+      path.quadraticBezierTo(center.dx, center.dy, center.dx, center.dy - radius);
+      canvas.drawPath(path, starPaint);
+
+      // Star halo
+      final haloPaint = Paint()
+        ..color = const Color(0x44FFE082)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(center, radius * 0.6, haloPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SparklePainter oldDelegate) => true;
+}
+
+class _ShakeOverlayPainter extends CustomPainter {
+  final double progress;
+  _ShakeOverlayPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final streak = math.sin(progress * 6 * math.pi);
+    if (streak.abs() > 0.7) {
+      final streakPaint = Paint()
+        ..color = Colors.white.withOpacity(0.06)
+        ..strokeWidth = 2.0;
+      final y = (size.height * 0.5) + streak * 40.0;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), streakPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ShakeOverlayPainter oldDelegate) => true;
+}
+
+class _FilmGrainPainter extends CustomPainter {
+  final int seed;
+  _FilmGrainPainter({required this.seed});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rand = math.Random(seed);
+    final grainPaint = Paint()
+      ..color = Colors.white.withOpacity(0.07)
+      ..strokeWidth = 1.0;
+
+    const count = 350;
+    for (int i = 0; i < count; i++) {
+      final x = rand.nextDouble() * size.width;
+      final y = rand.nextDouble() * size.height;
+      canvas.drawCircle(Offset(x, y), 0.8, grainPaint);
+    }
+
+    final vigPaint = Paint()
+      ..shader = ui.Gradient.radial(
+        Offset(size.width / 2, size.height / 2),
+        size.longestSide * 0.65,
+        [Colors.transparent, Colors.black.withOpacity(0.35)],
+        [0.65, 1.0],
+      );
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), vigPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _FilmGrainPainter oldDelegate) => oldDelegate.seed != seed;
 }
 
 class _CircleTransitionClipper extends CustomClipper<Rect> {

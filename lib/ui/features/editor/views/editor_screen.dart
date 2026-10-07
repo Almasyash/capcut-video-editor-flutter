@@ -255,9 +255,22 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
             focusNode: _keyboardFocusNode,
             autofocus: true,
             onKeyEvent: _handleKeyEvent,
-            child: Scaffold(
-              backgroundColor: AppColors.background,
-              body: SafeArea(
+            child: PopScope(
+              canPop: activeDrawer == null,
+              onPopInvokedWithResult: (didPop, result) async {
+                if (didPop) return;
+                if (_viewModel.activeDrawer != null) {
+                  _viewModel.closeDrawer();
+                } else {
+                  await _viewModel.saveCurrentProject();
+                  if (context.mounted) {
+                    Navigator.of(context).maybePop();
+                  }
+                }
+              },
+              child: Scaffold(
+                backgroundColor: AppColors.background,
+                body: SafeArea(
                 bottom: false,
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -357,8 +370,9 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
                 ),
               ),
             ),
-          );
-        },
+          ),
+        );
+      },
       ),
     );
   }

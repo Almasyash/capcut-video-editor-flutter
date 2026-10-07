@@ -127,16 +127,54 @@ class ColorAdjustments {
     final lumG = 0.7152 * (1.0 - s);
     final lumB = 0.0722 * (1.0 - s);
 
-    final rOffset = totalOffset + tempR + tintM;
-    final gOffset = totalOffset + tintG;
-    final bOffset = totalOffset + tempB + tintM;
+    var rOffset = totalOffset + tempR + tintM;
+    var gOffset = totalOffset + tintG;
+    var bOffset = totalOffset + tempB + tintM;
 
     final cOffset = 128.0 * (1.0 - c);
 
+    double rScale = 1.0;
+    double gScale = 1.0;
+    double bScale = 1.0;
+
+    if (!curves.isIdentity) {
+      final m0 = curves.evaluate(0.0, CurveChannel.master);
+      final m1 = curves.evaluate(1.0, CurveChannel.master);
+      final mMid = curves.evaluate(0.5, CurveChannel.master);
+      final curveMasterGain = (m1 - m0).clamp(0.1, 3.0);
+      final curveMasterOffset = (m0 * 255.0) + (mMid - (m0 + m1) * 0.5) * 128.0;
+
+      final r0 = curves.evaluate(0.0, CurveChannel.red);
+      final r1 = curves.evaluate(1.0, CurveChannel.red);
+      final rMid = curves.evaluate(0.5, CurveChannel.red);
+      final curveRGain = (r1 - r0).clamp(0.1, 3.0);
+      final curveROffset = (r0 * 255.0) + (rMid - (r0 + r1) * 0.5) * 128.0;
+
+      final g0 = curves.evaluate(0.0, CurveChannel.green);
+      final g1 = curves.evaluate(1.0, CurveChannel.green);
+      final gMid = curves.evaluate(0.5, CurveChannel.green);
+      final curveGGain = (g1 - g0).clamp(0.1, 3.0);
+      final curveGOffset = (g0 * 255.0) + (gMid - (g0 + g1) * 0.5) * 128.0;
+
+      final b0 = curves.evaluate(0.0, CurveChannel.blue);
+      final b1 = curves.evaluate(1.0, CurveChannel.blue);
+      final bMid = curves.evaluate(0.5, CurveChannel.blue);
+      final curveBGain = (b1 - b0).clamp(0.1, 3.0);
+      final curveBOffset = (b0 * 255.0) + (bMid - (b0 + b1) * 0.5) * 128.0;
+
+      rScale = curveMasterGain * curveRGain;
+      gScale = curveMasterGain * curveGGain;
+      bScale = curveMasterGain * curveBGain;
+
+      rOffset += curveMasterOffset + curveROffset;
+      gOffset += curveMasterOffset + curveGOffset;
+      bOffset += curveMasterOffset + curveBOffset;
+    }
+
     return ColorFilter.matrix(<double>[
-      (lumR + s) * c, lumG * c, lumB * c, 0, rOffset + cOffset,
-      lumR * c, (lumG + s) * c, lumB * c, 0, gOffset + cOffset,
-      lumR * c, lumG * c, (lumB + s) * c, 0, bOffset + cOffset,
+      (lumR + s) * c * rScale, lumG * c * rScale, lumB * c * rScale, 0, rOffset + cOffset,
+      lumR * c * gScale, (lumG + s) * c * gScale, lumB * c * gScale, 0, gOffset + cOffset,
+      lumR * c * bScale, lumG * c * bScale, (lumB + s) * c * bScale, 0, bOffset + cOffset,
       0, 0, 0, 1, 0,
     ]);
   }
