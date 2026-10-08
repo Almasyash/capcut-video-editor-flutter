@@ -29,7 +29,10 @@ class VideoClip {
   final IconData previewIcon;
   final List<VideoKeyframe> keyframes;
   final KeyframeTrackGroup? keyframeTracks;
-  final VideoMask? mask;
+  final List<VideoMask> _masks;
+  final VideoMask? _legacyMask;
+  List<VideoMask> get masks => _masks.isNotEmpty ? _masks : (_legacyMask != null ? [_legacyMask!] : const []);
+  VideoMask? get mask => _legacyMask ?? (_masks.isNotEmpty ? _masks.first : null);
   final BlendMode blendMode;
 
   /// Spatial transformation properties (Free Transform Canvas)
@@ -77,9 +80,11 @@ class VideoClip {
     this.rotationAngle = 0.0,
     this.keyframes = const [],
     this.keyframeTracks,
-    this.mask,
+    VideoMask? mask,
+    List<VideoMask> masks = const [],
     this.blendMode = BlendMode.srcOver,
-  });
+  }) : _legacyMask = mask,
+       _masks = masks;
 
   /// Authoritative keyframe track group (falls back to legacy keyframes if not explicitly set)
   KeyframeTrackGroup get effectiveKeyframeTracks =>
@@ -130,6 +135,7 @@ class VideoClip {
     double? rotationAngle,
     List<VideoKeyframe>? keyframes,
     KeyframeTrackGroup? keyframeTracks,
+    List<VideoMask>? masks,
     VideoMask? mask,
     bool clearMask = false,
     BlendMode? blendMode,
@@ -138,6 +144,9 @@ class VideoClip {
   }) {
     final effectiveKfs = keyframes ?? (keyframeTracks != null ? keyframeTracks.toVideoKeyframes() : this.keyframes);
     final effectiveTracks = keyframeTracks ?? (keyframes != null ? KeyframeTrackGroup.fromVideoKeyframes(keyframes) : this.keyframeTracks);
+    final effectiveMasks = clearMask
+        ? const <VideoMask>[]
+        : (masks ?? (mask != null ? [mask] : this.masks));
 
     return VideoClip(
       id: id ?? this.id,
@@ -167,7 +176,7 @@ class VideoClip {
       rotationAngle: rotationAngle ?? this.rotationAngle,
       keyframes: effectiveKfs,
       keyframeTracks: effectiveTracks,
-      mask: clearMask ? null : (mask ?? this.mask),
+      masks: effectiveMasks,
       blendMode: blendMode ?? this.blendMode,
     );
   }
@@ -197,6 +206,7 @@ class VideoClip {
       'rotationAngle': rotationAngle,
       if (keyframes.isNotEmpty) 'keyframes': keyframes.map((k) => k.toJson()).toList(),
       if (keyframeTracks != null && keyframeTracks!.isNotEmpty) 'keyframeTracks': keyframeTracks!.toJson(),
+      if (masks.isNotEmpty) 'masks': masks.map((m) => m.toJson()).toList(),
       if (mask != null) 'mask': mask!.toJson(),
       'blendMode': blendMode.index,
       'isLocked': isLocked,
@@ -215,6 +225,15 @@ class VideoClip {
       parsedTracks = KeyframeTrackGroup.fromJson(json['keyframeTracks'] as Map<String, dynamic>);
     } else if (parsedKeyframes.isNotEmpty) {
       parsedTracks = KeyframeTrackGroup.fromVideoKeyframes(parsedKeyframes);
+    }
+
+    List<VideoMask> parsedMasks = const [];
+    if (json['masks'] is List) {
+      parsedMasks = (json['masks'] as List<dynamic>)
+          .map((m) => VideoMask.fromJson(m as Map<String, dynamic>))
+          .toList();
+    } else if (json['mask'] != null) {
+      parsedMasks = [VideoMask.fromJson(json['mask'] as Map<String, dynamic>)];
     }
 
     return VideoClip(
@@ -248,7 +267,7 @@ class VideoClip {
       rotationAngle: (json['rotationAngle'] as num?)?.toDouble() ?? 0.0,
       keyframes: parsedKeyframes,
       keyframeTracks: parsedTracks,
-      mask: json['mask'] != null ? VideoMask.fromJson(json['mask'] as Map<String, dynamic>) : null,
+      masks: parsedMasks,
       blendMode: json['blendMode'] != null
           ? BlendMode.values[(json['blendMode'] as num).toInt().clamp(0, BlendMode.values.length - 1)]
           : BlendMode.srcOver,

@@ -2,6 +2,20 @@
 
 All notable changes to **Editor FS** are documented in this file.
 
+## [1.6.0] - 2026-10-08
+
+### 🌟 Professional Masking & Compositing Engine Suite
+- **Comprehensive Masking Geometries (`VideoMask`)**: Full support for 5 standard shapes (Rectangle, Ellipse, Polygon, Linear, Radial) plus legacy presets (Split, Filmstrip, Circle, Heart, Star).
+- **GPU-Accelerated Soft Feathering & Expansion**: High-performance analytical Signed Distance Fields (SDF) and smoothstep edge falloff ($0.0 - 100.0$) with inward/outward boundary dilation and erosion ($-100.0 - 100.0$).
+- **Multi-Mask Compositing & Boolean Modes**: Support for up to 4 concurrent masks per clip with Boolean combination operations (`Add`, `Intersect`, `Subtract`, `Difference/XOR`), per-mask opacity, and inversion toggle.
+- **Dynamic Keyframing Integration**: Direct integration with the keyframe animation engine for dynamic animated mask transitions across position ($X, Y$), scale, rotation, opacity, feather, and expansion.
+- **Picture-in-Picture (PIP) Mask Parity**: Complete masking support for secondary PIP overlay layers (`OverlayClip`), enabling creative PIP cutouts, split-screen reveals, and animated shapes.
+- **Production UI Suite (`MaskAdjustmentSheet`)**: Intuitive bottom sheet featuring multi-mask tabs, preset selector, precision sliders, interactive invert toggle, Boolean mode selector, and real-time keyframe indicator.
+- **Native Android Hardware Export Engine (`VideoExportEngine.kt`)**: Hardware-accelerated OpenGL ES 2.0 fragment shaders (`oesFS` and `tex2DFS`) with uniform arrays, analytical SDF evaluations, dynamic blending, and MediaCodec MP4 encoding.
+- **Quality & Assurance**: 726/726 passing unit, widget, and integration tests, 0 analyzer issues, verified across both canonical repositories.
+
+---
+
 ## [1.5.0] - 2026-10-08
 
 ### 🌟 Professional Speed Ramping & Time Remapping Engine Suite

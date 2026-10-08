@@ -368,6 +368,95 @@ object SpeedRemapParser {
 }
 
 /**
+ * Mask definitions for native export pipeline
+ */
+data class ExportMaskDefinition(
+    val id: String = "",
+    val name: String = "",
+    val type: String = "rectangle",
+    val enabled: Boolean = true,
+    val inverted: Boolean = false,
+    val opacity: Double = 1.0,
+    val feather: Double = 0.0,
+    val expansion: Double = 0.0,
+    val positionX: Double = 0.5,
+    val positionY: Double = 0.5,
+    val scale: Double = 1.0,
+    val rotation: Double = 0.0,
+    val width: Double = 0.5,
+    val height: Double = 0.5,
+    val cornerRadius: Double = 0.0,
+    val combineMode: String = "add",
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
+) {
+    fun evaluateAt(timeInSeconds: Double): ExportMaskDefinition {
+        if (keyframeTracks.tracks.isEmpty()) return this
+        return copy(
+            positionX = keyframeTracks.evaluate("maskPositionX", timeInSeconds, positionX).coerceIn(-2.0, 2.0),
+            positionY = keyframeTracks.evaluate("maskPositionY", timeInSeconds, positionY).coerceIn(-2.0, 2.0),
+            scale = keyframeTracks.evaluate("maskScale", timeInSeconds, scale).coerceIn(0.01, 10.0),
+            rotation = keyframeTracks.evaluate("maskRotation", timeInSeconds, rotation),
+            opacity = keyframeTracks.evaluate("maskOpacity", timeInSeconds, opacity).coerceIn(0.0, 1.0),
+            feather = keyframeTracks.evaluate("maskFeather", timeInSeconds, feather).coerceIn(0.0, 1.0),
+            expansion = keyframeTracks.evaluate("maskExpansion", timeInSeconds, expansion).coerceIn(-1.0, 1.0),
+            width = keyframeTracks.evaluate("maskWidth", timeInSeconds, width).coerceIn(0.01, 2.0),
+            height = keyframeTracks.evaluate("maskHeight", timeInSeconds, height).coerceIn(0.01, 2.0)
+        )
+    }
+}
+
+object MaskParser {
+    @Suppress("UNCHECKED_CAST")
+    fun parseMasks(rawList: List<Any>?): List<ExportMaskDefinition> {
+        if (rawList == null) return emptyList()
+        val result = mutableListOf<ExportMaskDefinition>()
+        for (item in rawList) {
+            val map = item as? Map<String, Any> ?: continue
+            val enabled = map["enabled"] as? Boolean ?: true
+            val type = map["type"] as? String ?: "rectangle"
+            if (type == "none" || !enabled) continue
+            val id = map["id"] as? String ?: ""
+            val name = map["name"] as? String ?: ""
+            val inverted = map["inverted"] as? Boolean ?: false
+            val opacity = (map["opacity"] as? Number)?.toDouble() ?: 1.0
+            val feather = (map["feather"] as? Number)?.toDouble() ?: 0.0
+            val expansion = (map["expansion"] as? Number)?.toDouble() ?: 0.0
+            val positionX = (map["positionX"] as? Number)?.toDouble() ?: 0.5
+            val positionY = (map["positionY"] as? Number)?.toDouble() ?: 0.5
+            val scale = (map["scale"] as? Number)?.toDouble() ?: 1.0
+            val rotation = (map["rotation"] as? Number)?.toDouble() ?: 0.0
+            val width = (map["width"] as? Number)?.toDouble() ?: 0.5
+            val height = (map["height"] as? Number)?.toDouble() ?: 0.5
+            val cornerRadius = (map["cornerRadius"] as? Number)?.toDouble() ?: 0.0
+            val combineMode = map["combineMode"] as? String ?: "add"
+            val kfTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
+            result.add(
+                ExportMaskDefinition(
+                    id = id,
+                    name = name,
+                    type = type,
+                    enabled = enabled,
+                    inverted = inverted,
+                    opacity = opacity,
+                    feather = feather,
+                    expansion = expansion,
+                    positionX = positionX,
+                    positionY = positionY,
+                    scale = scale,
+                    rotation = rotation,
+                    width = width,
+                    height = height,
+                    cornerRadius = cornerRadius,
+                    combineMode = combineMode,
+                    keyframeTracks = kfTracks
+                )
+            )
+        }
+        return result
+    }
+}
+
+/**
  * Data structures for video export payload passed from Flutter
  */
 data class ExportClip(
@@ -407,6 +496,7 @@ data class ExportClip(
     val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup(),
     val speedCurve: ExportSpeedCurve? = null,
     val freezeFrame: ExportFreezeFrame? = null,
+    val masks: List<ExportMaskDefinition> = emptyList(),
     val isFrozen: Boolean = false,
     val isReversed: Boolean = false
 ) {
@@ -557,6 +647,7 @@ data class ExportPipOverlay(
     val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup(),
     val speedCurve: ExportSpeedCurve? = null,
     val freezeFrame: ExportFreezeFrame? = null,
+    val masks: List<ExportMaskDefinition> = emptyList(),
     val isFrozen: Boolean = false,
     val isReversed: Boolean = false
 ) {
@@ -1003,6 +1094,15 @@ class VideoExportEngine(private val context: Context) {
         private var oesSharpenLoc = 0
         private var oesTexelSizeLoc = 0
         private var oesAlphaLoc = 0
+        private var oesMaskCountLoc = 0
+        private var oesMaskTypeLoc = 0
+        private var oesMaskInvertedLoc = 0
+        private var oesMaskCombineLoc = 0
+        private var oesMaskPosLoc = 0
+        private var oesMaskHalfSizeLoc = 0
+        private var oesMaskRotLoc = 0
+        private var oesMaskFeatherLoc = 0
+        private var oesMaskOpacityLoc = 0
 
         private var tex2DProgram = 0
         private var tex2DPosLoc = 0
@@ -1018,6 +1118,15 @@ class VideoExportEngine(private val context: Context) {
         private var tex2DVignetteSoftnessLoc = 0
         private var tex2DSharpenLoc = 0
         private var tex2DTexelSizeLoc = 0
+        private var tex2DMaskCountLoc = 0
+        private var tex2DMaskTypeLoc = 0
+        private var tex2DMaskInvertedLoc = 0
+        private var tex2DMaskCombineLoc = 0
+        private var tex2DMaskPosLoc = 0
+        private var tex2DMaskHalfSizeLoc = 0
+        private var tex2DMaskRotLoc = 0
+        private var tex2DMaskFeatherLoc = 0
+        private var tex2DMaskOpacityLoc = 0
 
         private var solidProgram = 0
         private var solidPosLoc = 0
@@ -1164,6 +1273,77 @@ class VideoExportEngine(private val context: Context) {
                 uniform vec2 uTexelSize;
                 uniform float uAlpha;
 
+                // Mask uniforms
+                uniform int uMaskCount;
+                uniform int uMaskType[4];
+                uniform int uMaskInverted[4];
+                uniform int uMaskCombine[4];
+                uniform vec2 uMaskPos[4];
+                uniform vec2 uMaskHalfSize[4];
+                uniform float uMaskRot[4];
+                uniform float uMaskFeather[4];
+                uniform float uMaskOpacity[4];
+
+                float evaluateMasks(vec2 uv) {
+                    if (uMaskCount <= 0) return 1.0;
+                    float accum = 0.0;
+                    for (int i = 0; i < 4; i++) {
+                        if (i >= uMaskCount) break;
+                        int mType = uMaskType[i];
+                        if (mType <= 0) continue;
+
+                        vec2 dUv = uv - uMaskPos[i];
+                        float rot = -uMaskRot[i];
+                        float cR = cos(rot);
+                        float sR = sin(rot);
+                        vec2 p = vec2(dUv.x * cR - dUv.y * sR, dUv.x * sR + dUv.y * cR);
+
+                        vec2 hSize = max(uMaskHalfSize[i], vec2(0.001));
+                        float f = max(uMaskFeather[i] * 0.35, 0.002);
+                        float a = 1.0;
+
+                        if (mType == 1) { // Rectangle
+                            vec2 d = abs(p) - hSize;
+                            float dist = max(d.x, d.y);
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 2) { // Ellipse / Circle
+                            float dist = length(p / hSize) - 1.0;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 3) { // Linear / Split
+                            float dist = p.y;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 4) { // Radial
+                            float r = max(hSize.x, 0.001);
+                            float dist = length(p) - r;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else { // Star / Heart fallback
+                            float dist = length(p / hSize) - 1.0;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        }
+
+                        if (uMaskInverted[i] == 1) {
+                            a = 1.0 - a;
+                        }
+                        a = clamp(a * uMaskOpacity[i], 0.0, 1.0);
+
+                        if (i == 0) {
+                            accum = a;
+                        } else {
+                            int mode = uMaskCombine[i];
+                            if (mode == 0) {
+                                accum = clamp(accum + a, 0.0, 1.0);
+                            } else if (mode == 1) {
+                                accum = accum * a;
+                            } else if (mode == 2) {
+                                accum = clamp(accum * (1.0 - a), 0.0, 1.0);
+                            } else if (mode == 3) {
+                                accum = abs(accum - a);
+                            }
+                        }
+                    }
+                    return accum;
+                }
+
                 void main() {
                     vec4 col;
                     if (uSharpen > 0.0) {
@@ -1185,7 +1365,8 @@ class VideoExportEngine(private val context: Context) {
                         float vig = smoothstep(uVignetteRadius, uVignetteRadius - max(uVignetteSoftness, 0.001), dist);
                         col.rgb = mix(col.rgb, col.rgb * vig, uVignette);
                     }
-                    gl_FragColor = vec4(col.rgb, col.a * uAlpha);
+                    float maskAlpha = evaluateMasks(vTextureCoord);
+                    gl_FragColor = vec4(col.rgb, col.a * uAlpha * maskAlpha);
                 }
             """.trimIndent()
 
@@ -1203,6 +1384,15 @@ class VideoExportEngine(private val context: Context) {
             oesSharpenLoc = GLES20.glGetUniformLocation(oesProgram, "uSharpen")
             oesTexelSizeLoc = GLES20.glGetUniformLocation(oesProgram, "uTexelSize")
             oesAlphaLoc = GLES20.glGetUniformLocation(oesProgram, "uAlpha")
+            oesMaskCountLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskCount")
+            oesMaskTypeLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskType")
+            oesMaskInvertedLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskInverted")
+            oesMaskCombineLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskCombine")
+            oesMaskPosLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskPos")
+            oesMaskHalfSizeLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskHalfSize")
+            oesMaskRotLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskRot")
+            oesMaskFeatherLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskFeather")
+            oesMaskOpacityLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskOpacity")
 
             // 2. Texture2D Program
             val tex2DVS = """
@@ -1231,6 +1421,77 @@ class VideoExportEngine(private val context: Context) {
                 uniform float uSharpen;
                 uniform vec2 uTexelSize;
 
+                // Mask uniforms
+                uniform int uMaskCount;
+                uniform int uMaskType[4];
+                uniform int uMaskInverted[4];
+                uniform int uMaskCombine[4];
+                uniform vec2 uMaskPos[4];
+                uniform vec2 uMaskHalfSize[4];
+                uniform float uMaskRot[4];
+                uniform float uMaskFeather[4];
+                uniform float uMaskOpacity[4];
+
+                float evaluateMasks(vec2 uv) {
+                    if (uMaskCount <= 0) return 1.0;
+                    float accum = 0.0;
+                    for (int i = 0; i < 4; i++) {
+                        if (i >= uMaskCount) break;
+                        int mType = uMaskType[i];
+                        if (mType <= 0) continue;
+
+                        vec2 dUv = uv - uMaskPos[i];
+                        float rot = -uMaskRot[i];
+                        float cR = cos(rot);
+                        float sR = sin(rot);
+                        vec2 p = vec2(dUv.x * cR - dUv.y * sR, dUv.x * sR + dUv.y * cR);
+
+                        vec2 hSize = max(uMaskHalfSize[i], vec2(0.001));
+                        float f = max(uMaskFeather[i] * 0.35, 0.002);
+                        float a = 1.0;
+
+                        if (mType == 1) { // Rectangle
+                            vec2 d = abs(p) - hSize;
+                            float dist = max(d.x, d.y);
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 2) { // Ellipse / Circle
+                            float dist = length(p / hSize) - 1.0;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 3) { // Linear / Split
+                            float dist = p.y;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 4) { // Radial
+                            float r = max(hSize.x, 0.001);
+                            float dist = length(p) - r;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else { // Star / Heart fallback
+                            float dist = length(p / hSize) - 1.0;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        }
+
+                        if (uMaskInverted[i] == 1) {
+                            a = 1.0 - a;
+                        }
+                        a = clamp(a * uMaskOpacity[i], 0.0, 1.0);
+
+                        if (i == 0) {
+                            accum = a;
+                        } else {
+                            int mode = uMaskCombine[i];
+                            if (mode == 0) {
+                                accum = clamp(accum + a, 0.0, 1.0);
+                            } else if (mode == 1) {
+                                accum = accum * a;
+                            } else if (mode == 2) {
+                                accum = clamp(accum * (1.0 - a), 0.0, 1.0);
+                            } else if (mode == 3) {
+                                accum = abs(accum - a);
+                            }
+                        }
+                    }
+                    return accum;
+                }
+
                 void main() {
                     vec4 col;
                     if (uSharpen > 0.0) {
@@ -1252,7 +1513,8 @@ class VideoExportEngine(private val context: Context) {
                         float vig = smoothstep(uVignetteRadius, uVignetteRadius - max(uVignetteSoftness, 0.001), dist);
                         col.rgb = mix(col.rgb, col.rgb * vig, uVignette);
                     }
-                    gl_FragColor = vec4(col.rgb, col.a * uAlpha);
+                    float maskAlpha = evaluateMasks(vTextureCoord);
+                    gl_FragColor = vec4(col.rgb, col.a * uAlpha * maskAlpha);
                 }
             """.trimIndent()
 
@@ -1270,6 +1532,15 @@ class VideoExportEngine(private val context: Context) {
             tex2DVignetteSoftnessLoc = GLES20.glGetUniformLocation(tex2DProgram, "uVignetteSoftness")
             tex2DSharpenLoc = GLES20.glGetUniformLocation(tex2DProgram, "uSharpen")
             tex2DTexelSizeLoc = GLES20.glGetUniformLocation(tex2DProgram, "uTexelSize")
+            tex2DMaskCountLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskCount")
+            tex2DMaskTypeLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskType")
+            tex2DMaskInvertedLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskInverted")
+            tex2DMaskCombineLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskCombine")
+            tex2DMaskPosLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskPos")
+            tex2DMaskHalfSizeLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskHalfSize")
+            tex2DMaskRotLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskRot")
+            tex2DMaskFeatherLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskFeather")
+            tex2DMaskOpacityLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskOpacity")
 
             // 3. Solid Color Program
             val solidVS = """
@@ -1490,6 +1761,76 @@ class VideoExportEngine(private val context: Context) {
             }
         }
 
+        private fun bindMaskUniforms(
+            maskCountLoc: Int,
+            maskTypeLoc: Int,
+            maskInvertedLoc: Int,
+            maskCombineLoc: Int,
+            maskPosLoc: Int,
+            maskHalfSizeLoc: Int,
+            maskRotLoc: Int,
+            maskFeatherLoc: Int,
+            maskOpacityLoc: Int,
+            masks: List<ExportMaskDefinition>?
+        ) {
+            val activeMasks = masks?.filter { it.enabled && it.type != "none" }?.take(4) ?: emptyList()
+            val count = activeMasks.size
+            if (maskCountLoc >= 0) {
+                GLES20.glUniform1i(maskCountLoc, count)
+            }
+            if (count == 0) return
+
+            val types = IntArray(4)
+            val inverted = IntArray(4)
+            val combine = IntArray(4)
+            val pos = FloatArray(8)
+            val halfSize = FloatArray(8)
+            val rot = FloatArray(4)
+            val feather = FloatArray(4)
+            val opacity = FloatArray(4)
+
+            for (i in 0 until count) {
+                val m = activeMasks[i]
+                types[i] = when (m.type.lowercase()) {
+                    "rectangle", "rect" -> 1
+                    "ellipse", "circle" -> 2
+                    "linear", "split" -> 3
+                    "radial" -> 4
+                    "star" -> 5
+                    "heart" -> 6
+                    else -> 1
+                }
+                inverted[i] = if (m.inverted) 1 else 0
+                combine[i] = when (m.combineMode.lowercase()) {
+                    "add" -> 0
+                    "intersect" -> 1
+                    "subtract" -> 2
+                    "xor" -> 3
+                    else -> 0
+                }
+                pos[i * 2] = m.positionX.toFloat()
+                pos[i * 2 + 1] = m.positionY.toFloat()
+
+                val effHalfW = ((m.width * m.scale + m.expansion) / 2.0).coerceAtLeast(0.001).toFloat()
+                val effHalfH = ((m.height * m.scale + m.expansion) / 2.0).coerceAtLeast(0.001).toFloat()
+                halfSize[i * 2] = effHalfW
+                halfSize[i * 2 + 1] = effHalfH
+
+                rot[i] = (m.rotation * Math.PI / 180.0).toFloat()
+                feather[i] = m.feather.coerceIn(0.0, 1.0).toFloat()
+                opacity[i] = m.opacity.coerceIn(0.0, 1.0).toFloat()
+            }
+
+            if (maskTypeLoc >= 0) GLES20.glUniform1iv(maskTypeLoc, 4, types, 0)
+            if (maskInvertedLoc >= 0) GLES20.glUniform1iv(maskInvertedLoc, 4, inverted, 0)
+            if (maskCombineLoc >= 0) GLES20.glUniform1iv(maskCombineLoc, 4, combine, 0)
+            if (maskPosLoc >= 0) GLES20.glUniform2fv(maskPosLoc, 4, pos, 0)
+            if (maskHalfSizeLoc >= 0) GLES20.glUniform2fv(maskHalfSizeLoc, 4, halfSize, 0)
+            if (maskRotLoc >= 0) GLES20.glUniform1fv(maskRotLoc, 4, rot, 0)
+            if (maskFeatherLoc >= 0) GLES20.glUniform1fv(maskFeatherLoc, 4, feather, 0)
+            if (maskOpacityLoc >= 0) GLES20.glUniform1fv(maskOpacityLoc, 4, opacity, 0)
+        }
+
         fun renderOESTexture(
             textureId: Int,
             mvpMatrix: FloatArray,
@@ -1503,7 +1844,8 @@ class VideoExportEngine(private val context: Context) {
             vignetteSoftness: Float = 0.5f,
             sharpen: Float = 0f,
             texW: Float = width.toFloat(),
-            texH: Float = height.toFloat()
+            texH: Float = height.toFloat(),
+            masks: List<ExportMaskDefinition>? = null
         ) {
             GLES20.glUseProgram(oesProgram)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -1533,6 +1875,19 @@ class VideoExportEngine(private val context: Context) {
                 GLES20.glUniform2f(oesTexelSizeLoc, 1.0f / max(texW, 1.0f), 1.0f / max(texH, 1.0f))
             }
 
+            bindMaskUniforms(
+                oesMaskCountLoc,
+                oesMaskTypeLoc,
+                oesMaskInvertedLoc,
+                oesMaskCombineLoc,
+                oesMaskPosLoc,
+                oesMaskHalfSizeLoc,
+                oesMaskRotLoc,
+                oesMaskFeatherLoc,
+                oesMaskOpacityLoc,
+                masks
+            )
+
             quadBuffer.position(0)
             GLES20.glVertexAttribPointer(oesPosLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, quadBuffer)
             GLES20.glEnableVertexAttribArray(oesPosLoc)
@@ -1558,7 +1913,8 @@ class VideoExportEngine(private val context: Context) {
             vignetteSoftness: Float = 0.5f,
             sharpen: Float = 0f,
             texW: Float = width.toFloat(),
-            texH: Float = height.toFloat()
+            texH: Float = height.toFloat(),
+            masks: List<ExportMaskDefinition>? = null
         ) {
             GLES20.glUseProgram(tex2DProgram)
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -1587,6 +1943,19 @@ class VideoExportEngine(private val context: Context) {
                 GLES20.glUniform1f(tex2DSharpenLoc, sharpen)
                 GLES20.glUniform2f(tex2DTexelSizeLoc, 1.0f / max(texW, 1.0f), 1.0f / max(texH, 1.0f))
             }
+
+            bindMaskUniforms(
+                tex2DMaskCountLoc,
+                tex2DMaskTypeLoc,
+                tex2DMaskInvertedLoc,
+                tex2DMaskCombineLoc,
+                tex2DMaskPosLoc,
+                tex2DMaskHalfSizeLoc,
+                tex2DMaskRotLoc,
+                tex2DMaskFeatherLoc,
+                tex2DMaskOpacityLoc,
+                masks
+            )
 
             quadBuffer.position(0)
             GLES20.glVertexAttribPointer(tex2DPosLoc, 2, GLES20.GL_FLOAT, false, 4 * 4, quadBuffer)
@@ -1649,7 +2018,8 @@ class VideoExportEngine(private val context: Context) {
             vignette: Float = 0f,
             vignetteRadius: Float = 0.8f,
             vignetteSoftness: Float = 0.5f,
-            sharpen: Float = 0f
+            sharpen: Float = 0f,
+            masks: List<ExportMaskDefinition>? = null
         ) {
             val halfW = (baseW * scale) / 2.0f
             val halfH = (baseH * scale) / 2.0f
@@ -1706,7 +2076,8 @@ class VideoExportEngine(private val context: Context) {
                 vignetteSoftness = vignetteSoftness,
                 sharpen = sharpen,
                 texW = baseW * scale,
-                texH = baseH * scale
+                texH = baseH * scale,
+                masks = masks
             )
             GLES20.glDisable(GLES20.GL_BLEND)
         }
@@ -2380,7 +2751,10 @@ class VideoExportEngine(private val context: Context) {
                 )
             }
 
-            if (evalOpacity < 1.0f) {
+            val evaluatedMasks = clip.masks.map { it.evaluateAt(localTimeSec) }
+            val hasActiveMask = evaluatedMasks.any { it.enabled && it.type != "none" }
+
+            if (evalOpacity < 1.0f || hasActiveMask) {
                 GLES20.glEnable(GLES20.GL_BLEND)
                 GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             }
@@ -2399,7 +2773,8 @@ class VideoExportEngine(private val context: Context) {
                     vignetteSoftness = effVignetteSoftness,
                     sharpen = effSharpness,
                     texW = contentW.toFloat(),
-                    texH = contentH.toFloat()
+                    texH = contentH.toFloat(),
+                    masks = evaluatedMasks
                 )
             } else if (isPhoto && path != null && photoTextures.containsKey(path)) {
                 val tex = photoTextures[path] ?: 0
@@ -2415,13 +2790,14 @@ class VideoExportEngine(private val context: Context) {
                     vignetteSoftness = effVignetteSoftness,
                     sharpen = effSharpness,
                     texW = contentW.toFloat(),
-                    texH = contentH.toFloat()
+                    texH = contentH.toFloat(),
+                    masks = evaluatedMasks
                 )
             } else {
                 inputSurface.renderSolidColor(clip.color, mvpMatrix, inputSurface.fullQuadBuffer)
             }
 
-            if (evalOpacity < 1.0f) {
+            if (evalOpacity < 1.0f || hasActiveMask) {
                 GLES20.glDisable(GLES20.GL_BLEND)
             }
             totalRenderNs += (System.nanoTime() - renderStart)
@@ -2724,7 +3100,8 @@ class VideoExportEngine(private val context: Context) {
                                     colorMatrix = pipColorMatrix,
                                     colorOffset = pipColorOffset,
                                     vignette = kfVignette,
-                                    sharpen = kfSharpness
+                                    sharpen = kfSharpness,
+                                    masks = pip.masks.map { it.evaluateAt(pipSec) }
                                 )
                             }
                         }

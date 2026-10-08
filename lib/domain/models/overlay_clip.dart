@@ -329,7 +329,10 @@ class OverlayClip {
   final IconData previewIcon;
   final List<VideoKeyframe> keyframes;
   final KeyframeTrackGroup? keyframeTracks;
-  final VideoMask? mask;
+  final List<VideoMask> _masks;
+  final VideoMask? _legacyMask;
+  List<VideoMask> get masks => _masks.isNotEmpty ? _masks : (_legacyMask != null ? [_legacyMask!] : const []);
+  VideoMask? get mask => _legacyMask ?? (_masks.isNotEmpty ? _masks.first : null);
   final BlendMode blendMode;
 
   // Real Media Asset linkage
@@ -412,7 +415,8 @@ class OverlayClip {
     this.previewIcon = Icons.layers_rounded,
     this.keyframes = const [],
     this.keyframeTracks,
-    this.mask,
+    VideoMask? mask,
+    List<VideoMask> masks = const [],
     this.blendMode = BlendMode.srcOver,
     this.assetId,
     this.localPath,
@@ -451,7 +455,8 @@ class OverlayClip {
     this.chromaSpill = 0.15,
     this.audioEffects = const PipAudioEffects(),
     this.splitScreenPreset,
-  });
+  }) : _legacyMask = mask,
+       _masks = masks;
 
   /// Authoritative keyframe track group (falls back to legacy keyframes if not explicitly set)
   KeyframeTrackGroup get effectiveKeyframeTracks =>
@@ -562,6 +567,7 @@ class OverlayClip {
     IconData? previewIcon,
     List<VideoKeyframe>? keyframes,
     KeyframeTrackGroup? keyframeTracks,
+    List<VideoMask>? masks,
     VideoMask? mask,
     bool clearMask = false,
     BlendMode? blendMode,
@@ -632,7 +638,7 @@ class OverlayClip {
       previewIcon: previewIcon ?? this.previewIcon,
       keyframes: effectiveKfs,
       keyframeTracks: effectiveTracks,
-      mask: clearMask ? null : (mask ?? this.mask),
+      masks: clearMask ? const <VideoMask>[] : (masks ?? (mask != null ? [mask] : this.masks)),
       blendMode: blendMode ?? this.blendMode,
       assetId: assetId ?? this.assetId,
       localPath: localPath ?? this.localPath,
@@ -689,6 +695,7 @@ class OverlayClip {
       'flipVertical': flipVertical,
       if (keyframes.isNotEmpty) 'keyframes': keyframes.map((k) => k.toJson()).toList(),
       if (keyframeTracks != null && keyframeTracks!.isNotEmpty) 'keyframeTracks': keyframeTracks!.toJson(),
+      if (masks.isNotEmpty) 'masks': masks.map((m) => m.toJson()).toList(),
       if (mask != null) 'mask': mask!.toJson(),
       'blendMode': blendMode.index,
       if (assetId != null) 'assetId': assetId,
@@ -766,6 +773,15 @@ class OverlayClip {
       parsedTracks = KeyframeTrackGroup.fromVideoKeyframes(parsedKeyframes);
     }
 
+    List<VideoMask> parsedMasks = const [];
+    if (json['masks'] is List) {
+      parsedMasks = (json['masks'] as List<dynamic>)
+          .map((m) => VideoMask.fromJson(m as Map<String, dynamic>))
+          .toList();
+    } else if (json['mask'] != null) {
+      parsedMasks = [VideoMask.fromJson(json['mask'] as Map<String, dynamic>)];
+    }
+
     return OverlayClip(
       id: json['id'] as String,
       title: json['title'] as String? ?? 'Overlay',
@@ -784,7 +800,7 @@ class OverlayClip {
       flipVertical: json['flipVertical'] as bool? ?? false,
       keyframes: parsedKeyframes,
       keyframeTracks: parsedTracks,
-      mask: json['mask'] != null ? VideoMask.fromJson(json['mask'] as Map<String, dynamic>) : null,
+      masks: parsedMasks,
       blendMode: json['blendMode'] != null
           ? BlendMode.values[(json['blendMode'] as num).toInt().clamp(0, BlendMode.values.length - 1)]
           : BlendMode.srcOver,
