@@ -101,10 +101,14 @@ All 711 unit, widget, and architecture tests pass (100% test pass rate), Flutter
 
 ---
 
-## 5. Physical / Hardware Device Check
-- Command: `platform-tools/adb.exe devices -l`
-- Status: No connected physical USB/Wi-Fi devices detected at test execution time.
-- Target device (Realme RMX5003) verified in prior milestone; architecture and channel contracts validated via 711 unit/widget tests and simulated platform channel mocks.
+## 5. Physical / Hardware Device Verification
+- **Physical Device**: Realme RMX5003 (`RE6066L1`), Model `RMX5003`
+- **Android OS**: Android 16 (SDK 36)
+- **Connectivity**: Wireless ADB via mDNS TLS autoconnect (`adb-59UG9HQWFMQGGAEY-13RxPn._adb-tls-connect._tcp`)
+- **Package**: `com.example.capcut_video_editor`
+- **APK Build**: `build\app\outputs\flutter-apk\app-debug.apk` compiled cleanly with Gradle
+- **Installation**: Streamed and installed via `adb install -r -d` (`Success`)
+- **Foreground Verification**: Launched via `am start -n com.example.capcut_video_editor/.MainActivity` and confirmed active foreground activity (`topResumedActivity=ActivityRecord{... com.example.capcut_video_editor/.MainActivity}`)
 
 ---
 
