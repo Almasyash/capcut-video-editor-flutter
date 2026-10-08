@@ -36,15 +36,19 @@ class ProjectStorageService {
     }
 
     String basePath;
-    try {
-      final nativeFilesDir = await _platform.invokeMethod<String>('getAppFilesDir');
-      if (nativeFilesDir != null && nativeFilesDir.trim().isNotEmpty) {
-        basePath = nativeFilesDir;
-      } else {
+    if (Platform.environment.containsKey('FLUTTER_TEST')) {
+      basePath = Directory.systemTemp.path;
+    } else {
+      try {
+        final nativeFilesDir = await _platform.invokeMethod<String>('getAppFilesDir');
+        if (nativeFilesDir != null && nativeFilesDir.trim().isNotEmpty) {
+          basePath = nativeFilesDir;
+        } else {
+          basePath = Directory.systemTemp.path;
+        }
+      } catch (_) {
         basePath = Directory.systemTemp.path;
       }
-    } catch (_) {
-      basePath = Directory.systemTemp.path;
     }
 
     final projectsDir = Directory('$basePath/projects');

@@ -671,5 +671,81 @@ void main() {
       expect(dupKeyframes.length, equals(origCount));
       expect(dupKeyframes.first.id, isNot(equals(viewModel.videoClips[0].effectiveKeyframeTracks.tracks[AnimatableProperty.scale]!.keyframes.first.id)));
     });
+
+    test('updateEasingForTransformProperties synchronizes scale, pos, rot, opacity smoothly', () {
+      var group = const KeyframeTrackGroup().addTransformKeyframe(
+        timeMs: 1000,
+        posX: 10.0,
+        posY: 20.0,
+        scale: 1.5,
+        rotation: 45.0,
+        opacity: 0.8,
+        easing: EasingCurve.linear,
+      );
+
+      // Verify all tracks initially have linear easing
+      for (final prop in const [
+        AnimatableProperty.scale,
+        AnimatableProperty.positionX,
+        AnimatableProperty.positionY,
+        AnimatableProperty.rotation,
+        AnimatableProperty.opacity,
+      ]) {
+        expect(group.tracks[prop]!.getKeyframeAt(1000)!.easing.mode, equals(InterpolationMode.linear));
+      }
+
+      // Sync easeInOut curve across all transforms
+      group = group.updateEasingForTransformProperties(1000, EasingCurve.easeInOut);
+
+      for (final prop in const [
+        AnimatableProperty.scale,
+        AnimatableProperty.positionX,
+        AnimatableProperty.positionY,
+        AnimatableProperty.rotation,
+        AnimatableProperty.opacity,
+      ]) {
+        expect(group.tracks[prop]!.getKeyframeAt(1000)!.easing.mode, equals(InterpolationMode.easeInOut));
+      }
+    });
+
+    test('getKeyframeAtOrBefore correctly resolves segment-governing keyframe', () {
+      var track = const KeyframeTrack(property: AnimatableProperty.scale);
+      track = track.addOrUpdate(1000, 1.0);
+      track = track.addOrUpdate(3000, 2.0);
+
+      // Direct match
+      expect(track.getKeyframeAtOrBefore(1000)!.timestampMs, equals(1000));
+      // In-between at 2.0s -> resolves to preceding keyframe at 1.0s
+      expect(track.getKeyframeAtOrBefore(2000)!.timestampMs, equals(1000));
+      // In-between at 3.5s -> resolves to preceding keyframe at 3.0s
+      expect(track.getKeyframeAtOrBefore(3500)!.timestampMs, equals(3000));
+    });
+
+    test('Cubic Bezier bisection fallback converges on flat and steep tangents', () {
+      // Steep curve
+      const steepCurve = EasingCurve(
+        mode: InterpolationMode.cubicBezier,
+        x1: 0.0,
+        y1: 1.0,
+        x2: 0.0,
+        y2: 1.0,
+      );
+      expect(steepCurve.solve(0.0), closeTo(0.0, 1e-4));
+      expect(steepCurve.solve(0.5), isA<double>());
+      expect(steepCurve.solve(1.0), closeTo(1.0, 1e-4));
+
+      // Overshoot curve (anticipation / bounce)
+      const overshootCurve = EasingCurve(
+        mode: InterpolationMode.cubicBezier,
+        x1: 0.68,
+        y1: -0.55,
+        x2: 0.265,
+        y2: 1.55,
+      );
+      // At t=0.1, it should overshoot negatively below 0.0
+      expect(overshootCurve.solve(0.1), lessThan(0.0));
+      // At t=0.9, it should overshoot positively above 1.0
+      expect(overshootCurve.solve(0.9), greaterThan(1.0));
+    });
   });
 }

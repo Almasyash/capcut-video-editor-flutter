@@ -20,7 +20,11 @@ class ExportSettings {
   double estimatedSizeMb(double durationSeconds) {
     // Base ~1.2 MB per second for 1080p 30fps
     const baseMbPerSec = 1.1;
-    final fpsMult = (fps == ExportFps.fps60 ? 1.5 : (fps == ExportFps.fps50 ? 1.3 : 1.0));
+    final fpsMult = (fps == ExportFps.fps60
+        ? 1.5
+        : (fps == ExportFps.fps50
+            ? 1.3
+            : (fps == ExportFps.fps20 ? 0.7 : 1.0)));
     return (durationSeconds * baseMbPerSec * resolution.sizeMultiplier * fpsMult);
   }
 

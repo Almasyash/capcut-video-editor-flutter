@@ -124,10 +124,13 @@ class _MotionGraphSheetState extends State<MotionGraphSheet> {
     }
   }
 
+  bool _syncTransformTracks = true;
+
   MotionKeyframe? _getSelectedKeyframe(KeyframeTrack? track) {
     if (track == null || track.isEmpty) return null;
     final relTimeMs = (_getLayerRelativePlayheadSec() * 1000).round();
-    return track.getKeyframeAt(relTimeMs, toleranceMs: 120);
+    // Segment resolution: direct match under playhead or preceding keyframe governing the segment
+    return track.getKeyframeAtOrBefore(relTimeMs);
   }
 
   @override
@@ -174,26 +177,38 @@ class _MotionGraphSheetState extends State<MotionGraphSheet> {
                     borderRadius: BorderRadius.circular(AppDimensions.radiusMd),
                     child: Container(
                       color: const Color(0xFF0D0D0E),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapDown: (details) {
-                          // Tap-to-seek relative to graph width
-                          final box = context.findRenderObject() as RenderBox?;
-                          final renderWidth = box?.size.width ?? 300.0;
-                          final ratio = (details.localPosition.dx / renderWidth).clamp(0.0, 1.0);
-                          final targetRelSec = ratio * layerDuration;
-                          _seekToLayerRelativeTime(targetRelSec);
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final canvasWidth = constraints.maxWidth;
+                          return GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapDown: (details) {
+                              final tapX = details.localPosition.dx.clamp(0.0, canvasWidth);
+                              final ratio = (tapX / math.max(1.0, canvasWidth)).clamp(0.0, 1.0);
+                              var targetRelSec = ratio * layerDuration;
+
+                              // Proximity snap to keyframe diamonds (within 24 logical pixels)
+                              for (final kf in track.keyframes) {
+                                final kfX = (kf.timeInSeconds / layerDuration) * canvasWidth;
+                                if ((details.localPosition.dx - kfX).abs() <= 24.0) {
+                                  targetRelSec = kf.timeInSeconds;
+                                  break;
+                                }
+                              }
+                              _seekToLayerRelativeTime(targetRelSec);
+                            },
+                            child: CustomPaint(
+                              painter: _MotionGraphPainter(
+                                track: track,
+                                durationSec: layerDuration,
+                                playheadSec: relPlayheadSec,
+                                selectedKeyframe: selectedKf,
+                                property: _selectedProperty,
+                              ),
+                              child: const SizedBox.expand(),
+                            ),
+                          );
                         },
-                        child: CustomPaint(
-                          painter: _MotionGraphPainter(
-                            track: track,
-                            durationSec: layerDuration,
-                            playheadSec: relPlayheadSec,
-                            selectedKeyframe: selectedKf,
-                            property: _selectedProperty,
-                          ),
-                          child: const SizedBox.expand(),
-                        ),
                       ),
                     ),
                   ),
@@ -369,6 +384,39 @@ class _MotionGraphSheetState extends State<MotionGraphSheet> {
                 ),
               ),
               const Spacer(),
+              if (_selectedProperty.isTransform) ...[
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _syncTransformTracks = !_syncTransformTracks;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _syncTransformTracks ? Icons.link_rounded : Icons.link_off_rounded,
+                          size: 13,
+                          color: _syncTransformTracks ? const Color(0xFFFFD600) : Colors.white38,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _syncTransformTracks ? 'Sync Transforms' : 'Single Track',
+                          style: TextStyle(
+                            color: _syncTransformTracks ? const Color(0xFFFFD600) : Colors.white38,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
               if (selectedKf != null)
                 Text(
                   '${(selectedKf.timestampMs / 1000.0).toStringAsFixed(2)}s: ${selectedKf.value.toStringAsFixed(2)}',
@@ -400,6 +448,7 @@ class _MotionGraphSheetState extends State<MotionGraphSheet> {
                             _selectedProperty,
                             selectedKf.timestampMs,
                             newCurve,
+                            syncAllTransformProperties: _syncTransformTracks,
                           );
                           TtsService.announce(modeItem.$2);
                         }
@@ -590,8 +639,9 @@ class _MotionGraphPainter extends CustomPainter {
     }
 
     double valueToY(double val) {
-      final norm = ((val - minVal) / (maxVal - minVal)).clamp(0.0, 1.0);
-      return size.height - (norm * (size.height - 24) + 12);
+      final norm = (val - minVal) / (maxVal - minVal);
+      final rawY = size.height - (norm * (size.height - 24) + 12);
+      return rawY.clamp(4.0, size.height - 4.0);
     }
 
     double timeToX(double tSec) {
