@@ -25,11 +25,13 @@ class TimelineRuler extends StatelessWidget {
       height: AppDimensions.timelineRulerHeight,
       width: totalWidth,
       color: AppColors.timelineRulerBg,
-      child: CustomPaint(
-        size: Size(totalWidth, AppDimensions.timelineRulerHeight),
-        painter: _TimelineRulerPainter(
-          totalDuration: effectiveDuration,
-          pixelsPerSecond: pixelsPerSecond,
+      child: RepaintBoundary(
+        child: CustomPaint(
+          size: Size(totalWidth, AppDimensions.timelineRulerHeight),
+          painter: _TimelineRulerPainter(
+            totalDuration: effectiveDuration,
+            pixelsPerSecond: pixelsPerSecond,
+          ),
         ),
       ),
     );

@@ -285,7 +285,18 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  double _playheadPosition = 0.0; // In seconds
+  final ValueNotifier<double> playheadNotifier = ValueNotifier<double>(0.0);
+  final ValueNotifier<EditorCategory?> drawerNotifier = ValueNotifier<EditorCategory?>(null);
+
+  double _rawPlayheadPosition = 0.0; // In seconds
+  double get _playheadPosition => _rawPlayheadPosition;
+  set _playheadPosition(double val) {
+    _rawPlayheadPosition = val;
+    if (playheadNotifier.value != val) {
+      playheadNotifier.value = val;
+    }
+  }
+
   bool _isPlaying = false;
   bool _isLooping = false; // Default non-looping playback for video editor
   Timer? _playbackTimer;
@@ -1108,11 +1119,13 @@ class EditorViewModel extends ChangeNotifier {
 
   void openDrawer(EditorCategory category) {
     _activeDrawer = category;
+    drawerNotifier.value = category;
     notifyListeners();
   }
 
   void closeDrawer() {
     _activeDrawer = null;
+    drawerNotifier.value = null;
     notifyListeners();
   }
 
@@ -5238,6 +5251,8 @@ class EditorViewModel extends ChangeNotifier {
     }
     VideoPlaybackService.instance.disposeAll();
     saveCurrentProject();
+    playheadNotifier.dispose();
+    drawerNotifier.dispose();
     super.dispose();
   }
   // --- Transitions Management ---
@@ -6584,4 +6599,3 @@ class ActiveTransitionState {
     required this.sourceTimeB,
   });
 }
-

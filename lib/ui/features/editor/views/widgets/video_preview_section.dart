@@ -507,20 +507,23 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
           fit: StackFit.expand,
           children: [
             // 1. Primary Video Canvas with Transformations, Filters & Adjustments
-            if (activeTransition != null)
-              _buildTransitionCanvas(activeTransition, filter, adjustments)
-            else if (activeClip != null)
-              _buildMainVideoCanvas(activeClip, filter, adjustments)
-            else
-              _buildEmptyMediaPlaceholder(filter, adjustments),
+            RepaintBoundary(
+              child: activeTransition != null
+                  ? _buildTransitionCanvas(activeTransition, filter, adjustments)
+                  : (activeClip != null
+                      ? _buildMainVideoCanvas(activeClip, filter, adjustments)
+                      : _buildEmptyMediaPlaceholder(filter, adjustments)),
+            ),
 
             // 2. Visual Effects Overlay (Glitch, VHS, RGB, Sparkle, ZoomBlur, Shake, FilmGrain)
             if (viewModel.activeEffect.type != VideoEffectType.none)
               Positioned.fill(
-                child: VideoEffectOverlayWidget(
-                  effect: viewModel.activeEffect,
-                  currentTime: viewModel.currentTimeInSeconds,
-                  isPlaying: viewModel.isPlaying,
+                child: RepaintBoundary(
+                  child: VideoEffectOverlayWidget(
+                    effect: viewModel.activeEffect,
+                    currentTime: viewModel.currentTimeInSeconds,
+                    isPlaying: viewModel.isPlaying,
+                  ),
                 ),
               ),
 
@@ -677,9 +680,14 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        TimeFormatter.formatSeconds(viewModel.playheadPosition),
-                        style: AppTypography.timecodeLarge,
+                      ValueListenableBuilder<double>(
+                        valueListenable: viewModel.playheadNotifier,
+                        builder: (context, pos, _) {
+                          return Text(
+                            TimeFormatter.formatSeconds(pos),
+                            style: AppTypography.timecodeLarge,
+                          );
+                        },
                       ),
                       const Text(' / ', style: TextStyle(color: AppColors.textMuted, fontSize: 11)),
                       Text(
