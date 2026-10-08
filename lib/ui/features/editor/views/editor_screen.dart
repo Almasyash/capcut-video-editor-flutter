@@ -281,24 +281,32 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
                       return Column(
                         children: [
                           // 1. Top Navigation Bar
-                          TopNavigationBar(viewModel: _viewModel),
+                          RepaintBoundary(
+                            child: TopNavigationBar(viewModel: _viewModel),
+                          ),
 
                           // 2. Video Preview Screen at top (Flexible/Responsive)
                           Expanded(
                             flex: 5,
-                            child: VideoPreviewSection(
-                              key: const ValueKey('mobile_video_preview'),
-                              viewModel: _viewModel,
+                            child: RepaintBoundary(
+                              child: VideoPreviewSection(
+                                key: const ValueKey('mobile_video_preview'),
+                                viewModel: _viewModel,
+                              ),
                             ),
                           ),
 
                           // 3. Action Toolbar in between (Split, Trim, Delete, Export)
-                          ActionToolbar(viewModel: _viewModel),
+                          RepaintBoundary(
+                            child: ActionToolbar(viewModel: _viewModel),
+                          ),
 
                           // 4. Timeline Track at bottom (Scrollable tracks, ruler, playhead)
                           Expanded(
                             flex: 4,
-                            child: TimelineSection(viewModel: _viewModel),
+                            child: RepaintBoundary(
+                              child: TimelineSection(viewModel: _viewModel),
+                            ),
                           ),
 
                           // 5. Signature Bottom Category Selector or Active Drawer Panel
@@ -331,7 +339,9 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
                     return Column(
                       children: [
                         // 1. Top Navigation Bar
-                        TopNavigationBar(viewModel: _viewModel),
+                        RepaintBoundary(
+                          child: TopNavigationBar(viewModel: _viewModel),
+                        ),
 
                         // 2. Middle Row: Left Panel (Media Assets) + Center Viewport + Right Panel (Tools Inspector)
                         Expanded(
@@ -340,29 +350,39 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               // Left Panel: Project Media Library
-                              DesktopAssetsPanel(viewModel: _viewModel),
+                              RepaintBoundary(
+                                child: DesktopAssetsPanel(viewModel: _viewModel),
+                              ),
 
                               // Center Panel: Video Viewport Canvas
                               Expanded(
-                                child: VideoPreviewSection(
-                                  key: const ValueKey('desktop_video_preview'),
-                                  viewModel: _viewModel,
+                                child: RepaintBoundary(
+                                  child: VideoPreviewSection(
+                                    key: const ValueKey('desktop_video_preview'),
+                                    viewModel: _viewModel,
+                                  ),
                                 ),
                               ),
 
                               // Right Panel: Tools & Category Drawers Inspector
-                              DesktopToolsPanel(viewModel: _viewModel),
+                              RepaintBoundary(
+                                child: DesktopToolsPanel(viewModel: _viewModel),
+                              ),
                             ],
                           ),
                         ),
 
                         // 3. Action Toolbar
-                        ActionToolbar(viewModel: _viewModel),
+                        RepaintBoundary(
+                          child: ActionToolbar(viewModel: _viewModel),
+                        ),
 
                         // 4. Bottom Timeline Track
                         Expanded(
                           flex: 4,
-                          child: TimelineSection(viewModel: _viewModel),
+                          child: RepaintBoundary(
+                            child: TimelineSection(viewModel: _viewModel),
+                          ),
                         ),
                       ],
                     );

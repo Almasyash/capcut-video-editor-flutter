@@ -116,6 +116,8 @@ class _TimelineSectionState extends State<TimelineSection> {
   }
 
   double _lastSyncedPlayhead = -1.0;
+  int? _lastSelectedClipIndex;
+  bool _lastIsPlaying = false;
 
   void _onViewModelChanged() {
     if (!mounted) return;
@@ -138,22 +140,32 @@ class _TimelineSectionState extends State<TimelineSection> {
     // 2. Auto-scroll vertically when a new layer is created
     _checkAndAutoScrollToNewLayer(vm);
 
-    setState(() {});
+    final playingChanged = vm.isPlaying != _lastIsPlaying;
+    final clipChanged = vm.selectedClipIndex != _lastSelectedClipIndex;
+    _lastIsPlaying = vm.isPlaying;
+    _lastSelectedClipIndex = vm.selectedClipIndex;
 
-    // 3. Post-frame verification to ensure timeline and ruler accurately reflect restored layout bounds
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!_isUserScrollingHorizontal && _horizontalScrollController.hasClients) {
-        if (_horizontalScrollController.position.hasContentDimensions) {
-          final targetScroll = widget.viewModel.playheadPosition * widget.viewModel.pixelsPerSecond;
-          final clamped = targetScroll.clamp(0.0, _horizontalScrollController.position.maxScrollExtent);
-          if ((_horizontalScrollController.offset - clamped).abs() > 0.5) {
-            _horizontalScrollController.jumpTo(clamped);
+    // During continuous playback, horizontal scrolling is driven directly by the scroll
+    // controller and timecode is driven by playheadNotifier. Avoid re-executing full widget tree
+    // rebuilds and post-frame layout callbacks on every frame tick to guarantee 120Hz fluid rendering.
+    if (!vm.isPlaying || playingChanged || clipChanged) {
+      setState(() {});
+
+      // 3. Post-frame verification to ensure timeline and ruler accurately reflect layout bounds
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_isUserScrollingHorizontal && _horizontalScrollController.hasClients) {
+          if (_horizontalScrollController.position.hasContentDimensions) {
+            final targetScroll = widget.viewModel.playheadPosition * widget.viewModel.pixelsPerSecond;
+            final clamped = targetScroll.clamp(0.0, _horizontalScrollController.position.maxScrollExtent);
+            if ((_horizontalScrollController.offset - clamped).abs() > 0.5) {
+              _horizontalScrollController.jumpTo(clamped);
+            }
           }
         }
-      }
-      _syncRulerScroll();
-    });
+        _syncRulerScroll();
+      });
+    }
   }
 
   void _checkAndAutoScrollToNewLayer(EditorViewModel vm) {
@@ -326,9 +338,11 @@ class _TimelineSectionState extends State<TimelineSection> {
                       physics: const NeverScrollableScrollPhysics(),
                       child: Padding(
                         padding: EdgeInsets.symmetric(horizontal: halfCanvasWidth),
-                        child: TimelineRuler(
-                          totalDurationSeconds: totalDuration,
-                          pixelsPerSecond: viewModel.pixelsPerSecond,
+                        child: RepaintBoundary(
+                          child: TimelineRuler(
+                            totalDurationSeconds: totalDuration,
+                            pixelsPerSecond: viewModel.pixelsPerSecond,
+                          ),
                         ),
                       ),
                     ),
@@ -536,14 +550,19 @@ class _TimelineSectionState extends State<TimelineSection> {
                 borderRadius: BorderRadius.circular(4),
                 border: Border.all(color: AppColors.divider, width: 0.6),
               ),
-              child: Text(
-                TimelineCoordinateSystem.formatFrameTimecode(viewModel.playheadPosition, fps: 30, showFpsBadge: true),
-                style: const TextStyle(
-                  fontSize: 9.5,
-                  fontFamily: 'monospace',
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primary,
-                ),
+              child: ValueListenableBuilder<double>(
+                valueListenable: viewModel.playheadNotifier,
+                builder: (context, playhead, _) {
+                  return Text(
+                    TimelineCoordinateSystem.formatFrameTimecode(playhead, fps: 30, showFpsBadge: true),
+                    style: const TextStyle(
+                      fontSize: 9.5,
+                      fontFamily: 'monospace',
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.primary,
+                    ),
+                  );
+                },
               ),
             ),
             const SizedBox(width: 6),
@@ -1278,45 +1297,47 @@ class _TimelineSectionState extends State<TimelineSection> {
                   final isSelected = viewModel.selectedClipIndex == idx;
                   final asset = viewModel.getAssetById(clip.assetId);
 
-                  return TimelineClipItem(
-                    key: ValueKey(clip.id),
-                    clip: clip,
-                    localPath: asset?.localPath,
-                    thumbnailPath: asset?.thumbnailPath,
-                    isPhoto: asset?.isPhoto ?? false,
-                    index: idx,
-                    isSelected: isSelected,
-                    pixelsPerSecond: viewModel.pixelsPerSecond,
-                    clipStartTime: clipStart,
-                    currentPlayheadTime: viewModel.currentTimeInSeconds,
-                    onKeyframeTap: (kf) {
-                      if (viewModel.isPlaying) viewModel.pause();
-                      final targetTime = (clipStart + kf.timeInSeconds).clamp(0.0, viewModel.totalDurationInSeconds);
-                      viewModel.seekTo(targetTime);
-                      if (_horizontalScrollController.hasClients) {
-                        _horizontalScrollController.jumpTo(
-                          (targetTime * viewModel.pixelsPerSecond)
-                              .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                        );
-                      }
-                    },
-                    onTap: () => viewModel.selectClip(idx),
-                    onTapDown: (details) {
-                      if (viewModel.isPlaying) viewModel.pause();
-                      viewModel.selectClip(idx);
-                      final offsetInClip = details.localPosition.dx / viewModel.pixelsPerSecond;
-                      final targetTime = (clipStart + offsetInClip).clamp(0.0, viewModel.totalDurationInSeconds);
-                      viewModel.seekTo(targetTime);
-                      if (_horizontalScrollController.hasClients) {
-                        _horizontalScrollController.jumpTo(
-                          (targetTime * viewModel.pixelsPerSecond)
-                              .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
-                        );
-                      }
-                    },
-                    onTrimChanged: (newStart, newEnd) {
-                      viewModel.updateClipTrim(idx, newStart, newEnd);
-                    },
+                  return RepaintBoundary(
+                    child: TimelineClipItem(
+                      key: ValueKey(clip.id),
+                      clip: clip,
+                      localPath: asset?.localPath,
+                      thumbnailPath: asset?.thumbnailPath,
+                      isPhoto: asset?.isPhoto ?? false,
+                      index: idx,
+                      isSelected: isSelected,
+                      pixelsPerSecond: viewModel.pixelsPerSecond,
+                      clipStartTime: clipStart,
+                      currentPlayheadTime: viewModel.currentTimeInSeconds,
+                      onKeyframeTap: (kf) {
+                        if (viewModel.isPlaying) viewModel.pause();
+                        final targetTime = (clipStart + kf.timeInSeconds).clamp(0.0, viewModel.totalDurationInSeconds);
+                        viewModel.seekTo(targetTime);
+                        if (_horizontalScrollController.hasClients) {
+                          _horizontalScrollController.jumpTo(
+                            (targetTime * viewModel.pixelsPerSecond)
+                                .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+                          );
+                        }
+                      },
+                      onTap: () => viewModel.selectClip(idx),
+                      onTapDown: (details) {
+                        if (viewModel.isPlaying) viewModel.pause();
+                        viewModel.selectClip(idx);
+                        final offsetInClip = details.localPosition.dx / viewModel.pixelsPerSecond;
+                        final targetTime = (clipStart + offsetInClip).clamp(0.0, viewModel.totalDurationInSeconds);
+                        viewModel.seekTo(targetTime);
+                        if (_horizontalScrollController.hasClients) {
+                          _horizontalScrollController.jumpTo(
+                            (targetTime * viewModel.pixelsPerSecond)
+                                .clamp(0.0, _horizontalScrollController.position.maxScrollExtent),
+                          );
+                        }
+                      },
+                      onTrimChanged: (newStart, newEnd) {
+                        viewModel.updateClipTrim(idx, newStart, newEnd);
+                      },
+                    ),
                   );
                 },
               ),
@@ -1492,15 +1513,17 @@ class _TimelineSectionState extends State<TimelineSection> {
                 top: 2,
                 bottom: 2,
                 width: width,
-                child: TimelineOverlayTrackItem(
-                  key: ValueKey(overlay.id),
-                  overlay: overlay,
-                  overlayIndex: idx,
-                  isSelected: isSelected,
-                  width: width,
-                  startOffset: startOffset,
-                  viewModel: viewModel,
-                  scrollController: _horizontalScrollController,
+                child: RepaintBoundary(
+                  child: TimelineOverlayTrackItem(
+                    key: ValueKey(overlay.id),
+                    overlay: overlay,
+                    overlayIndex: idx,
+                    isSelected: isSelected,
+                    width: width,
+                    startOffset: startOffset,
+                    viewModel: viewModel,
+                    scrollController: _horizontalScrollController,
+                  ),
                 ),
               ),
             ],
@@ -1596,14 +1619,16 @@ class _TimelineSectionState extends State<TimelineSection> {
                 top: 2,
                 bottom: 2,
                 width: width,
-                child: TimelineTextTrackItem(
-                  key: ValueKey(text.id),
-                  text: text,
-                  isSelected: isSelected,
-                  width: width,
-                  startOffset: startOffset,
-                  viewModel: viewModel,
-                  scrollController: _horizontalScrollController,
+                child: RepaintBoundary(
+                  child: TimelineTextTrackItem(
+                    key: ValueKey(text.id),
+                    text: text,
+                    isSelected: isSelected,
+                    width: width,
+                    startOffset: startOffset,
+                    viewModel: viewModel,
+                    scrollController: _horizontalScrollController,
+                  ),
                 ),
               ),
             ],
@@ -1750,11 +1775,13 @@ class _TimelineSectionState extends State<TimelineSection> {
       mainAxisSize: MainAxisSize.min,
       children: [
         ...viewModel.audioTracks.map((track) {
-          return AudioTrackItem(
-            key: ValueKey(track.id),
-            audioTrack: track,
-            pixelsPerSecond: viewModel.pixelsPerSecond,
-            viewModel: viewModel,
+          return RepaintBoundary(
+            child: AudioTrackItem(
+              key: ValueKey(track.id),
+              audioTrack: track,
+              pixelsPerSecond: viewModel.pixelsPerSecond,
+              viewModel: viewModel,
+            ),
           );
         }),
 
@@ -1854,7 +1881,8 @@ class _TimelineSectionState extends State<TimelineSection> {
       top: 0,
       bottom: 0,
       width: 20,
-      child: GestureDetector(
+      child: RepaintBoundary(
+        child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onHorizontalDragStart: (details) {
           if (widget.viewModel.isPlaying) widget.viewModel.pause();
@@ -1918,6 +1946,7 @@ class _TimelineSectionState extends State<TimelineSection> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

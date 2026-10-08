@@ -41,8 +41,9 @@ class AudioTrackItem extends StatelessWidget {
       playheadProgress = activeSec > 0 ? ((currentPlayhead - trackStartSec) / activeSec).clamp(0.0, 1.0) : 0.0;
     }
 
-    return Opacity(
-      opacity: audioTrack.isVisible ? 1.0 : 0.45,
+    return RepaintBoundary(
+      child: Opacity(
+        opacity: audioTrack.isVisible ? 1.0 : 0.45,
       child: Container(
         margin: EdgeInsets.only(left: startOffset, top: 4.0, bottom: 4.0),
         width: trackWidth,
@@ -236,8 +237,9 @@ class AudioTrackItem extends StatelessWidget {
         ),
       ),
     ),
-  );
-  }
+  ),
+);
+}
 
   Widget _buildTrimHandle({required bool isLeft, required ValueChanged<double> onDrag}) {
     return GestureDetector(
@@ -270,6 +272,8 @@ class AudioTrackItem extends StatelessWidget {
 }
 
 class _WaveformPainter extends CustomPainter {
+  static final Map<int, List<double>> _resampledCache = {};
+
   final List<double> points;
   final Duration trimStart;
   final Duration trimEnd;
@@ -332,18 +336,33 @@ class _WaveformPainter extends CustomPainter {
     final barCount = (size.width / barStep).floor();
     if (barCount <= 0) return;
 
-    // 3. Sliced & Zoom-Adaptive Resampling
-    final effectivePoints = points.isEmpty
-        ? AudioWaveformService.instance.generateOrganicWaveform(seedKey: 'fallback_${size.width.toInt()}')
-        : points;
-
-    final resampled = AudioWaveformService.instance.resampleSlicedWaveform(
-      fullWaveform: effectivePoints,
-      trimStart: trimStart,
-      trimEnd: trimEnd,
-      totalDuration: totalDuration,
-      barCount: barCount,
+    // 3. Sliced & Zoom-Adaptive Resampling (Memoized for 120Hz high-frequency redraws)
+    final cacheKey = Object.hash(
+      points.isNotEmpty ? points.first : 0.0,
+      points.length,
+      trimStart.inMilliseconds,
+      trimEnd.inMilliseconds,
+      totalDuration.inMilliseconds,
+      barCount,
     );
+    List<double>? resampled = _resampledCache[cacheKey];
+    if (resampled == null) {
+      final effectivePoints = points.isEmpty
+          ? AudioWaveformService.instance.generateOrganicWaveform(seedKey: 'fallback_${size.width.toInt()}')
+          : points;
+
+      resampled = AudioWaveformService.instance.resampleSlicedWaveform(
+        fullWaveform: effectivePoints,
+        trimStart: trimStart,
+        trimEnd: trimEnd,
+        totalDuration: totalDuration,
+        barCount: barCount,
+      );
+      if (_resampledCache.length > 64) {
+        _resampledCache.clear();
+      }
+      _resampledCache[cacheKey] = resampled;
+    }
 
     // 4. Dual-State Paint Setup
     final activePaint = Paint()
