@@ -4,6 +4,33 @@ All notable changes to **Editor FS** are documented in this file.
 
 ---
 
+## [1.3.0] - 2026-10-08
+
+### 🌟 Professional Color Grading, RGB Curves, 3D LUTs & 60fps Video Effects Suite
+- **12 Comprehensive Color Grading Adjustments**: Exposure, Brightness, Contrast, Saturation, Temperature, Tint, Highlights, Shadows, Blacks, Whites, Vignette, and Sharpness.
+- **Interactive RGB Curves**: 4 spline channels (Master/Red/Green/Blue), interactive 2D canvas control point editing, and piecewise-linear spline evaluation.
+- **3D & 1D Adobe .cube LUT Parser**: Built-in production LUT presets (`Teal & Orange`, `Cyberpunk Glow`, `Warm Film 35mm`, `Bleach Bypass`, `Monochrome Noir`, `Vintage 70s`) with trilinear interpolation.
+- **12 Professional Filter Presets**: 0% – 100% matrix intensity blending with hardware-synchronized OpenGL ES fragment shader uniforms.
+- **60fps Animated Video Effects Engine**: Dedicated GPU-accelerated painters for `Glitch Art`, `VHS Camcorder` (retro OSD timecode & tracking), `RGB Split`, `Zoom Blur`, `Sparkles`, `Camera Shake`, and `35mm Film Grain`.
+- **Hardware-Accelerated Export Engine**: Native Android OpenGL ES 2.0 fragment shader color grading and MediaCodec hardware MP4 export pipeline with zero external FFmpeg dependencies.
+- **Neutral Safeguard & Performance**: Guaranteed zero-allocation pass-through on default parameters; isolated overlay rendering without text/UI distortion; debounced auto-save and `PopScope` navigation protection.
+- **Quality & Assurance**: 656/656 passing tests, 0 analyzer issues, verified on physical hardware (Realme RMX5003).
+
+---
+
+## [1.2.0] - 2026-10-07
+
+### 🌟 Professional Multi-Track Audio Editing & Sound Production Suite
+- **Multi-Track PCM Audio Mixer**: Native Android `MediaExtractor` + `MediaCodec` + `MediaMuxer` pipeline decoding and mixing multi-layer audio into 16-bit 44.1 kHz stereo PCM.
+- **Volume & Boost Engine**: Non-destructive volume scaling from 0% to 200% across primary video clips, audio tracks, and PIP video overlays with TTS accessibility announcements.
+- **Non-Destructive Mute & Solo**: Instant muting without timeline disruption.
+- **Fade In & Fade Out Envelopes**: Proportional linear volume ramps with waveform visual shading and dynamic duration clamping against trimmed clip bounds.
+- **Playhead Audio Split & Extract**: Frame-accurate split-at-playhead and one-tap video-to-audio extraction with automatic source video muting.
+- **RAM-Safe Waveform Generation**: Chunked 512 KB streaming analysis preventing Android heap exhaustion on large audio files.
+- **Quality & Assurance**: 638/638 passing tests, 0 analyzer issues.
+
+---
+
 ## [1.1.0] - 2026-09-24
 
 ### 🌟 Speed Curves, Keyframes, PIP, Chroma Key, Audio Beats & Captions Suite
