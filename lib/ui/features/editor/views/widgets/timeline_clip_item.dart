@@ -403,6 +403,68 @@ if([T2]::E("${path.replaceAll(r'\', r'\\')}","${thumbPath.replaceAll(r'\', r'\\'
                         ),
                       ),
 
+                    // Freeze Frame Badge
+                    if (widget.clip.freezeFrame != null || widget.clip.isFrozen)
+                      Positioned(
+                        bottom: 4,
+                        left: widget.isSelected ? AppDimensions.trimHandleWidth + 4 : 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00CEC9),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.ac_unit_rounded, size: 9, color: Colors.black),
+                              const SizedBox(width: 2),
+                              Text(
+                                widget.clip.freezeFrame != null
+                                    ? 'Freeze ${(widget.clip.freezeFrame!.duration.inMilliseconds / 1000).toStringAsFixed(1)}s'
+                                    : 'Frozen',
+                                style: const TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    // Reverse Badge
+                    if (widget.clip.isReversed)
+                      Positioned(
+                        top: 4,
+                        right: (widget.clip.isLocked
+                            ? (widget.isSelected ? AppDimensions.trimHandleWidth + 24 : 26)
+                            : (widget.isSelected ? AppDimensions.trimHandleWidth + 4 : 6)),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.deepOrangeAccent,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.fast_rewind_rounded, size: 9, color: Colors.white),
+                              SizedBox(width: 2),
+                              Text(
+                                'REV',
+                                style: TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
                     // Media Offline indicator
                     if (isMissingMedia)
                       Positioned(

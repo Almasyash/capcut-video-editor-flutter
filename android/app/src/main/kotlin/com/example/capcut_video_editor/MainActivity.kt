@@ -1313,7 +1313,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 sharpness = (map["sharpness"] as? Number)?.toDouble() ?: 0.0,
                 filterId = map["filterId"] as? String,
                 filterIntensity = (map["filterIntensity"] as? Number)?.toDouble() ?: 1.0,
-                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
+                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>),
+                speedCurve = SpeedRemapParser.parseSpeedCurve(map["speedCurve"] as? Map<String, Any>),
+                freezeFrame = SpeedRemapParser.parseFreezeFrame(map["freezeFrame"] as? Map<String, Any>),
+                isFrozen = map["isFrozen"] as? Boolean ?: false,
+                isReversed = map["isReversed"] as? Boolean ?: false
             )
         }
 
@@ -1429,7 +1433,11 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 glowColor = (map["glowColor"] as? Number)?.toInt() ?: 0,
                 glowRadius = (map["glowRadius"] as? Number)?.toDouble() ?: 12.0,
                 glowIntensity = (map["glowIntensity"] as? Number)?.toDouble() ?: 0.7,
-                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
+                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>),
+                speedCurve = SpeedRemapParser.parseSpeedCurve(map["speedCurve"] as? Map<String, Any>),
+                freezeFrame = SpeedRemapParser.parseFreezeFrame(map["freezeFrame"] as? Map<String, Any>),
+                isFrozen = map["isFrozen"] as? Boolean ?: false,
+                isReversed = map["isReversed"] as? Boolean ?: false
             )
         }
 

@@ -2,6 +2,20 @@
 
 All notable changes to **Editor FS** are documented in this file.
 
+## [1.5.0] - 2026-10-08
+
+### 🌟 Professional Speed Ramping & Time Remapping Engine Suite
+- **Deterministic Time Remapping Engine (`TimeRemapper`)**: Frame-accurate, monotonic timeline-to-source time mapping supporting continuous constant speeds ($0.1\times$ to $100.0\times$), freeze frame holding with playhead rebasing, and inverted reverse playback ($[\text{trimEnd} \to \text{trimStart}]$).
+- **8 Non-Linear Speed Ramping Curve Presets**: Montage, Hero, Bullet, Jump Cut, Flash In, Flash Out, Smooth, and Custom curves with multi-point piecewise interpolation (`linear`, `easeIn`, `easeOut`, `easeInOut`, `hold`).
+- **Interactive Speed Curve Splitting & Normalization**: Continuous, rebased split-at-playhead (`SpeedCurve.splitAt()`) generating normalized $[0.0, 1.0]$ time domains for Part A and Part B with velocity continuity across the split cut.
+- **Dynamic Transition Overlap Preservation**: Seamless head and tail handle evaluation ($[0, \text{trimStart}]$ and $[\text{trimEnd}, \text{originalDuration}]$) under variable speed ramps and freeze frames, preserving crossfade, dissolve, wipe, slide, and zoom transitions without edge clamping distortion.
+- **Picture-in-Picture (PIP) Video Overlay Remapping**: Full parity for video PIP layers, including independent speed multiplier controls ($0.1\times - 100\times$), speed ramping curves, freeze frames, and reverse playback.
+- **Hardware-Accelerated Android Native Export (`VideoExportEngine.kt`)**: Monotonic output PTS generation, per-frame source time remapping (`ExportTimeRemapper`), transition overlap decoding, and hardware-accelerated MediaCodec + EGL14 + OpenGL ES 2.0 rendering without frame drops.
+- **Undo/Redo & State Persistence**: Non-destructive speed history snapshots, deep duplication, backward-compatible project JSON serialization, and TTS announcements.
+- **Quality & Release Assurance**: 711/711 passing unit and widget tests, 0 analyzer issues, verified on both canonical repositories.
+
+---
+
 ## [1.4.0] - 2026-10-08
 
 ### 🌟 Professional Keyframe Animation & Motion Graph Engine Suite

@@ -27,6 +27,7 @@ import 'package:capcut_video_editor/core/utils/chroma_key_helper.dart';
 import 'package:capcut_video_editor/core/utils/font_helper.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/drawers/text_drawer.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/media_picker_sheet.dart';
+import 'package:capcut_video_editor/domain/models/speed_curve.dart';
 
 /// Top Video Preview Screen containing the live video canvas, aspect-ratio viewport,
 /// color grading LUT filters, adjustments, Picture-in-Picture (PIP) layers,
@@ -154,10 +155,24 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       final path = overlay.localPath!;
       final session = _pipSessions[overlay.id];
       final deltaSec = widget.viewModel.playheadPosition - overlay.startTimeInSeconds;
-      final rawOffsetSec = deltaSec * overlay.speed;
-      final maxDurSec = overlay.durationInSeconds * overlay.speed;
-      final clampedSec = rawOffsetSec.clamp(0.0, math.max(0.0, maxDurSec));
-      final targetMs = (clampedSec * 1000).round();
+      final overlayDurMs = (overlay.durationInSeconds * 1000).round();
+      final sourceDur = TimeRemapper.timelineToSourceTime(
+        timelineOffset: Duration(milliseconds: (deltaSec * 1000).round()),
+        trimStart: Duration.zero,
+        trimEnd: Duration(milliseconds: overlayDurMs),
+        originalDuration: Duration(milliseconds: overlayDurMs),
+        speedCurve: overlay.speedCurve,
+        constantSpeed: overlay.speed,
+        freezeFrame: overlay.freezeFrame,
+        isFrozen: overlay.isFrozen,
+        isReversed: overlay.isReversed,
+      );
+      final targetMs = sourceDur.inMilliseconds;
+      final currentOverlaySpeed = overlay.speedCurve != null
+          ? overlay.speedCurve!.evaluateSpeedAt(
+              (deltaSec / math.max(0.001, overlay.durationInSeconds)).clamp(0.0, 1.0),
+            )
+          : overlay.speed;
 
       if (session == null) {
         if (!_loadingPipIds.contains(overlay.id) && !kIsWeb && File(path).existsSync()) {
@@ -170,7 +185,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
               });
               final effVol = overlay.isMuted ? 0.0 : (overlay.volume / 2.0).clamp(0.0, 1.0);
               VideoPlaybackService.instance.setVolume(newSession.textureId, effVol);
-              VideoPlaybackService.instance.setSpeed(newSession.textureId, overlay.speed);
+              VideoPlaybackService.instance.setSpeed(newSession.textureId, currentOverlaySpeed);
               if (widget.viewModel.isPlaying) {
                 VideoPlaybackService.instance.play(newSession.textureId, position: Duration(milliseconds: targetMs));
                 _pipPlayingState[overlay.id] = true;
@@ -189,7 +204,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       // Sync live volume and speed
       final effVol = overlay.isMuted ? 0.0 : (overlay.volume / 2.0).clamp(0.0, 1.0);
       VideoPlaybackService.instance.setVolume(session.textureId, effVol);
-      VideoPlaybackService.instance.setSpeed(session.textureId, overlay.speed);
+      VideoPlaybackService.instance.setSpeed(session.textureId, currentOverlaySpeed);
 
       final isPipPlaying = _pipPlayingState[overlay.id] ?? false;
       if (widget.viewModel.isPlaying && !isPipPlaying) {
@@ -229,13 +244,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       activeClip is VideoClip ? activeClip.durationInSeconds : 1000.0,
     );
     final sourceOffsetSec = (activeClip is VideoClip)
-        ? (activeClip.speedCurve != null
-            ? (activeClip.trimStart.inMilliseconds / 1000.0) +
-                ((activeClip.trimEnd - activeClip.trimStart).inMilliseconds / 1000.0) *
-                    activeClip.speedCurve!.getSourceProgressAt(
-                      (deltaInClipSec / math.max(0.001, activeClip.durationInSeconds)).clamp(0.0, 1.0),
-                    )
-            : (activeClip.trimStart.inMilliseconds / 1000.0) + (deltaInClipSec * activeClip.speed))
+        ? EditorViewModel.timelineToSourceTime(activeClip, widget.viewModel.playheadPosition, activeClipStart)
         : deltaInClipSec;
     final sourceOffsetMs = (sourceOffsetSec * 1000).round();
 
