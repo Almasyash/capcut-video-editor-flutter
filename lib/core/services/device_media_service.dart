@@ -314,6 +314,9 @@ class DeviceMediaService {
 
     int targetFps = 30;
     switch (settings.fps) {
+      case ExportFps.fps20:
+        targetFps = 20;
+        break;
       case ExportFps.fps24:
         targetFps = 24;
         break;
@@ -579,11 +582,27 @@ class DeviceMediaService {
       });
     }
 
+    final maxDim = math.max(targetWidth, targetHeight);
+    final int targetBitrate;
+    if (maxDim >= 3840) {
+      // 4K (3840x2160)
+      targetBitrate = (targetFps >= 50) ? 42000000 : 32000000;
+    } else if (maxDim >= 2560) {
+      // 2K (2560x1440)
+      targetBitrate = (targetFps >= 50) ? 22000000 : 16000000;
+    } else if (maxDim >= 1920) {
+      // 1080p (1920x1080)
+      targetBitrate = (targetFps >= 50) ? 14000000 : 9000000;
+    } else {
+      // 720p or lower (1280x720)
+      targetBitrate = (targetFps <= 20) ? 3500000 : 5000000;
+    }
+
     final payload = {
       'width': targetWidth,
       'height': targetHeight,
       'fps': targetFps,
-      'bitrate': (settings.resolution.sizeMultiplier * 3500000).round(),
+      'bitrate': targetBitrate,
       'fileName': outputFileName ?? 'EDITOR_FS_${DateTime.now().millisecondsSinceEpoch}.mp4',
       'clips': clipsPayload,
       'transitions': transitionsPayload,
@@ -644,7 +663,7 @@ class DeviceMediaService {
         'width': targetWidth,
         'height': targetHeight,
         'fps': targetFps,
-        'bitrate': (settings.resolution.sizeMultiplier * 3500000).round(),
+        'bitrate': targetBitrate,
         'codec': 'H.264 / AVC',
       };
     }

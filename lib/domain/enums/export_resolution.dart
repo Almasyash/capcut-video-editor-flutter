@@ -13,6 +13,7 @@ enum ExportResolution {
 }
 
 enum ExportFps {
+  fps20('20 fps', 'Power Saving'),
   fps24('24 fps', 'Cinematic'),
   fps30('30 fps', 'Standard'),
   fps50('50 fps', 'Smooth'),
@@ -25,6 +26,8 @@ enum ExportFps {
 
   int get fpsNumber {
     switch (this) {
+      case ExportFps.fps20:
+        return 20;
       case ExportFps.fps24:
         return 24;
       case ExportFps.fps30:

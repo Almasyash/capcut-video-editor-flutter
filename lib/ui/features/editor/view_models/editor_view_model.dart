@@ -5986,66 +5986,112 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   /// Updates easing curve for all keyframes at target timestamp on selected layer
-  void updateKeyframeEasing(AnimatableProperty property, int timeMs, EasingCurve easing) {
+  void updateKeyframeEasing(
+    AnimatableProperty property,
+    int timeMs,
+    EasingCurve easing, {
+    bool syncAllTransformProperties = true,
+  }) {
     _saveSnapshot();
+    final shouldSync = syncAllTransformProperties && property.isTransform;
+
     if (_selectedClipIndex != null) {
       final clip = _videoClips[_selectedClipIndex!];
-      final currentTrack = clip.effectiveKeyframeTracks.tracks[property];
-      if (currentTrack != null) {
-        final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
-        if (kf != null) {
-          final updatedGroup = clip.effectiveKeyframeTracks.addKeyframe(
-            property,
-            kf.timestampMs,
-            kf.value,
-            easing: easing,
-          );
-          _videoClips[_selectedClipIndex!] = clip.copyWith(
-            keyframeTracks: updatedGroup,
-            keyframes: updatedGroup.toVideoKeyframes(),
-          );
+      KeyframeTrackGroup updatedGroup;
+      if (shouldSync) {
+        updatedGroup = clip.effectiveKeyframeTracks.updateEasingForTransformProperties(
+          timeMs,
+          easing,
+          toleranceMs: 80,
+        );
+      } else {
+        final currentTrack = clip.effectiveKeyframeTracks.tracks[property];
+        if (currentTrack != null) {
+          final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
+          if (kf != null) {
+            updatedGroup = clip.effectiveKeyframeTracks.addKeyframe(
+              property,
+              kf.timestampMs,
+              kf.value,
+              easing: easing,
+            );
+          } else {
+            updatedGroup = clip.effectiveKeyframeTracks;
+          }
+        } else {
+          updatedGroup = clip.effectiveKeyframeTracks;
         }
       }
+      _videoClips[_selectedClipIndex!] = clip.copyWith(
+        keyframeTracks: updatedGroup,
+        keyframes: updatedGroup.toVideoKeyframes(),
+      );
     } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
       final overlay = _overlayClips[_selectedOverlayIndex!];
-      final currentTrack = overlay.effectiveKeyframeTracks.tracks[property];
-      if (currentTrack != null) {
-        final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
-        if (kf != null) {
-          final updatedGroup = overlay.effectiveKeyframeTracks.addKeyframe(
-            property,
-            kf.timestampMs,
-            kf.value,
-            easing: easing,
-          );
-          _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
-            keyframeTracks: updatedGroup,
-            keyframes: updatedGroup.toVideoKeyframes(),
-          );
+      KeyframeTrackGroup updatedGroup;
+      if (shouldSync) {
+        updatedGroup = overlay.effectiveKeyframeTracks.updateEasingForTransformProperties(
+          timeMs,
+          easing,
+          toleranceMs: 80,
+        );
+      } else {
+        final currentTrack = overlay.effectiveKeyframeTracks.tracks[property];
+        if (currentTrack != null) {
+          final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
+          if (kf != null) {
+            updatedGroup = overlay.effectiveKeyframeTracks.addKeyframe(
+              property,
+              kf.timestampMs,
+              kf.value,
+              easing: easing,
+            );
+          } else {
+            updatedGroup = overlay.effectiveKeyframeTracks;
+          }
+        } else {
+          updatedGroup = overlay.effectiveKeyframeTracks;
         }
       }
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+        keyframeTracks: updatedGroup,
+        keyframes: updatedGroup.toVideoKeyframes(),
+      );
     } else if (selectedTextOverlay != null) {
       final text = selectedTextOverlay!;
-      final currentTrack = text.effectiveKeyframeTracks.tracks[property];
-      if (currentTrack != null) {
-        final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
-        if (kf != null) {
-          final updatedGroup = text.effectiveKeyframeTracks.addKeyframe(
-            property,
-            kf.timestampMs,
-            kf.value,
-            easing: easing,
-          );
-          updateTextOverlay(
-            text.copyWith(
-              keyframeTracks: updatedGroup,
-              keyframes: updatedGroup.toVideoKeyframes(),
-            ),
-            saveSnapshot: false,
-            notify: true,
-          );
+      KeyframeTrackGroup updatedGroup;
+      if (shouldSync) {
+        updatedGroup = text.effectiveKeyframeTracks.updateEasingForTransformProperties(
+          timeMs,
+          easing,
+          toleranceMs: 80,
+        );
+      } else {
+        final currentTrack = text.effectiveKeyframeTracks.tracks[property];
+        if (currentTrack != null) {
+          final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
+          if (kf != null) {
+            updatedGroup = text.effectiveKeyframeTracks.addKeyframe(
+              property,
+              kf.timestampMs,
+              kf.value,
+              easing: easing,
+            );
+          } else {
+            updatedGroup = text.effectiveKeyframeTracks;
+          }
+        } else {
+          updatedGroup = text.effectiveKeyframeTracks;
         }
       }
+      updateTextOverlay(
+        text.copyWith(
+          keyframeTracks: updatedGroup,
+          keyframes: updatedGroup.toVideoKeyframes(),
+        ),
+        saveSnapshot: false,
+        notify: true,
+      );
     } else if (selectedAudioTrack != null) {
       final audio = selectedAudioTrack!;
       final currentTrack = audio.effectiveKeyframeTracks.tracks[property];

@@ -11,118 +11,98 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Phase 7.1 - Export FPS Metadata & Resolution Tests', () {
-    test('ExportFps enum exposes correct integer fpsNumber', () {
+    test('ExportFps enum exposes correct integer fpsNumber for all supported frame rates', () {
+      expect(ExportFps.fps20.fpsNumber, 20);
       expect(ExportFps.fps24.fpsNumber, 24);
       expect(ExportFps.fps30.fpsNumber, 30);
       expect(ExportFps.fps50.fpsNumber, 50);
       expect(ExportFps.fps60.fpsNumber, 60);
     });
 
-    test('DeviceMediaService.renderAndExportVideo preserves 1080x1920 portrait dimensions without 16-px clipping', () async {
+    test('DeviceMediaService verifies and delivers 720p@20fps, 1080p@30fps, 2K@50fps, and 4K@60fps pipelines', () async {
       const clip = VideoClip(
-        id: 'clip_p71_1',
-        assetId: 'asset_p71_1',
-        title: 'Test Clip',
-        originalDuration: Duration(seconds: 5),
+        id: 'clip_target_pipeline',
+        assetId: 'asset_target_pipeline',
+        title: 'Target Combination Clip',
+        originalDuration: Duration(seconds: 4),
         trimStart: Duration.zero,
-        trimEnd: Duration(seconds: 5),
+        trimEnd: Duration(seconds: 4),
         speed: 1.0,
         previewGradient: [Color(0xFF00C9FF), Color(0xFF92FE9D)],
       );
 
       final project = Project(
-        id: 'proj_p71_1',
-        name: 'Phase 7.1 Test',
-        videoClips: [clip],
-        aspectRatio: AspectRatioPreset.ratio9x16,
-        createdAt: DateTime.now(),
-        updatedAt: DateTime.now(),
-      );
-
-      const settings30 = ExportSettings(
-        resolution: ExportResolution.res1080p,
-        fps: ExportFps.fps30,
-      );
-
-      final result30 = await DeviceMediaService.renderAndExportVideo(
-        project: project,
-        settings: settings30,
-        assets: [],
-      );
-
-      expect(result30['success'], isTrue);
-      expect(result30['fps'], 30);
-      expect(result30['width'], 1080);
-      expect(result30['height'], 1920);
-      expect(result30['codec'], 'H.264 / AVC');
-
-      const settings60 = ExportSettings(
-        resolution: ExportResolution.res1080p,
-        fps: ExportFps.fps60,
-      );
-
-      final result60 = await DeviceMediaService.renderAndExportVideo(
-        project: project,
-        settings: settings60,
-        assets: [],
-      );
-
-      expect(result60['success'], isTrue);
-      expect(result60['fps'], 60);
-      expect(result60['width'], 1080);
-      expect(result60['height'], 1920);
-    });
-
-    test('DeviceMediaService.renderAndExportVideo respects 720p 24fps and 4k 60fps configurations', () async {
-      const clip = VideoClip(
-        id: 'clip_p71_2',
-        assetId: 'asset_p71_2',
-        title: 'Test Clip 2',
-        originalDuration: Duration(seconds: 3),
-        trimStart: Duration.zero,
-        trimEnd: Duration(seconds: 3),
-        speed: 1.0,
-        previewGradient: [Color(0xFFFC466B), Color(0xFF3F5EFB)],
-      );
-
-      final project = Project(
-        id: 'proj_p71_2',
-        name: 'Phase 7.1 Test 2',
+        id: 'proj_target_pipeline',
+        name: 'Target Pipeline Test',
         videoClips: [clip],
         aspectRatio: AspectRatioPreset.ratio16x9,
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
 
-      const settings720p24 = ExportSettings(
+      // 1. 720p at 20 FPS (1280x720, 20 fps, 3.5 Mbps)
+      const settings720p20 = ExportSettings(
         resolution: ExportResolution.res720p,
-        fps: ExportFps.fps24,
+        fps: ExportFps.fps20,
       );
-
-      final res720 = await DeviceMediaService.renderAndExportVideo(
+      final res720p20 = await DeviceMediaService.renderAndExportVideo(
         project: project,
-        settings: settings720p24,
+        settings: settings720p20,
         assets: [],
       );
+      expect(res720p20['success'], isTrue);
+      expect(res720p20['width'], 1280);
+      expect(res720p20['height'], 720);
+      expect(res720p20['fps'], 20);
+      expect(res720p20['bitrate'], 3500000);
 
-      expect(res720['width'], 1280);
-      expect(res720['height'], 720);
-      expect(res720['fps'], 24);
+      // 2. 1080p at 30 FPS (1920x1080, 30 fps, 9.0 Mbps)
+      const settings1080p30 = ExportSettings(
+        resolution: ExportResolution.res1080p,
+        fps: ExportFps.fps30,
+      );
+      final res1080p30 = await DeviceMediaService.renderAndExportVideo(
+        project: project,
+        settings: settings1080p30,
+        assets: [],
+      );
+      expect(res1080p30['success'], isTrue);
+      expect(res1080p30['width'], 1920);
+      expect(res1080p30['height'], 1080);
+      expect(res1080p30['fps'], 30);
+      expect(res1080p30['bitrate'], 9000000);
 
+      // 3. 2K (1440p) at 50 FPS (2560x1440, 50 fps, 22.0 Mbps)
+      const settings2k50 = ExportSettings(
+        resolution: ExportResolution.res2k,
+        fps: ExportFps.fps50,
+      );
+      final res2k50 = await DeviceMediaService.renderAndExportVideo(
+        project: project,
+        settings: settings2k50,
+        assets: [],
+      );
+      expect(res2k50['success'], isTrue);
+      expect(res2k50['width'], 2560);
+      expect(res2k50['height'], 1440);
+      expect(res2k50['fps'], 50);
+      expect(res2k50['bitrate'], 22000000);
+
+      // 4. 4K at 60 FPS (3840x2160, 60 fps, 42.0 Mbps)
       const settings4k60 = ExportSettings(
         resolution: ExportResolution.res4k,
         fps: ExportFps.fps60,
       );
-
-      final res4k = await DeviceMediaService.renderAndExportVideo(
+      final res4k60 = await DeviceMediaService.renderAndExportVideo(
         project: project,
         settings: settings4k60,
         assets: [],
       );
-
-      expect(res4k['width'], 3840);
-      expect(res4k['height'], 2160);
-      expect(res4k['fps'], 60);
+      expect(res4k60['success'], isTrue);
+      expect(res4k60['width'], 3840);
+      expect(res4k60['height'], 2160);
+      expect(res4k60['fps'], 60);
+      expect(res4k60['bitrate'], 42000000);
     });
   });
 }

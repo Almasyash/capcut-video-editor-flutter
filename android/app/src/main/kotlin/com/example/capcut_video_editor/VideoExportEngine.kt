@@ -94,16 +94,41 @@ data class ExportKeyframeTrack(
     private fun evaluateCubicBezier(x1: Double, y1: Double, x2: Double, y2: Double, t: Double): Double {
         if (t <= 0.0) return 0.0
         if (t >= 1.0) return 1.0
+
+        // 1. Newton-Raphson iteration (fast quadratic convergence)
         var s = t
+        var converged = false
         for (i in 0 until 8) {
             val currentX = sampleCurveX(x1, x2, s) - t
-            if (Math.abs(currentX) < 1e-5) break
+            if (Math.abs(currentX) < 1e-6) {
+                converged = true
+                break
+            }
             val dx = sampleCurveDerivativeX(x1, x2, s)
-            if (Math.abs(dx) < 1e-5) break
+            if (Math.abs(dx) < 1e-6) break
             s -= currentX / dx
+            if (s < 0.0 || s > 1.0) break
+        }
+
+        // 2. Binary subdivision (bisection search) fallback for guaranteed convergence on steep/flat tangents
+        if (!converged || s < 0.0 || s > 1.0) {
+            var low = 0.0
+            var high = 1.0
+            s = t
+            for (i in 0 until 16) {
+                val currentX = sampleCurveX(x1, x2, s)
+                if (Math.abs(currentX - t) < 1e-6) break
+                if (t > currentX) {
+                    low = s
+                } else {
+                    high = s
+                }
+                s = (high + low) * 0.5
+            }
         }
         s = s.coerceIn(0.0, 1.0)
-        return sampleCurveY(y1, y2, s).coerceIn(0.0, 1.0)
+        // Allow dynamic vertical overshoot (e.g. bounce, anticipation) matching Flutter preview
+        return sampleCurveY(y1, y2, s)
     }
 
     private fun sampleCurveX(x1: Double, x2: Double, t: Double): Double =
@@ -2302,12 +2327,37 @@ class VideoExportEngine(private val context: Context) {
         val tempOutputFile = File(tempDir, "export_${System.currentTimeMillis()}.mp4")
         if (tempOutputFile.exists()) tempOutputFile.delete()
 
-        // Configure MediaCodec Encoder
+        // Configure MediaCodec Encoder with optimal profile, level, and bitrate mode
+        val maxDim = max(width, height)
         val videoFormat = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL)
+            setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+
+            // Select optimal H.264 profile & level for target resolution & FPS combinations
+            val (targetProfile, targetLevel) = when {
+                maxDim >= 3840 -> Pair(
+                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
+                    if (fps >= 50) MediaCodecInfo.CodecProfileLevel.AVCLevel52 else MediaCodecInfo.CodecProfileLevel.AVCLevel51
+                )
+                maxDim >= 2560 -> Pair(
+                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
+                    MediaCodecInfo.CodecProfileLevel.AVCLevel51
+                )
+                maxDim >= 1920 -> Pair(
+                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
+                    MediaCodecInfo.CodecProfileLevel.AVCLevel41
+                )
+                else -> Pair(
+                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
+                    MediaCodecInfo.CodecProfileLevel.AVCLevel31
+                )
+            }
+            setInteger(MediaFormat.KEY_PROFILE, targetProfile)
+            setInteger(MediaFormat.KEY_LEVEL, targetLevel)
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
                 setFloat(MediaFormat.KEY_OPERATING_RATE, Float.MAX_VALUE)
@@ -2315,7 +2365,18 @@ class VideoExportEngine(private val context: Context) {
         }
 
         val encoder = MediaCodec.createEncoderByType(MIME_TYPE)
-        encoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        try {
+            encoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        } catch (e: Exception) {
+            Log.w(TAG, "Hardware encoder rejected target profile/level, applying fallback format: ${e.message}")
+            val fallbackFormat = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
+                setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
+                setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL)
+            }
+            encoder.configure(fallbackFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        }
         val inputSurfaceRaw = encoder.createInputSurface()
         val inputSurface = CodecInputSurface(inputSurfaceRaw, width, height)
         encoder.start()
@@ -2631,8 +2692,11 @@ class VideoExportEngine(private val context: Context) {
             val s = evalScale.toFloat()
             val scaleX = (if (clip.flipHorizontal) -1f else 1f) * s
             val scaleY = (if (clip.flipVertical) -1f else 1f) * s
-            val continuousDeg = (evalRotationAngle.toFloat() * 180f / Math.PI.toFloat())
-            val totalRotationDeg = clip.rotationDegrees.toFloat() + continuousDeg
+            val totalRotationDeg = if (kfTracks.hasProperty("rotation")) {
+                kfTracks.evaluate("rotation", localTimeSec, clip.rotationDegrees.toDouble()).toFloat()
+            } else {
+                clip.rotationDegrees.toFloat() + (clip.safeRotationAngle.toFloat() * 180f / Math.PI.toFloat())
+            }
 
             val modelMatrix = inputSurface.reusableModelMatrix
             Matrix.setIdentityM(modelMatrix, 0)
@@ -3030,11 +3094,15 @@ class VideoExportEngine(private val context: Context) {
                                 val baseCenterX = (pipKfs.evaluate("positionX", pipSec, pip.x) * width).toFloat()
                                 val baseCenterY = (pipKfs.evaluate("positionY", pipSec, pip.y) * height).toFloat()
                                 val baseScale = pipKfs.evaluate("scale", pipSec, pip.scale).toFloat()
-                                val baseRotation = pipKfs.evaluate("rotation", pipSec, pip.rotation).toFloat()
+                                val baseRotationRad = if (pipKfs.hasProperty("rotation")) {
+                                    (pipKfs.evaluate("rotation", pipSec, pip.rotation * 180.0 / Math.PI) * Math.PI / 180.0).toFloat()
+                                } else {
+                                    pip.rotation.toFloat()
+                                }
                                 val baseOpacity = pipKfs.evaluate("opacity", pipSec, pip.opacity).toFloat()
 
                                 val effScale = (baseScale * animScale).coerceIn(0.05f, 10f)
-                                val effRotation = baseRotation + animRotation
+                                val effRotation = baseRotationRad + animRotation
                                 val effOpacity = (baseOpacity * animOpacity).coerceIn(0f, 1f)
                                 val effCenterX = baseCenterX + animOffsetX
                                 val effCenterY = baseCenterY + animOffsetY
@@ -3177,14 +3245,14 @@ class VideoExportEngine(private val context: Context) {
             val drainJoinStart = System.nanoTime()
             encoder.signalEndOfInputStream()
 
-            if (!drainThread.muxerStartedLatch.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+            if (!drainThread.muxerStartedLatch.await(30, java.util.concurrent.TimeUnit.SECONDS)) {
                 throw RuntimeException("Encoder drain thread never started muxer")
             }
 
-            drainThread.join(30_000L)
+            drainThread.join(120_000L)
             if (drainThread.isAlive) {
                 drainThread.isRunning = false
-                throw RuntimeException("Encoder drain timed out after 30 seconds")
+                throw RuntimeException("Encoder drain timed out after 120 seconds")
             }
             drainThread.error?.let { throw RuntimeException("Encoder drain failed: ${it.message}", it) }
             totalDrainJoinNs = System.nanoTime() - drainJoinStart

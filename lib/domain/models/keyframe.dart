@@ -72,22 +72,39 @@ class EasingCurve {
   /// Alias for evaluate to match motion physics solvers
   double solve(double t) => evaluate(t);
 
-  /// Standard Newton-Raphson cubic Bézier solver
+  /// Standard Newton-Raphson cubic Bézier solver with guaranteed binary subdivision fallback
   double _evaluateCubicBezier(double t) {
     if (t <= 0.0) return 0.0;
     if (t >= 1.0) return 1.0;
 
-    // Fast initial guess
+    // Fast initial guess with Newton-Raphson
     double s = t;
     for (int i = 0; i < 8; i++) {
       final currentX = _sampleCurveX(s) - t;
-      if (currentX.abs() < 1e-5) break;
+      if (currentX.abs() < 1e-6) {
+        return _sampleCurveY(s);
+      }
       final dx = _sampleCurveDerivativeX(s);
-      if (dx.abs() < 1e-5) break;
+      if (dx.abs() < 1e-6) break;
       s -= currentX / dx;
+      if (s < 0.0 || s > 1.0) break; // Diverged out of unit range, fallback to bisection
     }
-    s = s.clamp(0.0, 1.0);
-    return _sampleCurveY(s).clamp(0.0, 1.0);
+
+    // Binary subdivision fallback guarantees convergence for steep curves or flat tangents
+    double low = 0.0;
+    double high = 1.0;
+    s = t;
+    for (int i = 0; i < 16; i++) {
+      final currentX = _sampleCurveX(s);
+      if ((currentX - t).abs() < 1e-6) break;
+      if (t > currentX) {
+        low = s;
+      } else {
+        high = s;
+      }
+      s = (high + low) * 0.5;
+    }
+    return _sampleCurveY(s);
   }
 
   double _sampleCurveX(double t) {
@@ -497,6 +514,21 @@ class KeyframeTrack {
     return null;
   }
 
+  /// Finds keyframe at or immediately before timeMs (for segment easing evaluation)
+  MotionKeyframe? getKeyframeAtOrBefore(int timeMs, {int toleranceMs = 80}) {
+    final direct = getKeyframeAt(timeMs, toleranceMs: toleranceMs);
+    if (direct != null) return direct;
+    MotionKeyframe? best;
+    for (final k in keyframes) {
+      if (k.timestampMs <= timeMs) {
+        best = k;
+      } else {
+        break;
+      }
+    }
+    return best ?? (keyframes.isNotEmpty ? keyframes.first : null);
+  }
+
   /// Removes a keyframe by its unique ID
   KeyframeTrack removeById(String id) {
     final updated = keyframes.where((k) => k.id != id).toList();
@@ -671,6 +703,36 @@ class KeyframeTrackGroup {
     return group;
   }
 
+  /// Updates easing curve at timeMs across all active transform tracks (scale, pos, rot, opacity)
+  KeyframeTrackGroup updateEasingForTransformProperties(
+    int timeMs,
+    EasingCurve easing, {
+    int toleranceMs = 80,
+  }) {
+    final updatedTracks = Map<AnimatableProperty, KeyframeTrack>.from(tracks);
+    for (final prop in const [
+      AnimatableProperty.scale,
+      AnimatableProperty.positionX,
+      AnimatableProperty.positionY,
+      AnimatableProperty.rotation,
+      AnimatableProperty.opacity,
+    ]) {
+      final track = updatedTracks[prop];
+      if (track != null) {
+        final kf = track.getKeyframeAt(timeMs, toleranceMs: toleranceMs);
+        if (kf != null) {
+          updatedTracks[prop] = track.addOrUpdate(
+            kf.timestampMs,
+            kf.value,
+            easing: easing,
+            toleranceMs: toleranceMs,
+          );
+        }
+      }
+    }
+    return KeyframeTrackGroup(tracks: updatedTracks);
+  }
+
   /// Removes all keyframes near timeMs across all tracks
   KeyframeTrackGroup removeKeyframeAtTime(int timeMs, {int toleranceMs = 80}) {
     final updatedTracks = <AnimatableProperty, KeyframeTrack>{};
@@ -749,13 +811,29 @@ class KeyframeTrackGroup {
       final r = evaluate(AnimatableProperty.rotation, timeSec);
       final op = evaluate(AnimatableProperty.opacity, timeSec);
 
-      // Determine curve from the scale track's keyframe if present
-      final scaleTrack = tracks[AnimatableProperty.scale];
-      final kf = scaleTrack?.keyframes.firstWhere(
-        (k) => (k.timestampMs - ms).abs() <= 50,
-        orElse: () => MotionKeyframe(id: '', timestampMs: ms, value: s),
-      );
-      final curve = KeyframeCurve.fromEasingCurve(kf?.easing ?? EasingCurve.easeInOut);
+      // Determine curve from transform tracks (check scale, position, rotation, opacity)
+      MotionKeyframe? foundKf;
+      for (final prop in const [
+        AnimatableProperty.scale,
+        AnimatableProperty.positionX,
+        AnimatableProperty.positionY,
+        AnimatableProperty.rotation,
+        AnimatableProperty.opacity,
+      ]) {
+        final track = tracks[prop];
+        if (track != null) {
+          final candidate = track.getKeyframeAt(ms, toleranceMs: 50);
+          if (candidate != null) {
+            foundKf ??= candidate;
+            // If candidate has non-default or customized curve, prioritize it
+            if (candidate.easing.mode != InterpolationMode.easeInOut || candidate.easing != EasingCurve.easeInOut) {
+              foundKf = candidate;
+              break;
+            }
+          }
+        }
+      }
+      final curve = KeyframeCurve.fromEasingCurve(foundKf?.easing ?? EasingCurve.easeInOut);
 
       return VideoKeyframe(
         id: 'kf_$ms',
