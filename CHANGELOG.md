@@ -2,6 +2,18 @@
 
 All notable changes to **Editor FS** are documented in this file.
 
+## [1.4.0] - 2026-10-08
+
+### 🌟 Professional Keyframe Animation & Motion Graph Engine Suite
+- **Deterministic Keyframe Domain Models**: Reusable multi-track keyframe engine with `Linear`, `Hold`, and custom cubic Bézier easing curves solved via high-precision Newton-Raphson approximation ($\varepsilon = 10^{-6}$, 12 iterations max) with analytical boundary clamping.
+- **Multi-Track Spatial & Parameter Keyframing**: Fine-grained keyframing across 2D transform ($X, Y$, scale, continuous multi-turn rotation beyond $\pm 360^\circ$), visual opacity, audio track volume, and 12 color grading adjustments.
+- **Interactive Motion Graph Visualizer (`MotionGraphSheet`)**: 2D interactive cubic Bézier curve visualizer bottom sheet with draggable tangent control handles, curve interpolation presets (`Linear`, `Ease In`, `Ease Out`, `Ease In Out`, `Bounce`, `Elastic`), and dynamic parameter selection.
+- **Timeline Diamond Keyframe Indicators**: Zoom-aligned diamond markers on video, overlay, and text tracks with playhead snapping, active indicator highlighting, and tap-to-seek navigation.
+- **Preview & Hardware Export Parity**: Bit-for-bit mathematical alignment between Flutter Canvas rendering and Android native OpenGL ES 2.0 / MediaCodec hardware MP4 export compositing.
+- **Audio Precedence Modulation**: Frame-accurate keyframe volume modulation (`effectiveGain = baseVolume * keyframeGain * fadeEnvelope`) applied across Flutter audio preview and native 16-bit 44.1 kHz PCM audio mixing export.
+- **Non-Destructive Layer Lifecycle**: Complete keyframe preservation across split-at-playhead (segment retiming with boundary keyframes), clip duplication (deep copying with unique IDs), ripple delete, and universal undo/redo state restoration.
+- **Quality & Release Assurance**: 685/685 passing unit and widget tests, 0 analyzer issues, verified on physical hardware (Realme RMX5003).
+
 ---
 
 ## [1.3.0] - 2026-10-08

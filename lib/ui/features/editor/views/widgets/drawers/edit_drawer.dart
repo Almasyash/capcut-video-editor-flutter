@@ -10,6 +10,7 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/transition_
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/speed_adjustment_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/mask_adjustment_sheet.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/blend_mode_adjustment_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/motion_graph_sheet.dart';
 
 class EditDrawer extends StatelessWidget {
   final EditorViewModel viewModel;
@@ -191,6 +192,12 @@ class EditDrawer extends StatelessWidget {
         label: 'Keyframe',
         onTap: viewModel.toggleKeyframeAtPlayhead,
         isActive: viewModel.hasKeyframeAtPlayhead,
+        color: AppColors.primary,
+      ),
+      _buildToolButton(
+        icon: Icons.show_chart_rounded,
+        label: 'Curves',
+        onTap: () => MotionGraphSheet.show(context, viewModel),
         color: AppColors.primary,
       ),
       _buildToolButton(

@@ -1312,7 +1312,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 vignetteSoftness = (map["vignetteSoftness"] as? Number)?.toDouble() ?: 0.5,
                 sharpness = (map["sharpness"] as? Number)?.toDouble() ?: 0.0,
                 filterId = map["filterId"] as? String,
-                filterIntensity = (map["filterIntensity"] as? Number)?.toDouble() ?: 1.0
+                filterIntensity = (map["filterIntensity"] as? Number)?.toDouble() ?: 1.0,
+                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
             )
         }
 
@@ -1336,7 +1337,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 speed = (map["speed"] as? Number)?.toDouble() ?: 1.0,
                 fadeInMs = (map["fadeInMs"] as? Number)?.toLong() ?: 0L,
                 fadeOutMs = (map["fadeOutMs"] as? Number)?.toLong() ?: 0L,
-                isMuted = map["isMuted"] as? Boolean ?: false
+                isMuted = map["isMuted"] as? Boolean ?: false,
+                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
             )
         }
         val rawTexts = call.argument<List<Map<String, Any>>>("textOverlays") ?: emptyList()
@@ -1356,7 +1358,9 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 isUnderline = map["isUnderline"] as? Boolean ?: false,
                 textAlign = map["textAlign"] as? String ?: "center",
                 fontFamily = map["fontFamily"] as? String,
-                boxWidth = (map["boxWidth"] as? Number)?.toDouble()
+                boxWidth = (map["boxWidth"] as? Number)?.toDouble(),
+                scale = (map["scale"] as? Number)?.toDouble() ?: 1.0,
+                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
             )
         }
 
@@ -1424,7 +1428,8 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 glowEnabled = map["glowEnabled"] as? Boolean ?: false,
                 glowColor = (map["glowColor"] as? Number)?.toInt() ?: 0,
                 glowRadius = (map["glowRadius"] as? Number)?.toDouble() ?: 12.0,
-                glowIntensity = (map["glowIntensity"] as? Number)?.toDouble() ?: 0.7
+                glowIntensity = (map["glowIntensity"] as? Number)?.toDouble() ?: 0.7,
+                keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
             )
         }
 

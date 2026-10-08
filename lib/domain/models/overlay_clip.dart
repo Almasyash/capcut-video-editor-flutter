@@ -327,6 +327,7 @@ class OverlayClip {
   final List<Color> previewGradient;
   final IconData previewIcon;
   final List<VideoKeyframe> keyframes;
+  final KeyframeTrackGroup? keyframeTracks;
   final VideoMask? mask;
   final BlendMode blendMode;
 
@@ -405,6 +406,7 @@ class OverlayClip {
     this.previewGradient = const [Color(0xFF8A2387), Color(0xFFE94057)],
     this.previewIcon = Icons.layers_rounded,
     this.keyframes = const [],
+    this.keyframeTracks,
     this.mask,
     this.blendMode = BlendMode.srcOver,
     this.assetId,
@@ -441,6 +443,10 @@ class OverlayClip {
     this.audioEffects = const PipAudioEffects(),
     this.splitScreenPreset,
   });
+
+  /// Authoritative keyframe track group (falls back to legacy keyframes if not explicitly set)
+  KeyframeTrackGroup get effectiveKeyframeTracks =>
+      keyframeTracks ?? KeyframeTrackGroup.fromVideoKeyframes(keyframes);
 
   double get startTimeInSeconds => startTime.inMilliseconds / 1000.0;
   double get durationInSeconds => duration.inMilliseconds / 1000.0;
@@ -533,6 +539,7 @@ class OverlayClip {
     List<Color>? previewGradient,
     IconData? previewIcon,
     List<VideoKeyframe>? keyframes,
+    KeyframeTrackGroup? keyframeTracks,
     VideoMask? mask,
     bool clearMask = false,
     BlendMode? blendMode,
@@ -577,6 +584,9 @@ class OverlayClip {
     bool? isLocked,
     bool? isVisible,
   }) {
+    final effectiveKfs = keyframes ?? (keyframeTracks != null ? keyframeTracks.toVideoKeyframes() : this.keyframes);
+    final effectiveTracks = keyframeTracks ?? (keyframes != null ? KeyframeTrackGroup.fromVideoKeyframes(keyframes) : this.keyframeTracks);
+
     return OverlayClip(
       id: id ?? this.id,
       title: title ?? this.title,
@@ -592,7 +602,8 @@ class OverlayClip {
       flipVertical: flipVertical ?? this.flipVertical,
       previewGradient: previewGradient ?? this.previewGradient,
       previewIcon: previewIcon ?? this.previewIcon,
-      keyframes: keyframes ?? this.keyframes,
+      keyframes: effectiveKfs,
+      keyframeTracks: effectiveTracks,
       mask: clearMask ? null : (mask ?? this.mask),
       blendMode: blendMode ?? this.blendMode,
       assetId: assetId ?? this.assetId,
@@ -645,6 +656,7 @@ class OverlayClip {
       'flipHorizontal': flipHorizontal,
       'flipVertical': flipVertical,
       if (keyframes.isNotEmpty) 'keyframes': keyframes.map((k) => k.toJson()).toList(),
+      if (keyframeTracks != null && keyframeTracks!.isNotEmpty) 'keyframeTracks': keyframeTracks!.toJson(),
       if (mask != null) 'mask': mask!.toJson(),
       'blendMode': blendMode.index,
       if (assetId != null) 'assetId': assetId,
@@ -706,6 +718,18 @@ class OverlayClip {
       return null;
     }
 
+    final parsedKeyframes = (json['keyframes'] as List<dynamic>?)
+            ?.map((k) => VideoKeyframe.fromJson(k as Map<String, dynamic>))
+            .toList() ??
+        const <VideoKeyframe>[];
+
+    KeyframeTrackGroup? parsedTracks;
+    if (json['keyframeTracks'] != null) {
+      parsedTracks = KeyframeTrackGroup.fromJson(json['keyframeTracks'] as Map<String, dynamic>);
+    } else if (parsedKeyframes.isNotEmpty) {
+      parsedTracks = KeyframeTrackGroup.fromVideoKeyframes(parsedKeyframes);
+    }
+
     return OverlayClip(
       id: json['id'] as String,
       title: json['title'] as String? ?? 'Overlay',
@@ -722,10 +746,8 @@ class OverlayClip {
       rotation: (json['rotation'] as num?)?.toDouble() ?? 0.0,
       flipHorizontal: json['flipHorizontal'] as bool? ?? false,
       flipVertical: json['flipVertical'] as bool? ?? false,
-      keyframes: (json['keyframes'] as List<dynamic>?)
-              ?.map((k) => VideoKeyframe.fromJson(k as Map<String, dynamic>))
-              .toList() ??
-          const [],
+      keyframes: parsedKeyframes,
+      keyframeTracks: parsedTracks,
       mask: json['mask'] != null ? VideoMask.fromJson(json['mask'] as Map<String, dynamic>) : null,
       blendMode: json['blendMode'] != null
           ? BlendMode.values[(json['blendMode'] as num).toInt().clamp(0, BlendMode.values.length - 1)]
