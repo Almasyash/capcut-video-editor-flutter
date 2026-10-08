@@ -24,6 +24,7 @@ class VideoClip {
   final bool flipVertical;
   final bool isReversed;
   final bool isFrozen;
+  final FreezeFrame? freezeFrame;
   final List<Color> previewGradient;
   final IconData previewIcon;
   final List<VideoKeyframe> keyframes;
@@ -67,6 +68,7 @@ class VideoClip {
     this.flipVertical = false,
     this.isReversed = false,
     this.isFrozen = false,
+    this.freezeFrame,
     required this.previewGradient,
     this.previewIcon = Icons.movie_creation_outlined,
     this.xPos = 0.0,
@@ -86,13 +88,16 @@ class VideoClip {
   /// Effective playback volume respecting mute state
   double get effectiveVolume => isMuted ? 0.0 : volume;
 
-  /// Effective duration on the timeline after trimming and speed adjustment
-  Duration get activeDuration {
-    final trimmedMs = (trimEnd.inMilliseconds - trimStart.inMilliseconds).clamp(0, originalDuration.inMilliseconds);
-    final effectiveSpeed = (speedCurve != null) ? speedCurve!.averageSpeed : (speed > 0 ? speed : 1.0);
-    final adjustedMs = (trimmedMs / (effectiveSpeed > 0 ? effectiveSpeed : 1.0)).round();
-    return Duration(milliseconds: adjustedMs);
-  }
+  /// Effective duration on the timeline after trimming, speed adjustment, and freeze frame
+  Duration get activeDuration => TimeRemapper.calculateActiveDuration(
+        trimStart: trimStart,
+        trimEnd: trimEnd,
+        originalDuration: originalDuration,
+        speedCurve: speedCurve,
+        constantSpeed: speed,
+        freezeFrame: freezeFrame,
+        isFrozen: isFrozen,
+      );
 
   /// Active duration in seconds (double)
   double get durationInSeconds => activeDuration.inMilliseconds / 1000.0;
@@ -115,6 +120,8 @@ class VideoClip {
     bool? flipVertical,
     bool? isReversed,
     bool? isFrozen,
+    FreezeFrame? freezeFrame,
+    bool clearFreezeFrame = false,
     List<Color>? previewGradient,
     IconData? previewIcon,
     double? xPos,
@@ -151,6 +158,7 @@ class VideoClip {
       flipVertical: flipVertical ?? this.flipVertical,
       isReversed: isReversed ?? this.isReversed,
       isFrozen: isFrozen ?? this.isFrozen,
+      freezeFrame: clearFreezeFrame ? null : (freezeFrame ?? this.freezeFrame),
       previewGradient: previewGradient ?? this.previewGradient,
       previewIcon: previewIcon ?? this.previewIcon,
       xPos: xPos ?? this.xPos,
@@ -182,6 +190,7 @@ class VideoClip {
       'flipVertical': flipVertical,
       'isReversed': isReversed,
       'isFrozen': isFrozen,
+      if (freezeFrame != null) 'freezeFrame': freezeFrame!.toJson(),
       'xPos': xPos,
       'yPos': yPos,
       'scale': scale,
@@ -212,9 +221,9 @@ class VideoClip {
       id: json['id'] as String,
       assetId: json['assetId'] as String? ?? '',
       title: json['title'] as String? ?? 'Video Clip',
-      originalDuration: Duration(milliseconds: (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
-      trimStart: Duration(milliseconds: (json['trimStartMs'] as num?)?.toInt() ?? 0),
-      trimEnd: Duration(milliseconds: (json['trimEndMs'] as num?)?.toInt() ?? (json['originalDurationMs'] as num?)?.toInt() ?? 5000),
+      originalDuration: Duration(milliseconds: (json['originalDurationMs'] as num?)?.toInt() ?? (json['originalDuration'] as num?)?.toInt() ?? 5000),
+      trimStart: Duration(milliseconds: (json['trimStartMs'] as num?)?.toInt() ?? (json['trimStart'] as num?)?.toInt() ?? 0),
+      trimEnd: Duration(milliseconds: (json['trimEndMs'] as num?)?.toInt() ?? (json['trimEnd'] as num?)?.toInt() ?? (json['originalDurationMs'] as num?)?.toInt() ?? (json['originalDuration'] as num?)?.toInt() ?? 5000),
       isLocked: json['isLocked'] as bool? ?? false,
       isVisible: json['isVisible'] as bool? ?? true,
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
@@ -229,6 +238,9 @@ class VideoClip {
       flipVertical: json['flipVertical'] as bool? ?? false,
       isReversed: json['isReversed'] as bool? ?? false,
       isFrozen: json['isFrozen'] as bool? ?? false,
+      freezeFrame: json['freezeFrame'] != null
+          ? FreezeFrame.fromJson(json['freezeFrame'] as Map<String, dynamic>)
+          : null,
       previewGradient: const [Color(0xFF141E30), Color(0xFF243B55)],
       xPos: (json['xPos'] as num?)?.toDouble() ?? 0.0,
       yPos: (json['yPos'] as num?)?.toDouble() ?? 0.0,
@@ -263,6 +275,7 @@ class VideoClip {
           flipVertical == other.flipVertical &&
           isReversed == other.isReversed &&
           isFrozen == other.isFrozen &&
+          freezeFrame == other.freezeFrame &&
           xPos == other.xPos &&
           yPos == other.yPos &&
           scale == other.scale &&
@@ -285,6 +298,7 @@ class VideoClip {
       flipVertical.hashCode ^
       isReversed.hashCode ^
       isFrozen.hashCode ^
+      freezeFrame.hashCode ^
       xPos.hashCode ^
       yPos.hashCode ^
       scale.hashCode ^

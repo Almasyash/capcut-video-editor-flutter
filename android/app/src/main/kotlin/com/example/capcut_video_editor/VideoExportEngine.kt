@@ -172,6 +172,202 @@ object KeyframeParser {
 }
 
 /**
+ * Speed Ramping and Time Remapping native engine structures
+ */
+data class ExportSpeedPoint(
+    val timeRatio: Double,
+    val speedMultiplier: Double
+)
+
+data class ExportSpeedCurve(
+    val type: String = "none",
+    val points: List<ExportSpeedPoint> = emptyList(),
+    val keepPitch: Boolean = true,
+    val smoothSlowMo: Boolean = true
+) {
+    val averageSpeed: Double
+        get() {
+            if (points.isEmpty()) return 1.0
+            if (points.size == 1) return points.first().speedMultiplier.coerceAtLeast(0.1)
+            var sum = 0.0
+            val steps = 20
+            for (i in 0..steps) {
+                val t = i.toDouble() / steps
+                sum += evaluateSpeedAt(t)
+            }
+            return (sum / (steps + 1)).coerceIn(0.1, 50.0)
+        }
+
+    fun evaluateSpeedAt(tRatio: Double): Double {
+        if (points.isEmpty()) return 1.0
+        val t = tRatio.coerceIn(0.0, 1.0)
+        if (t <= points.first().timeRatio) return points.first().speedMultiplier.coerceAtLeast(0.1)
+        if (t >= points.last().timeRatio) return points.last().speedMultiplier.coerceAtLeast(0.1)
+        for (i in 0 until points.size - 1) {
+            val p0 = points[i]
+            val p1 = points[i + 1]
+            if (t >= p0.timeRatio && t <= p1.timeRatio) {
+                val span = (p1.timeRatio - p0.timeRatio).coerceAtLeast(0.0001)
+                val u = (t - p0.timeRatio) / span
+                val s = p0.speedMultiplier + u * (p1.speedMultiplier - p0.speedMultiplier)
+                return s.coerceIn(0.1, 50.0)
+            }
+        }
+        return 1.0
+    }
+
+    fun getSourceProgressAt(tRatio: Double): Double {
+        val t = tRatio.coerceIn(0.0, 1.0)
+        if (t <= 0.0) return 0.0
+        if (t >= 1.0) return 1.0
+        val steps = 50
+        val dt = 1.0 / steps
+        val targetIndex = (t * steps).toInt().coerceIn(1, steps)
+
+        var totalArea = 0.0
+        var targetArea = 0.0
+        for (i in 0 until steps) {
+            val mid = (i + 0.5) * dt
+            val spd = evaluateSpeedAt(mid)
+            totalArea += spd * dt
+            if (i < targetIndex) {
+                targetArea += spd * dt
+            }
+        }
+        if (totalArea <= 0.00001) return t
+        return (targetArea / totalArea).coerceIn(0.0, 1.0)
+    }
+}
+
+data class ExportFreezeFrame(
+    val timelineOffsetMs: Long,
+    val durationMs: Long,
+    val sourceTimeMs: Long
+)
+
+object ExportTimeRemapper {
+    fun timelineToSourceTime(
+        timelineOffsetMs: Long,
+        trimStartMs: Long,
+        trimEndMs: Long,
+        originalDurationMs: Long,
+        speed: Double = 1.0,
+        speedCurve: ExportSpeedCurve? = null,
+        freezeFrame: ExportFreezeFrame? = null,
+        isFrozen: Boolean = false,
+        isReversed: Boolean = false
+    ): Long {
+        val trimmedDurationMs = (trimEndMs - trimStartMs).coerceAtLeast(0L)
+        if (trimmedDurationMs <= 0L) return trimStartMs
+
+        if (isFrozen) {
+            return trimStartMs
+        }
+
+        if (freezeFrame != null && freezeFrame.durationMs > 0L) {
+            val fStart = freezeFrame.timelineOffsetMs
+            val fEnd = fStart + freezeFrame.durationMs
+            if (timelineOffsetMs in fStart..fEnd) {
+                return freezeFrame.sourceTimeMs
+            }
+            val effectiveTimelineMs = if (timelineOffsetMs > fEnd) timelineOffsetMs - freezeFrame.durationMs else timelineOffsetMs
+            return computeSpeedSourceTime(
+                effectiveTimelineMs,
+                trimStartMs,
+                trimEndMs,
+                trimmedDurationMs,
+                speed,
+                speedCurve,
+                isReversed
+            )
+        }
+
+        return computeSpeedSourceTime(
+            timelineOffsetMs,
+            trimStartMs,
+            trimEndMs,
+            trimmedDurationMs,
+            speed,
+            speedCurve,
+            isReversed
+        )
+    }
+
+    private fun computeSpeedSourceTime(
+        timelineOffsetMs: Long,
+        trimStartMs: Long,
+        trimEndMs: Long,
+        trimmedDurationMs: Long,
+        speed: Double,
+        speedCurve: ExportSpeedCurve?,
+        isReversed: Boolean
+    ): Long {
+        val mappedMs: Long = if (speedCurve != null && speedCurve.points.isNotEmpty()) {
+            val effectiveDurationMs = (trimmedDurationMs / speedCurve.averageSpeed).toLong().coerceAtLeast(1L)
+            val timelineRatio = (timelineOffsetMs.toDouble() / effectiveDurationMs.toDouble()).coerceIn(0.0, 1.0)
+            val sourceProgress = speedCurve.getSourceProgressAt(timelineRatio)
+            trimStartMs + (trimmedDurationMs * sourceProgress).toLong()
+        } else {
+            val effSpeed = if (speed > 0.0) speed else 1.0
+            trimStartMs + (timelineOffsetMs * effSpeed).toLong()
+        }
+
+        val clampedMs = mappedMs.coerceIn(trimStartMs, trimEndMs)
+        return if (isReversed) {
+            trimEndMs - (clampedMs - trimStartMs)
+        } else {
+            clampedMs
+        }
+    }
+
+    fun calculateActiveDurationMs(
+        trimStartMs: Long,
+        trimEndMs: Long,
+        speed: Double,
+        speedCurve: ExportSpeedCurve?,
+        freezeFrame: ExportFreezeFrame?
+    ): Long {
+        val trimmedMs = (trimEndMs - trimStartMs).coerceAtLeast(0L)
+        val baseMs = if (speedCurve != null && speedCurve.points.isNotEmpty()) {
+            (trimmedMs / speedCurve.averageSpeed).toLong().coerceAtLeast(1L)
+        } else {
+            val effSpeed = if (speed > 0.0) speed else 1.0
+            (trimmedMs / effSpeed).toLong().coerceAtLeast(1L)
+        }
+        val freezeMs = freezeFrame?.durationMs ?: 0L
+        return baseMs + freezeMs
+    }
+}
+
+object SpeedRemapParser {
+    @Suppress("UNCHECKED_CAST")
+    fun parseSpeedCurve(map: Map<String, Any>?): ExportSpeedCurve? {
+        if (map == null) return null
+        val type = map["type"] as? String ?: "none"
+        if (type == "none") return null
+        val pointsRaw = map["points"] as? List<Map<String, Any>> ?: emptyList()
+        val points = pointsRaw.map { pt ->
+            ExportSpeedPoint(
+                timeRatio = (pt["timeRatio"] as? Number)?.toDouble() ?: 0.0,
+                speedMultiplier = (pt["speedMultiplier"] as? Number)?.toDouble() ?: 1.0
+            )
+        }
+        val keepPitch = map["keepPitch"] as? Boolean ?: true
+        val smoothSlowMo = map["smoothSlowMo"] as? Boolean ?: true
+        return ExportSpeedCurve(type, points, keepPitch, smoothSlowMo)
+    }
+
+    fun parseFreezeFrame(map: Map<String, Any>?): ExportFreezeFrame? {
+        if (map == null) return null
+        val offsetMs = (map["timelineOffsetMs"] as? Number)?.toLong() ?: 0L
+        val durMs = (map["durationMs"] as? Number)?.toLong() ?: 0L
+        val srcMs = (map["sourceTimeMs"] as? Number)?.toLong() ?: 0L
+        if (durMs <= 0L) return null
+        return ExportFreezeFrame(offsetMs, durMs, srcMs)
+    }
+}
+
+/**
  * Data structures for video export payload passed from Flutter
  */
 data class ExportClip(
@@ -208,14 +404,20 @@ data class ExportClip(
     val sharpness: Double = 0.0,
     val filterId: String? = null,
     val filterIntensity: Double = 1.0,
-    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup(),
+    val speedCurve: ExportSpeedCurve? = null,
+    val freezeFrame: ExportFreezeFrame? = null,
+    val isFrozen: Boolean = false,
+    val isReversed: Boolean = false
 ) {
     val activeDurationMs: Long
-        get() {
-            val trimmed = (trimEndMs - trimStartMs).coerceAtLeast(0L)
-            val sp = if (speed > 0.0) speed else 1.0
-            return (trimmed / sp).toLong()
-        }
+        get() = ExportTimeRemapper.calculateActiveDurationMs(
+            trimStartMs,
+            trimEndMs,
+            speed,
+            speedCurve,
+            freezeFrame
+        )
 
     val hasColorGrading: Boolean
         get() = (brightness != 0.0 || contrast != 0.0 || saturation != 0.0 || exposure != 0.0 ||
@@ -352,7 +554,11 @@ data class ExportPipOverlay(
     val glowColor: Int = 0,
     val glowRadius: Double = 12.0,
     val glowIntensity: Double = 0.7,
-    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup(),
+    val speedCurve: ExportSpeedCurve? = null,
+    val freezeFrame: ExportFreezeFrame? = null,
+    val isFrozen: Boolean = false,
+    val isReversed: Boolean = false
 ) {
     val hasColorGrading: Boolean
         get() = (brightness != 0.0 || contrast != 0.0 || saturation != 0.0 || exposure != 0.0 ||
@@ -2287,10 +2493,29 @@ class VideoExportEngine(private val context: Context) {
                     val leftClip = clips[leftClipIndex]
                     val rightClip = clips[rightClipIndex]
 
-                    val leftLocalMs = ((currentTimeMs - clipStartTimes[leftClipIndex]) * leftClip.speed + leftClip.trimStartMs)
-                        .toLong().coerceIn(0L, leftClip.originalDurationMs)
-                    val rightLocalMs = ((currentTimeMs - clipStartTimes[rightClipIndex]) * rightClip.speed + rightClip.trimStartMs)
-                        .toLong().coerceIn(0L, rightClip.originalDurationMs)
+                    val leftLocalMs = ExportTimeRemapper.timelineToSourceTime(
+                        currentTimeMs - clipStartTimes[leftClipIndex],
+                        leftClip.trimStartMs,
+                        leftClip.trimEndMs,
+                        leftClip.originalDurationMs,
+                        leftClip.speed,
+                        leftClip.speedCurve,
+                        leftClip.freezeFrame,
+                        leftClip.isFrozen,
+                        leftClip.isReversed
+                    ).coerceIn(0L, leftClip.originalDurationMs)
+
+                    val rightLocalMs = ExportTimeRemapper.timelineToSourceTime(
+                        currentTimeMs - clipStartTimes[rightClipIndex],
+                        rightClip.trimStartMs,
+                        rightClip.trimEndMs,
+                        rightClip.originalDurationMs,
+                        rightClip.speed,
+                        rightClip.speedCurve,
+                        rightClip.freezeFrame,
+                        rightClip.isFrozen,
+                        rightClip.isReversed
+                    ).coerceIn(0L, rightClip.originalDurationMs)
 
                     // Render Outgoing to FBO A
                     fboA.bind()
@@ -2326,7 +2551,17 @@ class VideoExportEngine(private val context: Context) {
                         }
                     }
                     val clip = clips[activeClipIndex]
-                    val localMs = ((currentTimeMs - clipStartTimes[activeClipIndex]) * clip.speed + clip.trimStartMs).toLong()
+                    val localMs = ExportTimeRemapper.timelineToSourceTime(
+                        currentTimeMs - clipStartTimes[activeClipIndex],
+                        clip.trimStartMs,
+                        clip.trimEndMs,
+                        clip.originalDurationMs,
+                        clip.speed,
+                        clip.speedCurve,
+                        clip.freezeFrame,
+                        clip.isFrozen,
+                        clip.isReversed
+                    ).coerceIn(0L, clip.originalDurationMs)
 
                     GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
                     GLES20.glViewport(0, 0, width, height)

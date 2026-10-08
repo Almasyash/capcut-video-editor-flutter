@@ -1,30 +1,72 @@
 import 'dart:math' as math;
 
+/// Interpolation mode between adjacent speed control points
+enum SpeedInterpolation {
+  linear,
+  easeIn,
+  easeOut,
+  easeInOut,
+  hold;
+
+  /// Evaluates normalized interpolation progression [t] (0.0 to 1.0)
+  double evaluate(double t) {
+    final clamped = t.clamp(0.0, 1.0);
+    switch (this) {
+      case SpeedInterpolation.linear:
+        return clamped;
+      case SpeedInterpolation.easeIn:
+        return clamped * clamped;
+      case SpeedInterpolation.easeOut:
+        return clamped * (2.0 - clamped);
+      case SpeedInterpolation.easeInOut:
+        return clamped < 0.5
+            ? 2.0 * clamped * clamped
+            : -1.0 + (4.0 - 2.0 * clamped) * clamped;
+      case SpeedInterpolation.hold:
+        return clamped >= 1.0 ? 1.0 : 0.0;
+    }
+  }
+}
+
 /// Represents a single control point on a 2D speed-time curve
 class SpeedCurvePoint {
   final double timeRatio; // 0.0 to 1.0 (relative position along clip)
   final double speedMultiplier; // e.g. 0.1x to 50.0x
+  final SpeedInterpolation interpolation;
 
   const SpeedCurvePoint({
     required this.timeRatio,
     required this.speedMultiplier,
+    this.interpolation = SpeedInterpolation.linear,
   });
 
-  SpeedCurvePoint copyWith({double? timeRatio, double? speedMultiplier}) {
+  SpeedCurvePoint copyWith({
+    double? timeRatio,
+    double? speedMultiplier,
+    SpeedInterpolation? interpolation,
+  }) {
     return SpeedCurvePoint(
       timeRatio: timeRatio ?? this.timeRatio,
       speedMultiplier: speedMultiplier ?? this.speedMultiplier,
+      interpolation: interpolation ?? this.interpolation,
     );
   }
 
   Map<String, dynamic> toJson() => {
         'timeRatio': timeRatio,
         'speedMultiplier': speedMultiplier,
+        'interpolation': interpolation.name,
       };
 
   factory SpeedCurvePoint.fromJson(Map<String, dynamic> json) => SpeedCurvePoint(
         timeRatio: (json['timeRatio'] as num).toDouble(),
         speedMultiplier: (json['speedMultiplier'] as num).toDouble(),
+        interpolation: json['interpolation'] != null
+            ? SpeedInterpolation.values.firstWhere(
+                (e) => e.name == json['interpolation'],
+                orElse: () => SpeedInterpolation.linear,
+              )
+            : SpeedInterpolation.linear,
       );
 
   @override
@@ -33,10 +75,100 @@ class SpeedCurvePoint {
       other is SpeedCurvePoint &&
           runtimeType == other.runtimeType &&
           timeRatio == other.timeRatio &&
-          speedMultiplier == other.speedMultiplier;
+          speedMultiplier == other.speedMultiplier &&
+          interpolation == other.interpolation;
 
   @override
-  int get hashCode => timeRatio.hashCode ^ speedMultiplier.hashCode;
+  int get hashCode =>
+      timeRatio.hashCode ^ speedMultiplier.hashCode ^ interpolation.hashCode;
+}
+
+/// Canonical alias for SpeedCurvePoint matching NLE terminology
+typedef SpeedPoint = SpeedCurvePoint;
+
+/// Represents a segment between two consecutive speed points
+class SpeedSegment {
+  final double startTimeRatio;
+  final double endTimeRatio;
+  final double startSpeed;
+  final double endSpeed;
+  final SpeedInterpolation interpolation;
+
+  const SpeedSegment({
+    double? startTimeRatio,
+    double? endTimeRatio,
+    double? startRatio,
+    double? endRatio,
+    required this.startSpeed,
+    required this.endSpeed,
+    this.interpolation = SpeedInterpolation.linear,
+  })  : startTimeRatio = startTimeRatio ?? startRatio ?? 0.0,
+        endTimeRatio = endTimeRatio ?? endRatio ?? 1.0;
+
+  double get startRatio => startTimeRatio;
+  double get endRatio => endTimeRatio;
+  double get durationRatio => (endTimeRatio - startTimeRatio).clamp(0.0, 1.0);
+  double get averageSpeed => (startSpeed + endSpeed) / 2.0;
+
+  double evaluateAt(double t) {
+    if (durationRatio <= 0.0001) return endSpeed;
+    final progress = ((t - startTimeRatio) / durationRatio).clamp(0.0, 1.0);
+    final factor = interpolation.evaluate(progress);
+    return startSpeed + factor * (endSpeed - startSpeed);
+  }
+}
+
+/// Non-destructive Freeze Frame model
+class FreezeFrame {
+  final Duration timelineOffset; // relative to clip timeline start
+  final Duration duration;       // duration of the freeze (default 3.0s)
+  final Duration sourceTime;     // exact source frame timestamp being held
+
+  const FreezeFrame({
+    required this.timelineOffset,
+    this.duration = const Duration(seconds: 3),
+    required this.sourceTime,
+  });
+
+  FreezeFrame copyWith({
+    Duration? timelineOffset,
+    Duration? duration,
+    Duration? sourceTime,
+  }) {
+    return FreezeFrame(
+      timelineOffset: timelineOffset ?? this.timelineOffset,
+      duration: duration ?? this.duration,
+      sourceTime: sourceTime ?? this.sourceTime,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'timelineOffsetMs': timelineOffset.inMilliseconds,
+        'durationMs': duration.inMilliseconds,
+        'sourceTimeMs': sourceTime.inMilliseconds,
+      };
+
+  factory FreezeFrame.fromJson(Map<String, dynamic> json) => FreezeFrame(
+        timelineOffset: Duration(
+            milliseconds: (json['timelineOffsetMs'] as num?)?.toInt() ?? 0),
+        duration: Duration(
+            milliseconds: (json['durationMs'] as num?)?.toInt() ?? 3000),
+        sourceTime: Duration(
+            milliseconds: (json['sourceTimeMs'] as num?)?.toInt() ?? 0),
+      );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FreezeFrame &&
+          runtimeType == other.runtimeType &&
+          timelineOffset == other.timelineOffset &&
+          duration == other.duration &&
+          sourceTime == other.sourceTime;
+
+  @override
+  int get hashCode =>
+      timelineOffset.hashCode ^ duration.hashCode ^ sourceTime.hashCode;
 }
 
 enum SpeedCurvePresetType {
@@ -48,6 +180,7 @@ enum SpeedCurvePresetType {
   flashIn,
   flashOut,
   bubbly,
+  smooth,
   custom,
 }
 
@@ -87,7 +220,8 @@ class SpeedCurve {
       if (clampedT >= p1.timeRatio && clampedT <= p2.timeRatio) {
         final span = p2.timeRatio - p1.timeRatio;
         if (span <= 0.0001) return p2.speedMultiplier;
-        final factor = (clampedT - p1.timeRatio) / span;
+        final rawFactor = (clampedT - p1.timeRatio) / span;
+        final factor = p1.interpolation.evaluate(rawFactor);
         return p1.speedMultiplier + factor * (p2.speedMultiplier - p1.speedMultiplier);
       }
     }
@@ -175,6 +309,124 @@ class SpeedCurve {
     return (partialArea / totalArea).clamp(0.0, 1.0);
   }
 
+  /// Splits the speed curve at [splitTimelineRatio], returning two independent,
+  /// continuous curves rebased to [0.0, 1.0] for Part 1 and Part 2.
+  (SpeedCurve partA, SpeedCurve partB) splitAt(double splitTimelineRatio) {
+    final u = splitTimelineRatio.clamp(0.001, 0.999);
+    final splitSpeed = evaluateSpeedAt(u);
+
+    final sorted = List<SpeedCurvePoint>.from(points)
+      ..sort((a, b) => a.timeRatio.compareTo(b.timeRatio));
+
+    // Part A: from 0.0 to u, normalized to [0.0, 1.0]
+    final ptsA = <SpeedCurvePoint>[];
+    for (final p in sorted) {
+      if (p.timeRatio < u) {
+        ptsA.add(SpeedCurvePoint(
+          timeRatio: (p.timeRatio / u).clamp(0.0, 1.0),
+          speedMultiplier: p.speedMultiplier,
+          interpolation: p.interpolation,
+        ));
+      }
+    }
+    if (ptsA.isEmpty || ptsA.first.timeRatio > 0.001) {
+      ptsA.insert(
+        0,
+        SpeedCurvePoint(
+          timeRatio: 0.0,
+          speedMultiplier: evaluateSpeedAt(0.0),
+        ),
+      );
+    }
+    ptsA.add(SpeedCurvePoint(
+      timeRatio: 1.0,
+      speedMultiplier: splitSpeed,
+    ));
+
+    // Part B: from u to 1.0, normalized to [0.0, 1.0]
+    final ptsB = <SpeedCurvePoint>[
+      SpeedCurvePoint(
+        timeRatio: 0.0,
+        speedMultiplier: splitSpeed,
+      ),
+    ];
+    for (final p in sorted) {
+      if (p.timeRatio > u) {
+        ptsB.add(SpeedCurvePoint(
+          timeRatio: ((p.timeRatio - u) / (1.0 - u)).clamp(0.0, 1.0),
+          speedMultiplier: p.speedMultiplier,
+          interpolation: p.interpolation,
+        ));
+      }
+    }
+    if (ptsB.last.timeRatio < 0.999) {
+      ptsB.add(SpeedCurvePoint(
+        timeRatio: 1.0,
+        speedMultiplier: evaluateSpeedAt(1.0),
+      ));
+    }
+
+    final curveA = SpeedCurve(
+      type: SpeedCurvePresetType.custom,
+      points: ptsA,
+      keepPitch: keepPitch,
+      smoothSlowMo: smoothSlowMo,
+    );
+
+    final curveB = SpeedCurve(
+      type: SpeedCurvePresetType.custom,
+      points: ptsB,
+      keepPitch: keepPitch,
+      smoothSlowMo: smoothSlowMo,
+    );
+
+    return (curveA, curveB);
+  }
+
+  /// Clamps speed points to [startRatio, endRatio] during trimming,
+  /// ensuring points outside the trimmed clip are safely removed or re-normalized.
+  SpeedCurve clampToRange(double startRatio, double endRatio) {
+    final start = startRatio.clamp(0.0, 0.99);
+    final end = endRatio.clamp(start + 0.01, 1.0);
+    final span = end - start;
+
+    final newPts = <SpeedCurvePoint>[
+      SpeedCurvePoint(
+        timeRatio: 0.0,
+        speedMultiplier: evaluateSpeedAt(start),
+      ),
+    ];
+
+    for (final p in points) {
+      if (p.timeRatio > start && p.timeRatio < end) {
+        newPts.add(SpeedCurvePoint(
+          timeRatio: ((p.timeRatio - start) / span).clamp(0.0, 1.0),
+          speedMultiplier: p.speedMultiplier,
+          interpolation: p.interpolation,
+        ));
+      }
+    }
+
+    newPts.add(SpeedCurvePoint(
+      timeRatio: 1.0,
+      speedMultiplier: evaluateSpeedAt(end),
+    ));
+
+    return copyWith(
+      type: SpeedCurvePresetType.custom,
+      points: newPts,
+    );
+  }
+
+  /// Deep duplicate of speed curve
+  SpeedCurve duplicate() {
+    return copyWith(
+      points: points.map((p) => p.copyWith()).toList(),
+    );
+  }
+
+  // --- Presets ---
+
   static SpeedCurve montage({bool keepPitch = true, bool smoothSlowMo = true}) => SpeedCurve(
         type: SpeedCurvePresetType.montage,
         keepPitch: keepPitch,
@@ -260,6 +512,19 @@ class SpeedCurve {
         ],
       );
 
+  static SpeedCurve smooth({bool keepPitch = true, bool smoothSlowMo = true}) => SpeedCurve(
+        type: SpeedCurvePresetType.smooth,
+        keepPitch: keepPitch,
+        smoothSlowMo: smoothSlowMo,
+        points: const [
+          SpeedCurvePoint(timeRatio: 0.0, speedMultiplier: 1.0),
+          SpeedCurvePoint(timeRatio: 0.25, speedMultiplier: 0.5),
+          SpeedCurvePoint(timeRatio: 0.5, speedMultiplier: 2.0),
+          SpeedCurvePoint(timeRatio: 0.75, speedMultiplier: 0.5),
+          SpeedCurvePoint(timeRatio: 1.0, speedMultiplier: 1.0),
+        ],
+      );
+
   static SpeedCurve custom({
     List<SpeedCurvePoint>? points,
     bool keepPitch = true,
@@ -276,6 +541,21 @@ class SpeedCurve {
               SpeedCurvePoint(timeRatio: 0.7, speedMultiplier: 0.4),
               SpeedCurvePoint(timeRatio: 1.0, speedMultiplier: 1.0),
             ],
+      );
+
+  static SpeedCurve constant(
+    double speed, {
+    bool keepPitch = true,
+    bool smoothSlowMo = true,
+  }) =>
+      SpeedCurve(
+        type: SpeedCurvePresetType.custom,
+        keepPitch: keepPitch,
+        smoothSlowMo: smoothSlowMo,
+        points: [
+          SpeedCurvePoint(timeRatio: 0.0, speedMultiplier: speed),
+          SpeedCurvePoint(timeRatio: 1.0, speedMultiplier: speed),
+        ],
       );
 
   SpeedCurve copyWith({
@@ -342,3 +622,141 @@ class SpeedCurve {
     return true;
   }
 }
+
+/// Deterministic Time Remapping Engine bridging timeline time and source media time
+class TimeRemapper {
+  /// Deterministic conversion from clip timeline offset to source media timestamp.
+  static Duration timelineToSourceTime({
+    required Duration timelineOffset,
+    required Duration trimStart,
+    required Duration trimEnd,
+    required Duration originalDuration,
+    SpeedCurve? speedCurve,
+    double constantSpeed = 1.0,
+    bool isReversed = false,
+    FreezeFrame? freezeFrame,
+    bool isFrozen = false,
+    Duration? wholeClipFreezeTime,
+  }) {
+    final trimmedDurationMs = (trimEnd.inMilliseconds - trimStart.inMilliseconds)
+        .clamp(0, originalDuration.inMilliseconds);
+    if (trimmedDurationMs <= 0) return trimStart;
+
+    // Whole-clip freeze handling
+    if (isFrozen) {
+      final frozenAt = wholeClipFreezeTime ?? trimStart;
+      return frozenAt;
+    }
+
+    // Freeze frame segment handling
+    if (freezeFrame != null && freezeFrame.duration.inMilliseconds > 0) {
+      final freezeStartMs = freezeFrame.timelineOffset.inMilliseconds;
+      final freezeDurMs = freezeFrame.duration.inMilliseconds;
+      final freezeEndMs = freezeStartMs + freezeDurMs;
+      final currentMs = timelineOffset.inMilliseconds;
+
+      if (currentMs >= freezeStartMs && currentMs <= freezeEndMs) {
+        // Inside freeze window: return exact frozen source frame
+        return freezeFrame.sourceTime;
+      }
+
+      // If past freeze window, subtract freeze duration to rebase timeline time
+      final effectiveTimelineMs = currentMs > freezeEndMs
+          ? currentMs - freezeDurMs
+          : currentMs;
+
+      return _computeSpeedSourceTime(
+        timelineOffsetMs: effectiveTimelineMs,
+        trimStart: trimStart,
+        trimEnd: trimEnd,
+        trimmedDurationMs: trimmedDurationMs,
+        originalDuration: originalDuration,
+        speedCurve: speedCurve,
+        constantSpeed: constantSpeed,
+        isReversed: isReversed,
+      );
+    }
+
+    return _computeSpeedSourceTime(
+      timelineOffsetMs: timelineOffset.inMilliseconds,
+      trimStart: trimStart,
+      trimEnd: trimEnd,
+      trimmedDurationMs: trimmedDurationMs,
+      originalDuration: originalDuration,
+      speedCurve: speedCurve,
+      constantSpeed: constantSpeed,
+      isReversed: isReversed,
+    );
+  }
+
+  static Duration _computeSpeedSourceTime({
+    required int timelineOffsetMs,
+    required Duration trimStart,
+    required Duration trimEnd,
+    required int trimmedDurationMs,
+    required Duration originalDuration,
+    SpeedCurve? speedCurve,
+    double constantSpeed = 1.0,
+    bool isReversed = false,
+  }) {
+    if (speedCurve != null) {
+      final avgSpeed = speedCurve.averageSpeed;
+      final activeTimelineDurationMs = (trimmedDurationMs / avgSpeed).round().clamp(1, 100000000);
+      final timelineRatio = timelineOffsetMs / activeTimelineDurationMs;
+      var sourceProgress = speedCurve.getSourceProgressAt(timelineRatio.clamp(0.0, 1.0));
+      if (isReversed) {
+        sourceProgress = 1.0 - sourceProgress;
+      }
+      final sourceOffsetMs = (sourceProgress * trimmedDurationMs).round();
+      final sourceTimeMs = (trimStart.inMilliseconds + sourceOffsetMs).clamp(
+        0,
+        originalDuration.inMilliseconds,
+      );
+      return Duration(milliseconds: sourceTimeMs);
+    } else {
+      final validSpeed = constantSpeed.clamp(0.1, 100.0);
+      final sourceOffsetMs = (timelineOffsetMs * validSpeed).round();
+      final baseSourceMs = isReversed
+          ? trimEnd.inMilliseconds - sourceOffsetMs
+          : trimStart.inMilliseconds + sourceOffsetMs;
+      final sourceTimeMs = baseSourceMs.clamp(
+        0,
+        originalDuration.inMilliseconds,
+      );
+      return Duration(milliseconds: sourceTimeMs);
+    }
+  }
+
+  /// Calculates the active timeline duration for a clip.
+  static Duration calculateActiveDuration({
+    required Duration trimStart,
+    required Duration trimEnd,
+    Duration? originalDuration,
+    SpeedCurve? speedCurve,
+    double constantSpeed = 1.0,
+    FreezeFrame? freezeFrame,
+    bool isFrozen = false,
+    Duration? frozenDuration,
+  }) {
+    final maxMs = originalDuration?.inMilliseconds ?? trimEnd.inMilliseconds;
+    final trimmedMs = (trimEnd.inMilliseconds - trimStart.inMilliseconds)
+        .clamp(0, maxMs);
+    if (trimmedMs <= 0) return Duration.zero;
+
+    if (isFrozen) {
+      return frozenDuration ?? const Duration(seconds: 3);
+    }
+
+    final effectiveSpeed = (speedCurve != null)
+        ? speedCurve.averageSpeed
+        : (constantSpeed > 0 ? constantSpeed : 1.0);
+    final clampedSpeed = effectiveSpeed.clamp(0.1, 100.0);
+    final baseTimelineMs = (trimmedMs / clampedSpeed).round();
+
+    final freezeAddMs = (freezeFrame != null) ? freezeFrame.duration.inMilliseconds : 0;
+    return Duration(milliseconds: baseTimelineMs + freezeAddMs);
+  }
+}
+
+/// Canonical alias for TimeRemapper
+typedef TimeRemap = TimeRemapper;

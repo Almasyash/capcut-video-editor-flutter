@@ -1018,6 +1018,8 @@ class EditorViewModel extends ChangeNotifier {
     }
   }
 
+  void selectOverlayClip(int index) => selectOverlay(index);
+
   void selectOverlayById(String? id) {
     if (id == null) {
       _selectedOverlayIndex = null;
@@ -1219,20 +1221,78 @@ class EditorViewModel extends ChangeNotifier {
 
     _saveSnapshot();
 
-    final splitOffsetMs = (offsetInClipSeconds * originalClip.speed * 1000).round();
-    final newSplitMs = (originalClip.trimStart.inMilliseconds + splitOffsetMs).clamp(
+    final offsetMs = (offsetInClipSeconds * 1000).round();
+    final sourceSplitPoint = TimeRemapper.timelineToSourceTime(
+      timelineOffset: Duration(milliseconds: offsetMs),
+      trimStart: originalClip.trimStart,
+      trimEnd: originalClip.trimEnd,
+      originalDuration: originalClip.originalDuration,
+      speedCurve: originalClip.speedCurve,
+      constantSpeed: originalClip.speed,
+      isReversed: originalClip.isReversed,
+      freezeFrame: originalClip.freezeFrame,
+    );
+
+    final newSplitMs = sourceSplitPoint.inMilliseconds.clamp(
       originalClip.trimStart.inMilliseconds + 1,
       originalClip.trimEnd.inMilliseconds - 1,
     );
     final newSplitPoint = Duration(milliseconds: newSplitMs);
+    final splitOffsetMs = (newSplitMs - originalClip.trimStart.inMilliseconds).clamp(
+      0,
+      originalClip.originalDuration.inMilliseconds,
+    );
 
     final timestamp = DateTime.now().microsecondsSinceEpoch;
     final (clipTracksA, clipTracksB) = originalClip.effectiveKeyframeTracks.splitAt(splitOffsetMs);
+
+    // Split speed curve proportionally into Part 1 and Part 2
+    SpeedCurve? curvePartA;
+    SpeedCurve? curvePartB;
+    if (originalClip.speedCurve != null) {
+      final splitTimelineRatio = (offsetInClipSeconds / math.max(0.001, originalClip.durationInSeconds)).clamp(0.001, 0.999);
+      final (cA, cB) = originalClip.speedCurve!.splitAt(splitTimelineRatio);
+      curvePartA = cA;
+      curvePartB = cB;
+    }
+
+    // Split freeze frame if present
+    FreezeFrame? freezePartA;
+    FreezeFrame? freezePartB;
+    if (originalClip.freezeFrame != null) {
+      final f = originalClip.freezeFrame!;
+      final fStart = f.timelineOffset.inMilliseconds;
+      final fDur = f.duration.inMilliseconds;
+      final fEnd = fStart + fDur;
+      if (offsetMs <= fStart) {
+        freezePartB = f.copyWith(
+          timelineOffset: Duration(milliseconds: fStart - offsetMs),
+        );
+      } else if (offsetMs >= fEnd) {
+        freezePartA = f;
+      } else {
+        // Playhead cuts through freeze frame
+        freezePartA = FreezeFrame(
+          timelineOffset: f.timelineOffset,
+          duration: Duration(milliseconds: offsetMs - fStart),
+          sourceTime: f.sourceTime,
+        );
+        freezePartB = FreezeFrame(
+          timelineOffset: Duration.zero,
+          duration: Duration(milliseconds: fEnd - offsetMs),
+          sourceTime: f.sourceTime,
+        );
+      }
+    }
 
     final clipPartA = originalClip.copyWith(
       id: '${originalClip.id}_a_$timestamp',
       title: '${originalClip.title} (Part 1)',
       trimEnd: newSplitPoint,
+      speedCurve: curvePartA,
+      clearSpeedCurve: curvePartA == null && originalClip.speedCurve != null,
+      freezeFrame: freezePartA,
+      clearFreezeFrame: freezePartA == null && originalClip.freezeFrame != null,
       keyframeTracks: clipTracksA,
       keyframes: clipTracksA.toVideoKeyframes(),
     );
@@ -1241,6 +1301,10 @@ class EditorViewModel extends ChangeNotifier {
       id: '${originalClip.id}_b_$timestamp',
       title: '${originalClip.title} (Part 2)',
       trimStart: newSplitPoint,
+      speedCurve: curvePartB,
+      clearSpeedCurve: curvePartB == null && originalClip.speedCurve != null,
+      freezeFrame: freezePartB,
+      clearFreezeFrame: freezePartB == null && originalClip.freezeFrame != null,
       keyframeTracks: clipTracksB,
       keyframes: clipTracksB.toVideoKeyframes(),
     );
@@ -1269,10 +1333,26 @@ class EditorViewModel extends ChangeNotifier {
 
     _saveSnapshot();
     final deltaSec = _playheadPosition - clipStart;
-    final deltaMs = (deltaSec * clip.speed * 1000).round();
-    final newTrimStart = Duration(milliseconds: clip.trimStart.inMilliseconds + deltaMs);
+    final deltaOffsetMs = (deltaSec * 1000).round();
+    final newTrimStart = TimeRemapper.timelineToSourceTime(
+      timelineOffset: Duration(milliseconds: deltaOffsetMs),
+      trimStart: clip.trimStart,
+      trimEnd: clip.trimEnd,
+      originalDuration: clip.originalDuration,
+      speedCurve: clip.speedCurve,
+      constantSpeed: clip.speed,
+      isReversed: clip.isReversed,
+      freezeFrame: clip.freezeFrame,
+    );
 
-    _videoClips[_selectedClipIndex!] = clip.copyWith(trimStart: newTrimStart);
+    // Adapt speed curve if active
+    final trimRatio = (deltaSec / clip.durationInSeconds).clamp(0.0, 0.99);
+    final newCurve = clip.speedCurve?.clampToRange(trimRatio, 1.0);
+
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      trimStart: newTrimStart,
+      speedCurve: newCurve,
+    );
     _cleanupInvalidTransitions();
     scheduleAutoSave();
     notifyListeners();
@@ -1290,10 +1370,26 @@ class EditorViewModel extends ChangeNotifier {
 
     _saveSnapshot();
     final offsetSec = _playheadPosition - clipStart;
-    final offsetMs = (offsetSec * clip.speed * 1000).round();
-    final newTrimEnd = Duration(milliseconds: clip.trimStart.inMilliseconds + offsetMs);
+    final offsetMs = (offsetSec * 1000).round();
+    final newTrimEnd = TimeRemapper.timelineToSourceTime(
+      timelineOffset: Duration(milliseconds: offsetMs),
+      trimStart: clip.trimStart,
+      trimEnd: clip.trimEnd,
+      originalDuration: clip.originalDuration,
+      speedCurve: clip.speedCurve,
+      constantSpeed: clip.speed,
+      isReversed: clip.isReversed,
+      freezeFrame: clip.freezeFrame,
+    );
 
-    _videoClips[_selectedClipIndex!] = clip.copyWith(trimEnd: newTrimEnd);
+    // Adapt speed curve if active
+    final trimRatio = (offsetSec / clip.durationInSeconds).clamp(0.01, 1.0);
+    final newCurve = clip.speedCurve?.clampToRange(0.0, trimRatio);
+
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      trimEnd: newTrimEnd,
+      speedCurve: newCurve,
+    );
     _cleanupInvalidTransitions();
     scheduleAutoSave();
     notifyListeners();
@@ -1430,6 +1526,16 @@ class EditorViewModel extends ChangeNotifier {
     return true;
   }
 
+  /// Adds a new video clip to the timeline track.
+  void addClip(VideoClip clip) {
+    _saveSnapshot();
+    _videoClips.add(clip);
+    _selectedClipIndex = _videoClips.length - 1;
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
   /// Duplicate on main timeline track
   void duplicateSelectedClip() {
     if (_selectedClipIndex == null) return;
@@ -1439,6 +1545,8 @@ class EditorViewModel extends ChangeNotifier {
     final duplicated = original.copyWith(
       id: 'clip_dup_${DateTime.now().millisecondsSinceEpoch}',
       title: '${original.title} (Copy)',
+      speedCurve: original.speedCurve?.duplicate(),
+      freezeFrame: original.freezeFrame?.copyWith(),
       keyframeTracks: original.effectiveKeyframeTracks.duplicate(),
       keyframes: original.keyframes
           .map((k) => k.copyWith(id: 'kf_${DateTime.now().microsecondsSinceEpoch}_${k.timestamp.inMilliseconds}'))
@@ -1467,6 +1575,11 @@ class EditorViewModel extends ChangeNotifier {
       isPhoto: asset?.type == MediaAssetType.photo,
       startTime: Duration(milliseconds: (clipStart * 1000).round()),
       duration: original.activeDuration,
+      speed: original.speed,
+      speedCurve: original.speedCurve?.duplicate(),
+      isFrozen: original.isFrozen,
+      isReversed: original.isReversed,
+      freezeFrame: original.freezeFrame?.copyWith(),
       previewGradient: original.previewGradient,
       previewIcon: original.previewIcon,
       position: const Offset(0.7, 0.25),
@@ -2343,10 +2456,12 @@ class EditorViewModel extends ChangeNotifier {
 
   void toggleSelectedClipFreeze() {
     if (_selectedClipIndex == null) return;
-    _saveSnapshot();
     final clip = _videoClips[_selectedClipIndex!];
-    _videoClips[_selectedClipIndex!] = clip.copyWith(isFrozen: !clip.isFrozen);
-    notifyListeners();
+    if (clip.freezeFrame != null || clip.isFrozen) {
+      removeFreezeFrame();
+    } else {
+      addFreezeFrameAtPlayhead();
+    }
   }
 
   // --- Spatial Transformations (Free Transform Canvas Phase 1) ---
@@ -2587,6 +2702,8 @@ class EditorViewModel extends ChangeNotifier {
 
   // --- Speed & Volume Adjustments ---
 
+  // --- Speed, Speed Ramping, Freeze Frame & Time Remapping ---
+
   void setClipSpeed(double speed) {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
@@ -2599,6 +2716,10 @@ class EditorViewModel extends ChangeNotifier {
     _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
     _cleanupInvalidTransitions();
     scheduleAutoSave();
+    final label = clampedSpeed == clampedSpeed.roundToDouble()
+        ? clampedSpeed.toInt().toString()
+        : clampedSpeed.toStringAsFixed(1);
+    TtsService.announce('Speed set to $label times');
     notifyListeners();
   }
 
@@ -2614,6 +2735,286 @@ class EditorViewModel extends ChangeNotifier {
     _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
     _cleanupInvalidTransitions();
     scheduleAutoSave();
+    TtsService.announce('Speed ramp selected');
+    notifyListeners();
+  }
+
+  void addSpeedPoint(double timeRatio, double speedMultiplier, {SpeedInterpolation interpolation = SpeedInterpolation.linear}) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    final ratio = timeRatio.clamp(0.0, 1.0);
+    final speed = speedMultiplier.clamp(0.1, 50.0);
+
+    final currentCurve = clip.speedCurve ?? SpeedCurve.custom(points: [
+      SpeedCurvePoint(timeRatio: 0.0, speedMultiplier: clip.speed),
+      SpeedCurvePoint(timeRatio: 1.0, speedMultiplier: clip.speed),
+    ]);
+
+    final updatedPoints = List<SpeedCurvePoint>.from(currentCurve.points)
+      ..add(SpeedCurvePoint(timeRatio: ratio, speedMultiplier: speed, interpolation: interpolation))
+      ..sort((a, b) => a.timeRatio.compareTo(b.timeRatio));
+
+    final newCurve = currentCurve.copyWith(
+      type: SpeedCurvePresetType.custom,
+      points: updatedPoints,
+    );
+
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      speed: newCurve.averageSpeed.clamp(0.1, 50.0),
+      speedCurve: newCurve,
+    );
+    _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
+    TtsService.announce('Speed point added');
+    notifyListeners();
+  }
+
+  void updateSpeedPoint(int pointIndex, {double? timeRatio, double? speedMultiplier, SpeedInterpolation? interpolation}) {
+    if (_selectedClipIndex == null) return;
+    final clip = _videoClips[_selectedClipIndex!];
+    if (clip.speedCurve == null || pointIndex < 0 || pointIndex >= clip.speedCurve!.points.length) return;
+
+    _saveSnapshot();
+    final currentCurve = clip.speedCurve!;
+    final points = List<SpeedCurvePoint>.from(currentCurve.points);
+    final oldPt = points[pointIndex];
+    points[pointIndex] = oldPt.copyWith(
+      timeRatio: timeRatio?.clamp(0.0, 1.0),
+      speedMultiplier: speedMultiplier?.clamp(0.1, 50.0),
+      interpolation: interpolation,
+    );
+    points.sort((a, b) => a.timeRatio.compareTo(b.timeRatio));
+
+    final newCurve = currentCurve.copyWith(
+      type: SpeedCurvePresetType.custom,
+      points: points,
+    );
+
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      speed: newCurve.averageSpeed.clamp(0.1, 50.0),
+      speedCurve: newCurve,
+    );
+    _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void removeSpeedPoint(int pointIndex) {
+    if (_selectedClipIndex == null) return;
+    final clip = _videoClips[_selectedClipIndex!];
+    if (clip.speedCurve == null || pointIndex < 0 || pointIndex >= clip.speedCurve!.points.length) return;
+    if (clip.speedCurve!.points.length <= 2) return; // Must retain at least 2 boundary points
+
+    _saveSnapshot();
+    final currentCurve = clip.speedCurve!;
+    final points = List<SpeedCurvePoint>.from(currentCurve.points)..removeAt(pointIndex);
+
+    final newCurve = currentCurve.copyWith(
+      type: SpeedCurvePresetType.custom,
+      points: points,
+    );
+
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      speed: newCurve.averageSpeed.clamp(0.1, 50.0),
+      speedCurve: newCurve,
+    );
+    _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
+    TtsService.announce('Speed point deleted');
+    notifyListeners();
+  }
+
+  void resetClipSpeed() {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      speed: 1.0,
+      clearSpeedCurve: true,
+      clearFreezeFrame: true,
+      isReversed: false,
+      isFrozen: false,
+    );
+    _playheadPosition = _playheadPosition.clamp(0.0, math.max(0.0, totalDurationInSeconds));
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
+    TtsService.announce('Speed reset');
+    notifyListeners();
+  }
+
+  void toggleClipReverse({int? index}) {
+    final targetIndex = index ?? _selectedClipIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _videoClips.length) return;
+    _saveSnapshot();
+    final clip = _videoClips[targetIndex];
+    final newReversed = !clip.isReversed;
+    _videoClips[targetIndex] = clip.copyWith(isReversed: newReversed);
+    scheduleAutoSave();
+    TtsService.announce(newReversed ? 'Reverse playback enabled' : 'Reverse playback disabled');
+    notifyListeners();
+  }
+
+  void addFreezeFrameAtPlayhead({
+    Duration? timelineOffset,
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    if (_selectedClipIndex == null) return;
+    final clip = _videoClips[_selectedClipIndex!];
+    final Duration effectiveTimelineOffset;
+    if (timelineOffset != null) {
+      effectiveTimelineOffset = timelineOffset;
+    } else {
+      final clipStart = getClipStartTime(_selectedClipIndex!);
+      final offsetInClipSec = _playheadPosition - clipStart;
+      if (offsetInClipSec < 0.0 || offsetInClipSec > clip.durationInSeconds) return;
+      effectiveTimelineOffset = Duration(milliseconds: (offsetInClipSec * 1000).round());
+    }
+
+    _saveSnapshot();
+    final sourceTime = TimeRemapper.timelineToSourceTime(
+      timelineOffset: effectiveTimelineOffset,
+      trimStart: clip.trimStart,
+      trimEnd: clip.trimEnd,
+      originalDuration: clip.originalDuration,
+      speedCurve: clip.speedCurve,
+      constantSpeed: clip.speed,
+      isReversed: clip.isReversed,
+      freezeFrame: clip.freezeFrame,
+    );
+
+    final freeze = FreezeFrame(
+      timelineOffset: effectiveTimelineOffset,
+      duration: duration,
+      sourceTime: sourceTime,
+    );
+
+    _videoClips[_selectedClipIndex!] = clip.copyWith(freezeFrame: freeze);
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
+    TtsService.announce('Freeze frame added');
+    notifyListeners();
+  }
+
+  void removeFreezeFrame({int? index}) {
+    final targetIndex = index ?? _selectedClipIndex;
+    if (targetIndex == null || targetIndex < 0 || targetIndex >= _videoClips.length) return;
+    _saveSnapshot();
+    final clip = _videoClips[targetIndex];
+    _videoClips[targetIndex] = clip.copyWith(clearFreezeFrame: true, isFrozen: false);
+    _cleanupInvalidTransitions();
+    scheduleAutoSave();
+    TtsService.announce('Freeze frame removed');
+    notifyListeners();
+  }
+
+  // --- PIP Video Overlay Speed Operations ---
+
+  void setOverlaySpeed(String overlayId, double speed) {
+    final idx = _overlayClips.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    final overlay = _overlayClips[idx];
+    if (overlay.isPhotoOverlay) return; // Image PIP unaffected
+
+    _saveSnapshot();
+    final clampedSpeed = speed.clamp(0.1, 100.0);
+    _overlayClips[idx] = overlay.copyWith(
+      speed: clampedSpeed,
+      clearSpeedCurve: true,
+    );
+    scheduleAutoSave();
+    final label = clampedSpeed == clampedSpeed.roundToDouble()
+        ? clampedSpeed.toInt().toString()
+        : clampedSpeed.toStringAsFixed(1);
+    TtsService.announce('Speed set to $label times');
+    notifyListeners();
+  }
+
+  void setOverlaySpeedCurve(String overlayId, SpeedCurve curve) {
+    final idx = _overlayClips.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    final overlay = _overlayClips[idx];
+    if (overlay.isPhotoOverlay) return; // Image PIP unaffected
+
+    _saveSnapshot();
+    final avgSpeed = curve.averageSpeed.clamp(0.1, 100.0);
+    _overlayClips[idx] = overlay.copyWith(
+      speed: avgSpeed,
+      speedCurve: curve,
+    );
+    scheduleAutoSave();
+    TtsService.announce('Speed ramp selected');
+    notifyListeners();
+  }
+
+  void toggleOverlayReverse(String overlayId) {
+    final idx = _overlayClips.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    final overlay = _overlayClips[idx];
+    if (overlay.isPhotoOverlay) return;
+
+    _saveSnapshot();
+    _overlayClips[idx] = overlay.copyWith(isReversed: !overlay.isReversed);
+    scheduleAutoSave();
+    TtsService.announce(!overlay.isReversed ? 'Reverse playback enabled' : 'Reverse playback disabled');
+    notifyListeners();
+  }
+
+  void addOverlayFreezeFrame(
+    String overlayId, {
+    Duration? timelineOffset,
+    Duration duration = const Duration(seconds: 3),
+  }) {
+    final idx = _overlayClips.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    final overlay = _overlayClips[idx];
+    if (overlay.isPhotoOverlay) return;
+
+    final Duration effectiveTimelineOffset;
+    if (timelineOffset != null) {
+      effectiveTimelineOffset = timelineOffset;
+    } else {
+      final overlayStart = overlay.startTimeInSeconds;
+      final offsetInOverlaySec = _playheadPosition - overlayStart;
+      if (offsetInOverlaySec < 0.0 || offsetInOverlaySec > overlay.durationInSeconds) return;
+      effectiveTimelineOffset = Duration(milliseconds: (offsetInOverlaySec * 1000).round());
+    }
+
+    _saveSnapshot();
+    final sourceTime = TimeRemapper.timelineToSourceTime(
+      timelineOffset: effectiveTimelineOffset,
+      trimStart: Duration.zero,
+      trimEnd: overlay.duration,
+      originalDuration: overlay.duration,
+      speedCurve: overlay.speedCurve,
+      constantSpeed: overlay.speed,
+      isReversed: overlay.isReversed,
+      freezeFrame: overlay.freezeFrame,
+    );
+
+    final freeze = FreezeFrame(
+      timelineOffset: effectiveTimelineOffset,
+      duration: duration,
+      sourceTime: sourceTime,
+    );
+
+    _overlayClips[idx] = overlay.copyWith(freezeFrame: freeze);
+    scheduleAutoSave();
+    TtsService.announce('Freeze frame added');
+    notifyListeners();
+  }
+
+  void removeOverlayFreezeFrame(String overlayId) {
+    final idx = _overlayClips.indexWhere((o) => o.id == overlayId);
+    if (idx == -1) return;
+    final overlay = _overlayClips[idx];
+    _saveSnapshot();
+    _overlayClips[idx] = overlay.copyWith(clearFreezeFrame: true, isFrozen: false);
+    scheduleAutoSave();
+    TtsService.announce('Freeze frame removed');
     notifyListeners();
   }
 
@@ -4987,8 +5388,18 @@ class EditorViewModel extends ChangeNotifier {
   /// Canonical mapping from timeline time to clip source time.
   static double timelineToSourceTime(VideoClip clip, double timelinePos, double clipTimelineStart) {
     final deltaSec = (timelinePos - clipTimelineStart);
-    final sourceOffsetSec = (clip.trimStart.inMilliseconds / 1000.0) + (deltaSec * clip.speed);
-    return sourceOffsetSec.clamp(0.0, clip.originalDuration.inMilliseconds / 1000.0);
+    final sourceDur = TimeRemapper.timelineToSourceTime(
+      timelineOffset: Duration(milliseconds: (deltaSec * 1000).round()),
+      trimStart: clip.trimStart,
+      trimEnd: clip.trimEnd,
+      originalDuration: clip.originalDuration,
+      speedCurve: clip.speedCurve,
+      constantSpeed: clip.speed,
+      freezeFrame: clip.freezeFrame,
+      isFrozen: clip.isFrozen,
+      isReversed: clip.isReversed,
+    );
+    return (sourceDur.inMilliseconds / 1000.0).clamp(0.0, clip.originalDuration.inMilliseconds / 1000.0);
   }
 
   /// Evaluates and returns the active transition state at the current playhead position,

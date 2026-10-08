@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/domain/models/keyframe.dart';
+import 'package:capcut_video_editor/domain/models/speed_curve.dart';
 import 'package:capcut_video_editor/domain/models/video_mask.dart';
 
 /// Animation configuration for PIP overlay entrance, overall loop, or exit
@@ -337,8 +338,12 @@ class OverlayClip {
   final String? thumbnailPath;
   final bool isPhoto;
 
-  // Speed Control (0.25x to 4.0x)
+  // Speed Control & Time Remapping
   final double speed;
+  final SpeedCurve? speedCurve;
+  final bool isFrozen;
+  final bool isReversed;
+  final FreezeFrame? freezeFrame;
 
   // Audio Mixer (0% to 200% volume, mute, fades)
   final double volume;
@@ -414,6 +419,10 @@ class OverlayClip {
     this.thumbnailPath,
     this.isPhoto = false,
     this.speed = 1.0,
+    this.speedCurve,
+    this.isFrozen = false,
+    this.isReversed = false,
+    this.freezeFrame,
     this.volume = 1.0,
     this.isMuted = false,
     this.fadeInDurationSec = 0.0,
@@ -448,13 +457,26 @@ class OverlayClip {
   KeyframeTrackGroup get effectiveKeyframeTracks =>
       keyframeTracks ?? KeyframeTrackGroup.fromVideoKeyframes(keyframes);
 
+  /// Effective duration on timeline after speed remapping or freeze
+  Duration get activeDuration => isPhotoOverlay
+      ? duration
+      : TimeRemapper.calculateActiveDuration(
+          trimStart: Duration.zero,
+          trimEnd: duration,
+          originalDuration: duration,
+          speedCurve: speedCurve,
+          constantSpeed: speed,
+          freezeFrame: freezeFrame,
+          isFrozen: isFrozen,
+        );
+
   double get startTimeInSeconds => startTime.inMilliseconds / 1000.0;
-  double get durationInSeconds => duration.inMilliseconds / 1000.0;
-  double get endTimeInSeconds => (startTime.inMilliseconds + duration.inMilliseconds) / 1000.0;
-  Duration get endTime => startTime + duration;
+  double get durationInSeconds => activeDuration.inMilliseconds / 1000.0;
+  double get endTimeInSeconds => (startTime.inMilliseconds + activeDuration.inMilliseconds) / 1000.0;
+  Duration get endTime => startTime + activeDuration;
   int get startTimeMs => startTime.inMilliseconds;
-  int get durationMs => duration.inMilliseconds;
-  int get endTimeMs => startTime.inMilliseconds + duration.inMilliseconds;
+  int get durationMs => activeDuration.inMilliseconds;
+  int get endTimeMs => startTime.inMilliseconds + activeDuration.inMilliseconds;
 
   bool get isPhotoOverlay =>
       isPhoto ||
@@ -548,6 +570,12 @@ class OverlayClip {
     String? thumbnailPath,
     bool? isPhoto,
     double? speed,
+    SpeedCurve? speedCurve,
+    bool clearSpeedCurve = false,
+    bool? isFrozen,
+    bool? isReversed,
+    FreezeFrame? freezeFrame,
+    bool clearFreezeFrame = false,
     double? volume,
     bool? isMuted,
     double? fadeInDurationSec,
@@ -611,6 +639,10 @@ class OverlayClip {
       thumbnailPath: thumbnailPath ?? this.thumbnailPath,
       isPhoto: isPhoto ?? this.isPhoto,
       speed: speed ?? this.speed,
+      speedCurve: clearSpeedCurve ? null : (speedCurve ?? this.speedCurve),
+      isFrozen: isFrozen ?? this.isFrozen,
+      isReversed: isReversed ?? this.isReversed,
+      freezeFrame: clearFreezeFrame ? null : (freezeFrame ?? this.freezeFrame),
       volume: volume ?? this.volume,
       isMuted: isMuted ?? this.isMuted,
       fadeInDurationSec: fadeInDurationSec ?? this.fadeInDurationSec,
@@ -664,6 +696,10 @@ class OverlayClip {
       if (thumbnailPath != null) 'thumbnailPath': thumbnailPath,
       'isPhoto': isPhoto,
       'speed': speed,
+      if (speedCurve != null) 'speedCurve': speedCurve!.toJson(),
+      'isFrozen': isFrozen,
+      'isReversed': isReversed,
+      if (freezeFrame != null) 'freezeFrame': freezeFrame!.toJson(),
       'volume': volume,
       'isMuted': isMuted,
       'fadeInDurationSec': fadeInDurationSec,
@@ -774,6 +810,14 @@ class OverlayClip {
               (json['title'] as String).toLowerCase().endsWith('.gif')
           )))),
       speed: (json['speed'] as num?)?.toDouble() ?? 1.0,
+      speedCurve: json['speedCurve'] != null
+          ? SpeedCurve.fromJson(json['speedCurve'] as Map<String, dynamic>)
+          : null,
+      isFrozen: json['isFrozen'] as bool? ?? false,
+      isReversed: json['isReversed'] as bool? ?? false,
+      freezeFrame: json['freezeFrame'] != null
+          ? FreezeFrame.fromJson(json['freezeFrame'] as Map<String, dynamic>)
+          : null,
       volume: (json['volume'] as num?)?.toDouble() ?? 1.0,
       isMuted: json['isMuted'] as bool? ?? false,
       fadeInDurationSec: (json['fadeInDurationSec'] as num?)?.toDouble() ?? 0.0,

@@ -113,6 +113,9 @@ class _SpeedAdjustmentSheetState extends State<SpeedAdjustmentSheet> with Single
         case SpeedCurvePresetType.bubbly:
           _curvePoints = List.from(SpeedCurve.bubbly().points);
           break;
+        case SpeedCurvePresetType.smooth:
+          _curvePoints = List.from(SpeedCurve.smooth().points);
+          break;
         case SpeedCurvePresetType.custom:
           if (_curvePoints.isEmpty) {
             _curvePoints = List.from(SpeedCurve.custom().points);
@@ -378,6 +381,7 @@ class _SpeedAdjustmentSheetState extends State<SpeedAdjustmentSheet> with Single
       _SpeedPresetOption(type: SpeedCurvePresetType.jumpCut, label: 'Jump Cut', icon: Icons.content_cut_rounded),
       _SpeedPresetOption(type: SpeedCurvePresetType.flashIn, label: 'Flash In', icon: Icons.keyboard_double_arrow_right_rounded),
       _SpeedPresetOption(type: SpeedCurvePresetType.flashOut, label: 'Flash Out', icon: Icons.keyboard_double_arrow_left_rounded),
+      _SpeedPresetOption(type: SpeedCurvePresetType.smooth, label: 'Smooth', icon: Icons.waves_rounded),
       _SpeedPresetOption(type: SpeedCurvePresetType.bubbly, label: 'Bubbly', icon: Icons.bubble_chart_rounded),
       _SpeedPresetOption(type: SpeedCurvePresetType.custom, label: 'Custom', icon: Icons.tune_rounded),
     ];
