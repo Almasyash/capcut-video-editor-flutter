@@ -245,7 +245,18 @@ enum AnimatableProperty {
   blendOpacity('Blend Opacity', '%', 1.0, 0.0, 1.0),
 
   // Audio Specific
-  volume('Volume', '%', 1.0, 0.0, 2.0);
+  volume('Volume', '%', 1.0, 0.0, 2.0),
+
+  // Mask Specific
+  maskPositionX('Mask Position X', '', 0.0, -3.0, 3.0),
+  maskPositionY('Mask Position Y', '', 0.0, -3.0, 3.0),
+  maskScale('Mask Scale', 'x', 1.0, 0.05, 10.0),
+  maskRotation('Mask Rotation', '°', 0.0, -3600.0, 3600.0),
+  maskOpacity('Mask Opacity', '%', 1.0, 0.0, 1.0),
+  maskFeather('Mask Feather', 'px', 0.0, 0.0, 100.0),
+  maskExpansion('Mask Expansion', 'px', 0.0, -100.0, 100.0),
+  maskWidth('Mask Width', '%', 0.5, 0.01, 2.0),
+  maskHeight('Mask Height', '%', 0.5, 0.01, 2.0);
 
   // Alias for sharpen / sharpness compatibility
   static AnimatableProperty get sharpen => AnimatableProperty.sharpness;
@@ -289,6 +300,17 @@ enum AnimatableProperty {
       this == AnimatableProperty.effectIntensity;
 
   bool get isAudio => this == AnimatableProperty.volume;
+
+  bool get isMask =>
+      this == AnimatableProperty.maskPositionX ||
+      this == AnimatableProperty.maskPositionY ||
+      this == AnimatableProperty.maskScale ||
+      this == AnimatableProperty.maskRotation ||
+      this == AnimatableProperty.maskOpacity ||
+      this == AnimatableProperty.maskFeather ||
+      this == AnimatableProperty.maskExpansion ||
+      this == AnimatableProperty.maskWidth ||
+      this == AnimatableProperty.maskHeight;
 
   double sanitize(double val) {
     if (val.isNaN || val.isInfinite) return defaultValue;

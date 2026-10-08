@@ -1603,9 +1603,12 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       );
     }
 
-    if (activeClip is VideoClip && activeClip.mask != null) {
-      videoContent = ClipPath(
-        clipper: MaskPathClipper(activeClip.mask!),
+    if (activeClip is VideoClip && activeClip.masks.any((m) => m.isActive)) {
+      final relTime = (viewModel.playheadPosition - viewModel.selectedClipStartTime)
+          .clamp(0.0, activeClip.durationInSeconds);
+      final evaluatedMasks = activeClip.masks.map((m) => m.evaluateAt(relTime)).toList();
+      videoContent = SoftMaskWidget(
+        masks: evaluatedMasks,
         child: videoContent,
       );
     }
@@ -4307,9 +4310,12 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
     }
 
     // 6. Apply Mask
-    if (overlay.mask != null) {
-      visual = ClipPath(
-        clipper: MaskPathClipper(overlay.mask!),
+    if (overlay.masks.any((m) => m.isActive)) {
+      final relTime = (widget.viewModel.playheadPosition - overlay.startTimeInSeconds)
+          .clamp(0.0, overlay.durationInSeconds);
+      final evaluatedMasks = overlay.masks.map((m) => m.evaluateAt(relTime)).toList();
+      visual = SoftMaskWidget(
+        masks: evaluatedMasks,
         child: visual,
       );
     }
@@ -4733,90 +4739,110 @@ class MaskPathClipper extends CustomClipper<Path> {
   MaskPathClipper(this.mask);
 
   @override
-  Path getClip(Size size) {
-    final Path path = Path();
-    final center = Offset(
-      size.width / 2 + (mask.positionX * size.width / 2),
-      size.height / 2 + (mask.positionY * size.height / 2),
-    );
-    final w = size.width * (mask.rectWidth ?? mask.size);
-    final h = size.height * (mask.rectHeight ?? mask.size);
-
-    switch (mask.type) {
-      case MaskType.none:
-        path.addRect(Rect.fromLTWH(0, 0, size.width, size.height));
-        break;
-
-      case MaskType.split:
-        path.addRect(Rect.fromLTWH(0, 0, size.width, size.height * 0.5 * mask.size + size.height * 0.25));
-        break;
-
-      case MaskType.filmstrip:
-        final barHeight = (size.height * (1.0 - mask.size.clamp(0.2, 0.9))) / 2;
-        path.addRect(Rect.fromLTWH(0, barHeight, size.width, size.height - barHeight * 2));
-        break;
-
-      case MaskType.rectangle:
-        path.addRRect(
-          RRect.fromRectAndRadius(
-            Rect.fromCenter(center: center, width: w, height: h),
-            Radius.circular(mask.feather > 0 ? mask.feather * 2 : 8),
-          ),
-        );
-        break;
-
-      case MaskType.circle:
-        path.addOval(Rect.fromCenter(center: center, width: w, height: h));
-        break;
-
-      case MaskType.heart:
-        final scale = mask.size;
-        final hw = size.width / 2;
-        final hh = size.height / 2;
-        path.moveTo(hw, hh + 40 * scale);
-        path.cubicTo(hw - 60 * scale, hh, hw - 60 * scale, hh - 40 * scale, hw, hh - 15 * scale);
-        path.cubicTo(hw + 60 * scale, hh - 40 * scale, hw + 60 * scale, hh, hw, hh + 40 * scale);
-        path.close();
-        break;
-
-      case MaskType.star:
-        final outerR = (w / 2);
-        final innerR = outerR * 0.45;
-        for (int i = 0; i < 5; i++) {
-          final outerAngle = -math.pi / 2 + (i * 2 * math.pi / 5);
-          final innerAngle = outerAngle + math.pi / 5;
-          final ox = center.dx + outerR * math.cos(outerAngle);
-          final oy = center.dy + outerR * math.sin(outerAngle);
-          final ix = center.dx + innerR * math.cos(innerAngle);
-          final iy = center.dy + innerR * math.sin(innerAngle);
-          if (i == 0) {
-            path.moveTo(ox, oy);
-          } else {
-            path.lineTo(ox, oy);
-          }
-          path.lineTo(ix, iy);
-        }
-        path.close();
-        break;
-    }
-
-    if (mask.inverted) {
-      final full = Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
-      return Path.combine(PathOperation.difference, full, path);
-    }
-
-    return path;
-  }
+  Path getClip(Size size) => mask.toPath(size);
 
   @override
   bool shouldReclip(covariant MaskPathClipper oldClipper) =>
       oldClipper.mask.type != mask.type ||
+      oldClipper.mask.scale != mask.scale ||
       oldClipper.mask.size != mask.size ||
       oldClipper.mask.feather != mask.feather ||
+      oldClipper.mask.expansion != mask.expansion ||
       oldClipper.mask.positionX != mask.positionX ||
       oldClipper.mask.positionY != mask.positionY ||
       oldClipper.mask.rotation != mask.rotation ||
       oldClipper.mask.inverted != mask.inverted ||
-      oldClipper.mask.rectWidth != mask.rectWidth ||
-      oldClipper.mask.rectHeight != mask.rectHeight;
+      oldClipper.mask.width != mask.width ||
+      oldClipper.mask.height != mask.height;
+}
+
+class MultiMaskPathClipper extends CustomClipper<Path> {
+  final List<VideoMask> masks;
+
+  MultiMaskPathClipper(this.masks);
+
+  @override
+  Path getClip(Size size) => computeCombinedPath(masks, size);
+
+  static Path computeCombinedPath(List<VideoMask> masks, Size size) {
+    final active = masks.where((m) => m.isActive).toList();
+    if (active.isEmpty) {
+      return Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+    }
+
+    Path? accumulated;
+    for (int i = 0; i < active.length; i++) {
+      final m = active[i];
+      final mPath = m.toPath(size);
+      if (accumulated == null) {
+        accumulated = mPath;
+      } else {
+        accumulated = Path.combine(m.combineMode.pathOperation, accumulated, mPath);
+      }
+    }
+    return accumulated ?? (Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height)));
+  }
+
+  @override
+  bool shouldReclip(covariant MultiMaskPathClipper oldClipper) => true;
+}
+
+class SoftMaskWidget extends SingleChildRenderObjectWidget {
+  final List<VideoMask> masks;
+
+  const SoftMaskWidget({super.key, required this.masks, super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) => RenderSoftMask(masks: masks);
+
+  @override
+  void updateRenderObject(BuildContext context, RenderSoftMask renderObject) {
+    renderObject.masks = masks;
+  }
+}
+
+class RenderSoftMask extends RenderProxyBox {
+  List<VideoMask> _masks;
+
+  RenderSoftMask({required List<VideoMask> masks}) : _masks = masks;
+
+  set masks(List<VideoMask> value) {
+    _masks = value;
+    markNeedsPaint();
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final activeMasks = _masks.where((m) => m.isActive).toList();
+    if (activeMasks.isEmpty) {
+      super.paint(context, offset);
+      return;
+    }
+
+    final rect = offset & size;
+    final maxFeather = activeMasks.fold<double>(0.0, (maxVal, m) => math.max(maxVal, m.feather));
+
+    if (maxFeather <= 0.0) {
+      final combinedPath = MultiMaskPathClipper.computeCombinedPath(activeMasks, size).shift(offset);
+      context.pushClipPath(needsCompositing, offset, rect, combinedPath, (context, offset) {
+        super.paint(context, offset);
+      });
+      return;
+    }
+
+    // Hardware-accelerated soft feathering layer via Skia/Impeller
+    final combinedPath = MultiMaskPathClipper.computeCombinedPath(activeMasks, size).shift(offset);
+
+    context.canvas.saveLayer(rect, Paint());
+    super.paint(context, offset);
+
+    final sigma = (maxFeather * (size.shortestSide / 400.0)).clamp(1.0, 30.0);
+    final maskPaint = Paint()
+      ..style = PaintingStyle.fill
+      ..blendMode = BlendMode.dstIn
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, sigma);
+
+    context.canvas.drawPath(combinedPath, maskPaint);
+    context.canvas.restore();
+  }
 }

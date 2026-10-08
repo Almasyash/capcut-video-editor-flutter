@@ -386,6 +386,7 @@ class DeviceMediaService {
         'filterId': project.activeFilter.id,
         'filterIntensity': project.activeFilter.intensity,
         'keyframeTracks': clip.effectiveKeyframeTracks.toJson(),
+        'masks': clip.masks.map((m) => m.toJson()).toList(),
       });
     }
 
@@ -574,6 +575,7 @@ class DeviceMediaService {
         'glowRadius': overlay.glow?.radius ?? 12.0,
         'glowIntensity': overlay.glow?.intensity ?? 0.7,
         'keyframeTracks': overlay.effectiveKeyframeTracks.toJson(),
+        'masks': overlay.masks.map((m) => m.toJson()).toList(),
       });
     }
 

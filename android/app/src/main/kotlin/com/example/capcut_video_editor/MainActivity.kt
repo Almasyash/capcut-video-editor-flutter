@@ -1316,6 +1316,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>),
                 speedCurve = SpeedRemapParser.parseSpeedCurve(map["speedCurve"] as? Map<String, Any>),
                 freezeFrame = SpeedRemapParser.parseFreezeFrame(map["freezeFrame"] as? Map<String, Any>),
+                masks = MaskParser.parseMasks(map["masks"] as? List<Any>),
                 isFrozen = map["isFrozen"] as? Boolean ?: false,
                 isReversed = map["isReversed"] as? Boolean ?: false
             )
@@ -1436,6 +1437,7 @@ class MainActivity : FlutterActivity(), TextToSpeech.OnInitListener {
                 keyframeTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>),
                 speedCurve = SpeedRemapParser.parseSpeedCurve(map["speedCurve"] as? Map<String, Any>),
                 freezeFrame = SpeedRemapParser.parseFreezeFrame(map["freezeFrame"] as? Map<String, Any>),
+                masks = MaskParser.parseMasks(map["masks"] as? List<Any>),
                 isFrozen = map["isFrozen"] as? Boolean ?: false,
                 isReversed = map["isReversed"] as? Boolean ?: false
             )

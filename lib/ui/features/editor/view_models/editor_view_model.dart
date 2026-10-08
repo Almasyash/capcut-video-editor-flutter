@@ -1586,7 +1586,7 @@ class EditorViewModel extends ChangeNotifier {
       scale: 0.45,
       opacity: original.opacity,
       blendMode: original.blendMode,
-      mask: original.mask,
+      masks: original.masks,
     );
 
     _overlayClips.add(overlay);
@@ -5746,6 +5746,19 @@ class EditorViewModel extends ChangeNotifier {
       group = group.addKeyframe(AnimatableProperty.vignette, timeMs, adj.vignette);
       group = group.addKeyframe(AnimatableProperty.sharpness, timeMs, adj.sharpness);
 
+      if (clip.mask != null && clip.mask!.isActive) {
+        final m = clip.mask!;
+        group = group.addKeyframe(AnimatableProperty.maskPositionX, timeMs, m.positionX);
+        group = group.addKeyframe(AnimatableProperty.maskPositionY, timeMs, m.positionY);
+        group = group.addKeyframe(AnimatableProperty.maskScale, timeMs, m.scale);
+        group = group.addKeyframe(AnimatableProperty.maskRotation, timeMs, m.rotation);
+        group = group.addKeyframe(AnimatableProperty.maskOpacity, timeMs, m.opacity);
+        group = group.addKeyframe(AnimatableProperty.maskFeather, timeMs, m.feather);
+        group = group.addKeyframe(AnimatableProperty.maskExpansion, timeMs, m.expansion);
+        group = group.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
+        group = group.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
+      }
+
       _videoClips[_selectedClipIndex!] = clip.copyWith(
         keyframes: updatedKeyframes,
         keyframeTracks: group,
@@ -5791,6 +5804,18 @@ class EditorViewModel extends ChangeNotifier {
       }
       if (overlay.effectIntensity > 0) {
         group = group.addKeyframe(AnimatableProperty.effectIntensity, timeMs, overlay.effectIntensity);
+      }
+      if (overlay.mask != null && overlay.mask!.isActive) {
+        final m = overlay.mask!;
+        group = group.addKeyframe(AnimatableProperty.maskPositionX, timeMs, m.positionX);
+        group = group.addKeyframe(AnimatableProperty.maskPositionY, timeMs, m.positionY);
+        group = group.addKeyframe(AnimatableProperty.maskScale, timeMs, m.scale);
+        group = group.addKeyframe(AnimatableProperty.maskRotation, timeMs, m.rotation);
+        group = group.addKeyframe(AnimatableProperty.maskOpacity, timeMs, m.opacity);
+        group = group.addKeyframe(AnimatableProperty.maskFeather, timeMs, m.feather);
+        group = group.addKeyframe(AnimatableProperty.maskExpansion, timeMs, m.expansion);
+        group = group.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
+        group = group.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
       }
 
       _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
@@ -6226,20 +6251,247 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   // ==========================================
-  // MASKING
+  // MASKING & COMPOSITING ENGINE (v1.6.0)
   // ==========================================
-  void setClipMask(VideoMask mask) {
+  int _selectedMaskIndex = 0;
+  int get selectedMaskIndex => _selectedMaskIndex;
+  void setSelectedMaskIndex(int index) {
+    _selectedMaskIndex = index;
+    notifyListeners();
+  }
+
+  void addMaskToSelectedClip(VideoMask mask) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    final updatedMasks = List<VideoMask>.from(clip.masks)..add(mask);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updatedMasks);
+    _selectedMaskIndex = updatedMasks.length - 1;
+    scheduleAutoSave();
+    TtsService.announce('Added ${mask.type.displayName} mask');
+    notifyListeners();
+  }
+
+  void updateMaskInSelectedClip(int index, VideoMask mask) {
     if (_selectedClipIndex == null) return;
     final clip = _videoClips[_selectedClipIndex!];
-    _videoClips[_selectedClipIndex!] = clip.copyWith(mask: mask);
+    if (index < 0 || index >= clip.masks.length) return;
+    final updatedMasks = List<VideoMask>.from(clip.masks);
+    updatedMasks[index] = mask;
+    _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void removeMaskFromSelectedClip(int index) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    if (index < 0 || index >= clip.masks.length) return;
+    final updatedMasks = List<VideoMask>.from(clip.masks)..removeAt(index);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(
+      masks: updatedMasks,
+      clearMask: updatedMasks.isEmpty,
+    );
+    if (_selectedMaskIndex >= updatedMasks.length) {
+      _selectedMaskIndex = math.max(0, updatedMasks.length - 1);
+    }
+    scheduleAutoSave();
+    TtsService.announce('Delete mask');
+    notifyListeners();
+  }
+
+  void duplicateMaskInSelectedClip(int index) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    if (index < 0 || index >= clip.masks.length) return;
+    final original = clip.masks[index];
+    final copy = original.copyWith(
+      id: 'mask_${DateTime.now().microsecondsSinceEpoch}',
+      name: '${original.name} (Copy)',
+    );
+    final updatedMasks = List<VideoMask>.from(clip.masks)..insert(index + 1, copy);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updatedMasks);
+    _selectedMaskIndex = index + 1;
+    scheduleAutoSave();
+    TtsService.announce('Duplicated mask');
+    notifyListeners();
+  }
+
+  void reorderMasksInSelectedClip(int oldIndex, int newIndex) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    if (oldIndex < 0 || oldIndex >= clip.masks.length || newIndex < 0 || newIndex >= clip.masks.length) return;
+    final updatedMasks = List<VideoMask>.from(clip.masks);
+    final item = updatedMasks.removeAt(oldIndex);
+    updatedMasks.insert(newIndex, item);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updatedMasks);
+    _selectedMaskIndex = newIndex;
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void setClipMask(VideoMask mask) {
+    if (_selectedClipIndex == null) return;
+    _saveSnapshot();
+    final clip = _videoClips[_selectedClipIndex!];
+    if (clip.masks.isEmpty) {
+      _videoClips[_selectedClipIndex!] = clip.copyWith(masks: [mask]);
+      _selectedMaskIndex = 0;
+    } else {
+      final updated = List<VideoMask>.from(clip.masks);
+      final idx = _selectedMaskIndex.clamp(0, updated.length - 1);
+      updated[idx] = mask;
+      _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updated);
+    }
+    scheduleAutoSave();
+    TtsService.announce('${mask.type.displayName} mask');
     notifyListeners();
   }
 
   void removeClipMask() {
     if (_selectedClipIndex == null) return;
+    _saveSnapshot();
     final clip = _videoClips[_selectedClipIndex!];
     _videoClips[_selectedClipIndex!] = clip.copyWith(clearMask: true);
+    _selectedMaskIndex = 0;
+    scheduleAutoSave();
+    TtsService.announce('Reset mask');
     notifyListeners();
+  }
+
+  // --- PIP / Overlay Multi-Mask Methods ---
+  void addMaskToSelectedOverlay(VideoMask mask) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    _saveSnapshot();
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    final updatedMasks = List<VideoMask>.from(overlay.masks)..add(mask);
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
+    _selectedMaskIndex = updatedMasks.length - 1;
+    scheduleAutoSave();
+    TtsService.announce('Added ${mask.type.displayName} mask');
+    notifyListeners();
+  }
+
+  void updateMaskInSelectedOverlay(int index, VideoMask mask) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    if (index < 0 || index >= overlay.masks.length) return;
+    final updatedMasks = List<VideoMask>.from(overlay.masks);
+    updatedMasks[index] = mask;
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void removeMaskFromSelectedOverlay(int index) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    _saveSnapshot();
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    if (index < 0 || index >= overlay.masks.length) return;
+    final updatedMasks = List<VideoMask>.from(overlay.masks)..removeAt(index);
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+      masks: updatedMasks,
+      clearMask: updatedMasks.isEmpty,
+    );
+    if (_selectedMaskIndex >= updatedMasks.length) {
+      _selectedMaskIndex = math.max(0, updatedMasks.length - 1);
+    }
+    scheduleAutoSave();
+    TtsService.announce('Delete mask');
+    notifyListeners();
+  }
+
+  void duplicateMaskInSelectedOverlay(int index) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    _saveSnapshot();
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    if (index < 0 || index >= overlay.masks.length) return;
+    final original = overlay.masks[index];
+    final copy = original.copyWith(
+      id: 'mask_${DateTime.now().microsecondsSinceEpoch}',
+      name: '${original.name} (Copy)',
+    );
+    final updatedMasks = List<VideoMask>.from(overlay.masks)..insert(index + 1, copy);
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
+    _selectedMaskIndex = index + 1;
+    scheduleAutoSave();
+    TtsService.announce('Duplicated mask');
+    notifyListeners();
+  }
+
+  void reorderMasksInSelectedOverlay(int oldIndex, int newIndex) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    _saveSnapshot();
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    if (oldIndex < 0 || oldIndex >= overlay.masks.length || newIndex < 0 || newIndex >= overlay.masks.length) return;
+    final updatedMasks = List<VideoMask>.from(overlay.masks);
+    final item = updatedMasks.removeAt(oldIndex);
+    updatedMasks.insert(newIndex, item);
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
+    _selectedMaskIndex = newIndex;
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  /// Adds a dedicated keyframe at the current playhead for the active mask
+  void addMaskKeyframeAtPlayhead() {
+    _saveSnapshot();
+    if (_selectedClipIndex != null) {
+      final clip = _videoClips[_selectedClipIndex!];
+      final m = (clip.masks.isNotEmpty && _selectedMaskIndex < clip.masks.length)
+          ? clip.masks[_selectedMaskIndex]
+          : clip.mask;
+      if (m == null || !m.isActive) return;
+
+      final relTime = (_playheadPosition - selectedClipStartTime).clamp(0.0, clip.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      var group = clip.effectiveKeyframeTracks;
+      group = group.addKeyframe(AnimatableProperty.maskPositionX, timeMs, m.positionX);
+      group = group.addKeyframe(AnimatableProperty.maskPositionY, timeMs, m.positionY);
+      group = group.addKeyframe(AnimatableProperty.maskScale, timeMs, m.scale);
+      group = group.addKeyframe(AnimatableProperty.maskRotation, timeMs, m.rotation);
+      group = group.addKeyframe(AnimatableProperty.maskOpacity, timeMs, m.opacity);
+      group = group.addKeyframe(AnimatableProperty.maskFeather, timeMs, m.feather);
+      group = group.addKeyframe(AnimatableProperty.maskExpansion, timeMs, m.expansion);
+      group = group.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
+      group = group.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
+
+      _videoClips[_selectedClipIndex!] = clip.copyWith(keyframeTracks: group);
+      HapticFeedback.mediumImpact();
+      scheduleAutoSave();
+      TtsService.announce('Mask keyframe');
+      notifyListeners();
+    } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
+      final overlay = _overlayClips[_selectedOverlayIndex!];
+      final m = (overlay.masks.isNotEmpty && _selectedMaskIndex < overlay.masks.length)
+          ? overlay.masks[_selectedMaskIndex]
+          : overlay.mask;
+      if (m == null || !m.isActive) return;
+
+      final relTime = (_playheadPosition - overlay.startTimeInSeconds).clamp(0.0, overlay.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      var group = overlay.effectiveKeyframeTracks;
+      group = group.addKeyframe(AnimatableProperty.maskPositionX, timeMs, m.positionX);
+      group = group.addKeyframe(AnimatableProperty.maskPositionY, timeMs, m.positionY);
+      group = group.addKeyframe(AnimatableProperty.maskScale, timeMs, m.scale);
+      group = group.addKeyframe(AnimatableProperty.maskRotation, timeMs, m.rotation);
+      group = group.addKeyframe(AnimatableProperty.maskOpacity, timeMs, m.opacity);
+      group = group.addKeyframe(AnimatableProperty.maskFeather, timeMs, m.feather);
+      group = group.addKeyframe(AnimatableProperty.maskExpansion, timeMs, m.expansion);
+      group = group.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
+      group = group.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
+
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(keyframeTracks: group);
+      HapticFeedback.mediumImpact();
+      scheduleAutoSave();
+      TtsService.announce('Mask keyframe');
+      notifyListeners();
+    }
   }
 
   // ==========================================
