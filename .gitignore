@@ -54,6 +54,9 @@ key.properties
 *.apk
 *.aab
 *.ipa
+release_distribution/
+release_assets/
+
 
 # Web related
 lib/generated_plugin_registrant.dart
