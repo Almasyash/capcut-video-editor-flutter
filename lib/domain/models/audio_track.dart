@@ -1,3 +1,5 @@
+import 'package:capcut_video_editor/domain/models/keyframe.dart';
+
 /// Model representing an audio or background music track on the timeline
 class AudioTrack {
   final String id;
@@ -24,6 +26,9 @@ class AudioTrack {
   /// Controls whether beat markers are displayed on the waveform and used for magnetic snapping
   final bool showBeats;
 
+  /// Optional keyframe track group (e.g. for volume automation)
+  final KeyframeTrackGroup? keyframeTracks;
+
   /// Layer Management (Lock & Visibility)
   final bool isLocked;
   final bool isVisible;
@@ -46,6 +51,7 @@ class AudioTrack {
     this.waveformPoints = const [],
     this.beats = const [],
     this.showBeats = true,
+    this.keyframeTracks,
     this.isLocked = false,
     this.isVisible = true,
   }) : name = title ?? name ?? 'Audio Track';
@@ -103,6 +109,39 @@ class AudioTrack {
     return Duration(milliseconds: fadeOutDuration.inMilliseconds.clamp(0, remMs));
   }
 
+  /// Authoritative keyframe track group
+  KeyframeTrackGroup get effectiveKeyframeTracks =>
+      keyframeTracks ?? const KeyframeTrackGroup();
+
+  /// Evaluates volume at time offset (in seconds) relative to clip start.
+  /// Combines static volume, keyframed volume, and fade in/out curves:
+  /// effectiveVolume = (isMuted ? 0.0 : volume * keyframeVolumeGain * fadeEnvelope).clamp(0.0, 2.0)
+  double getVolumeAt(double timeInSeconds) {
+    if (isMuted) return 0.0;
+
+    // 1. Evaluate keyframe track for audio volume if present
+    final keyframeGain = effectiveKeyframeTracks.evaluate(
+      AnimatableProperty.volume,
+      timeInSeconds,
+      fallback: 1.0,
+    );
+
+    // 2. Evaluate fade curve envelope
+    double fadeEnvelope = 1.0;
+    final fadeInSec = effectiveFadeInDuration.inMilliseconds / 1000.0;
+    final fadeOutSec = effectiveFadeOutDuration.inMilliseconds / 1000.0;
+    final totalDurSec = durationInSeconds;
+
+    if (fadeInSec > 0 && timeInSeconds < fadeInSec) {
+      fadeEnvelope = (timeInSeconds / fadeInSec).clamp(0.0, 1.0);
+    } else if (fadeOutSec > 0 && timeInSeconds > (totalDurSec - fadeOutSec)) {
+      final rem = totalDurSec - timeInSeconds;
+      fadeEnvelope = (rem / fadeOutSec).clamp(0.0, 1.0);
+    }
+
+    return (volume * keyframeGain * fadeEnvelope).clamp(0.0, 2.0);
+  }
+
   AudioTrack copyWith({
     String? id,
     String? assetId,
@@ -121,6 +160,7 @@ class AudioTrack {
     List<double>? waveformPoints,
     List<double>? beats,
     bool? showBeats,
+    KeyframeTrackGroup? keyframeTracks,
     bool? isLocked,
     bool? isVisible,
   }) {
@@ -141,6 +181,7 @@ class AudioTrack {
       waveformPoints: waveformPoints ?? this.waveformPoints,
       beats: beats ?? this.beats,
       showBeats: showBeats ?? this.showBeats,
+      keyframeTracks: keyframeTracks ?? this.keyframeTracks,
       isLocked: isLocked ?? this.isLocked,
       isVisible: isVisible ?? this.isVisible,
     );
@@ -164,6 +205,7 @@ class AudioTrack {
       'waveformPoints': waveformPoints,
       'beats': beats,
       'showBeats': showBeats,
+      if (keyframeTracks != null) 'keyframeTracks': keyframeTracks!.toJson(),
       'isLocked': isLocked,
       'isVisible': isVisible,
     };
@@ -198,6 +240,9 @@ class AudioTrack {
               .toList() ??
           const [],
       showBeats: json['showBeats'] as bool? ?? true,
+      keyframeTracks: json['keyframeTracks'] != null
+          ? KeyframeTrackGroup.fromJson(json['keyframeTracks'] as Map<String, dynamic>)
+          : null,
       isLocked: json['isLocked'] as bool? ?? false,
       isVisible: json['isVisible'] as bool? ?? true,
     );

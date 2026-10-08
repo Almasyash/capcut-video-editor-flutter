@@ -27,6 +27,7 @@ class VideoClip {
   final List<Color> previewGradient;
   final IconData previewIcon;
   final List<VideoKeyframe> keyframes;
+  final KeyframeTrackGroup? keyframeTracks;
   final VideoMask? mask;
   final BlendMode blendMode;
 
@@ -73,9 +74,14 @@ class VideoClip {
     this.scale = 1.0,
     this.rotationAngle = 0.0,
     this.keyframes = const [],
+    this.keyframeTracks,
     this.mask,
     this.blendMode = BlendMode.srcOver,
   });
+
+  /// Authoritative keyframe track group (falls back to legacy keyframes if not explicitly set)
+  KeyframeTrackGroup get effectiveKeyframeTracks =>
+      keyframeTracks ?? KeyframeTrackGroup.fromVideoKeyframes(keyframes);
 
   /// Effective playback volume respecting mute state
   double get effectiveVolume => isMuted ? 0.0 : volume;
@@ -116,12 +122,16 @@ class VideoClip {
     double? scale,
     double? rotationAngle,
     List<VideoKeyframe>? keyframes,
+    KeyframeTrackGroup? keyframeTracks,
     VideoMask? mask,
     bool clearMask = false,
     BlendMode? blendMode,
     bool? isLocked,
     bool? isVisible,
   }) {
+    final effectiveKfs = keyframes ?? (keyframeTracks != null ? keyframeTracks.toVideoKeyframes() : this.keyframes);
+    final effectiveTracks = keyframeTracks ?? (keyframes != null ? KeyframeTrackGroup.fromVideoKeyframes(keyframes) : this.keyframeTracks);
+
     return VideoClip(
       id: id ?? this.id,
       assetId: assetId ?? this.assetId,
@@ -147,7 +157,8 @@ class VideoClip {
       yPos: yPos ?? this.yPos,
       scale: scale ?? this.scale,
       rotationAngle: rotationAngle ?? this.rotationAngle,
-      keyframes: keyframes ?? this.keyframes,
+      keyframes: effectiveKfs,
+      keyframeTracks: effectiveTracks,
       mask: clearMask ? null : (mask ?? this.mask),
       blendMode: blendMode ?? this.blendMode,
     );
@@ -176,6 +187,7 @@ class VideoClip {
       'scale': scale,
       'rotationAngle': rotationAngle,
       if (keyframes.isNotEmpty) 'keyframes': keyframes.map((k) => k.toJson()).toList(),
+      if (keyframeTracks != null && keyframeTracks!.isNotEmpty) 'keyframeTracks': keyframeTracks!.toJson(),
       if (mask != null) 'mask': mask!.toJson(),
       'blendMode': blendMode.index,
       'isLocked': isLocked,
@@ -184,6 +196,18 @@ class VideoClip {
   }
 
   factory VideoClip.fromJson(Map<String, dynamic> json) {
+    final parsedKeyframes = (json['keyframes'] as List<dynamic>?)
+            ?.map((k) => VideoKeyframe.fromJson(k as Map<String, dynamic>))
+            .toList() ??
+        const <VideoKeyframe>[];
+
+    KeyframeTrackGroup? parsedTracks;
+    if (json['keyframeTracks'] != null) {
+      parsedTracks = KeyframeTrackGroup.fromJson(json['keyframeTracks'] as Map<String, dynamic>);
+    } else if (parsedKeyframes.isNotEmpty) {
+      parsedTracks = KeyframeTrackGroup.fromVideoKeyframes(parsedKeyframes);
+    }
+
     return VideoClip(
       id: json['id'] as String,
       assetId: json['assetId'] as String? ?? '',
@@ -210,10 +234,8 @@ class VideoClip {
       yPos: (json['yPos'] as num?)?.toDouble() ?? 0.0,
       scale: (json['scale'] as num?)?.toDouble() ?? 1.0,
       rotationAngle: (json['rotationAngle'] as num?)?.toDouble() ?? 0.0,
-      keyframes: (json['keyframes'] as List<dynamic>?)
-              ?.map((k) => VideoKeyframe.fromJson(k as Map<String, dynamic>))
-              .toList() ??
-          const [],
+      keyframes: parsedKeyframes,
+      keyframeTracks: parsedTracks,
       mask: json['mask'] != null ? VideoMask.fromJson(json['mask'] as Map<String, dynamic>) : null,
       blendMode: json['blendMode'] != null
           ? BlendMode.values[(json['blendMode'] as num).toInt().clamp(0, BlendMode.values.length - 1)]

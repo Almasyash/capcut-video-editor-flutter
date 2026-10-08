@@ -381,6 +381,7 @@ class DeviceMediaService {
         'sharpness': project.colorAdjustments.sharpness,
         'filterId': project.activeFilter.id,
         'filterIntensity': project.activeFilter.intensity,
+        'keyframeTracks': clip.effectiveKeyframeTracks.toJson(),
       });
     }
 
@@ -422,6 +423,7 @@ class DeviceMediaService {
           'fadeInMs': track.effectiveFadeInDuration.inMilliseconds,
           'fadeOutMs': track.effectiveFadeOutDuration.inMilliseconds,
           'isMuted': track.isMuted,
+          'keyframeTracks': track.effectiveKeyframeTracks.toJson(),
         });
       }
     }
@@ -447,6 +449,7 @@ class DeviceMediaService {
         'isUnderline': text.isUnderline,
         'textAlign': text.textAlign.name,
         'boxWidth': text.getEffectiveBoxWidth(targetWidth.toDouble()) * text.scale,
+        'keyframeTracks': text.effectiveKeyframeTracks.toJson(),
       });
     }
 
@@ -562,6 +565,7 @@ class DeviceMediaService {
         'glowColor': overlay.glow?.color.value ?? 0xFF00FFFF,
         'glowRadius': overlay.glow?.radius ?? 12.0,
         'glowIntensity': overlay.glow?.intensity ?? 0.7,
+        'keyframeTracks': overlay.effectiveKeyframeTracks.toJson(),
       });
     }
 

@@ -403,6 +403,64 @@ class _TimelineTextTrackItemState extends State<TimelineTextTrackItem> {
                 ),
               ),
             ),
+
+          // 4. Keyframe Diamond Markers
+          if (text.durationInSeconds > 0)
+            for (final sec in (text.effectiveKeyframeTracks.getAllTimestampsMs().isNotEmpty
+                ? text.effectiveKeyframeTracks.getAllTimestampsMs().map((ms) => ms / 1000.0)
+                : text.keyframes.map((k) => k.timeInSeconds))) ...[
+              () {
+                final ratio = (sec / text.durationInSeconds).clamp(0.0, 1.0);
+                final kfX = ratio * widget.width;
+                final isKeyframeActive = (widget.viewModel.playheadPosition - (text.startTimeInSeconds + sec)).abs() < 0.08;
+
+                return Positioned(
+                  left: (kfX - 7).clamp(0.0, math.max(0.0, widget.width - 14)),
+                  top: 3,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      widget.viewModel.seekTo(text.startTimeInSeconds + sec);
+                    },
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: Center(
+                        child: Transform.rotate(
+                          angle: math.pi / 4,
+                          child: Container(
+                            width: isKeyframeActive ? 10 : 8,
+                            height: isKeyframeActive ? 10 : 8,
+                            decoration: BoxDecoration(
+                              color: isKeyframeActive ? const Color(0xFFFFEA00) : const Color(0xFFFFD600),
+                              border: Border.all(
+                                color: isKeyframeActive ? Colors.white : Colors.black87,
+                                width: isKeyframeActive ? 1.5 : 1.0,
+                              ),
+                              boxShadow: isKeyframeActive
+                                  ? [
+                                      BoxShadow(
+                                        color: const Color(0xFFFFD600).withValues(alpha: 0.85),
+                                        blurRadius: 6,
+                                        spreadRadius: 2,
+                                      ),
+                                    ]
+                                  : [
+                                      const BoxShadow(
+                                        color: Colors.black54,
+                                        blurRadius: 2,
+                                        offset: Offset(0, 1),
+                                      ),
+                                    ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }(),
+            ],
         ],
       ),
     );

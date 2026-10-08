@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:capcut_video_editor/domain/models/caption_word.dart';
+import 'package:capcut_video_editor/domain/models/keyframe.dart';
 
 /// Animation style for captions and subtitle overlays
 enum TextAnimationType {
@@ -94,6 +95,8 @@ class TextOverlay {
   final double scale;
   final double? boxWidth;
   final List<CaptionWord> words;
+  final List<VideoKeyframe> keyframes;
+  final KeyframeTrackGroup? keyframeTracks;
   final bool isLocked;
   final bool isVisible;
 
@@ -123,6 +126,8 @@ class TextOverlay {
     this.scale = 1.0,
     this.boxWidth,
     this.words = const [],
+    this.keyframes = const [],
+    this.keyframeTracks,
     this.isLocked = false,
     this.isVisible = true,
   }) : textColor = color ?? textColor;
@@ -250,6 +255,10 @@ class TextOverlay {
     return defaultBoxW;
   }
 
+  /// Authoritative keyframe track group (falls back to legacy keyframes if not explicitly set)
+  KeyframeTrackGroup get effectiveKeyframeTracks =>
+      keyframeTracks ?? KeyframeTrackGroup.fromVideoKeyframes(keyframes);
+
   TextOverlay copyWith({
     String? id,
     String? text,
@@ -276,6 +285,8 @@ class TextOverlay {
     double? scale,
     double? boxWidth,
     List<CaptionWord>? words,
+    List<VideoKeyframe>? keyframes,
+    KeyframeTrackGroup? keyframeTracks,
     bool? isLocked,
     bool? isVisible,
   }) {
@@ -304,6 +315,8 @@ class TextOverlay {
       scale: scale ?? this.scale,
       boxWidth: boxWidth ?? this.boxWidth,
       words: words ?? this.words,
+      keyframes: keyframes ?? this.keyframes,
+      keyframeTracks: keyframeTracks ?? this.keyframeTracks,
       isLocked: isLocked ?? this.isLocked,
       isVisible: isVisible ?? this.isVisible,
     );
@@ -336,6 +349,8 @@ class TextOverlay {
       'scale': scale,
       'boxWidth': boxWidth,
       'words': words.map((w) => w.toJson()).toList(),
+      'keyframes': keyframes.map((k) => k.toJson()).toList(),
+      if (keyframeTracks != null) 'keyframeTracks': keyframeTracks!.toJson(),
       'isLocked': isLocked,
       'isVisible': isVisible,
     };
@@ -385,6 +400,13 @@ class TextOverlay {
               ?.map((w) => CaptionWord.fromJson(w as Map<String, dynamic>))
               .toList() ??
           const [],
+      keyframes: (json['keyframes'] as List<dynamic>?)
+              ?.map((k) => VideoKeyframe.fromJson(k as Map<String, dynamic>))
+              .toList() ??
+          const [],
+      keyframeTracks: json['keyframeTracks'] != null
+          ? KeyframeTrackGroup.fromJson(json['keyframeTracks'] as Map<String, dynamic>)
+          : null,
       isLocked: json['isLocked'] as bool? ?? false,
       isVisible: json['isVisible'] as bool? ?? true,
     );

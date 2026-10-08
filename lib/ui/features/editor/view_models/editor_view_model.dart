@@ -1227,16 +1227,22 @@ class EditorViewModel extends ChangeNotifier {
     final newSplitPoint = Duration(milliseconds: newSplitMs);
 
     final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final (clipTracksA, clipTracksB) = originalClip.effectiveKeyframeTracks.splitAt(splitOffsetMs);
+
     final clipPartA = originalClip.copyWith(
       id: '${originalClip.id}_a_$timestamp',
       title: '${originalClip.title} (Part 1)',
       trimEnd: newSplitPoint,
+      keyframeTracks: clipTracksA,
+      keyframes: clipTracksA.toVideoKeyframes(),
     );
 
     final clipPartB = originalClip.copyWith(
       id: '${originalClip.id}_b_$timestamp',
       title: '${originalClip.title} (Part 2)',
       trimStart: newSplitPoint,
+      keyframeTracks: clipTracksB,
+      keyframes: clipTracksB.toVideoKeyframes(),
     );
 
     _videoClips.removeAt(targetIndex);
@@ -1433,6 +1439,10 @@ class EditorViewModel extends ChangeNotifier {
     final duplicated = original.copyWith(
       id: 'clip_dup_${DateTime.now().millisecondsSinceEpoch}',
       title: '${original.title} (Copy)',
+      keyframeTracks: original.effectiveKeyframeTracks.duplicate(),
+      keyframes: original.keyframes
+          .map((k) => k.copyWith(id: 'kf_${DateTime.now().microsecondsSinceEpoch}_${k.timestamp.inMilliseconds}'))
+          .toList(),
     );
 
     _videoClips.insert(_selectedClipIndex! + 1, duplicated);
@@ -1780,6 +1790,24 @@ class EditorViewModel extends ChangeNotifier {
       scale: oldScale,
       rotation: oldRotation,
     );
+
+    if (current.keyframes.isNotEmpty || current.effectiveKeyframeTracks.isNotEmpty) {
+      final relTime = (_playheadPosition - current.startTimeInSeconds).clamp(0.0, current.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+      final updatedTracks = current.effectiveKeyframeTracks.addTransformKeyframe(
+        timeMs: timeMs,
+        posX: current.position.dx,
+        posY: current.position.dy,
+        scale: current.scale,
+        rotation: current.rotation * 180.0 / math.pi,
+        opacity: current.opacity,
+        easing: EasingCurve.easeInOut,
+      );
+      _overlayClips[index] = current.copyWith(
+        keyframeTracks: updatedTracks,
+        keyframes: updatedTracks.toVideoKeyframes(),
+      );
+    }
 
     _saveSnapshotWithOverlays(previousOverlays);
   }
@@ -2395,9 +2423,11 @@ class EditorViewModel extends ChangeNotifier {
 
     // Auto-update or auto-create keyframe if keyframes are active on this clip
     List<VideoKeyframe> updatedKeyframes = clip.keyframes;
-    if (clip.keyframes.isNotEmpty) {
+    KeyframeTrackGroup updatedTracks = clip.effectiveKeyframeTracks;
+    if (clip.keyframes.isNotEmpty || updatedTracks.isNotEmpty) {
       final clipStart = getClipStartTime(index);
       final relTime = (_playheadPosition - clipStart).clamp(0.0, clip.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
       final existingKfIndex = clip.keyframes.indexWhere(
         (k) => (k.timeInSeconds - relTime).abs() < 0.08,
       );
@@ -2417,7 +2447,7 @@ class EditorViewModel extends ChangeNotifier {
       } else {
         final newKf = VideoKeyframe(
           id: 'kf_${DateTime.now().millisecondsSinceEpoch}',
-          timestamp: Duration(milliseconds: (relTime * 1000).round()),
+          timestamp: Duration(milliseconds: timeMs),
           scale: sanitizedScale,
           positionX: sanitizedX,
           positionY: sanitizedY,
@@ -2428,6 +2458,16 @@ class EditorViewModel extends ChangeNotifier {
         updatedKeyframes = List<VideoKeyframe>.from(clip.keyframes)..add(newKf);
         updatedKeyframes.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       }
+
+      updatedTracks = updatedTracks.addTransformKeyframe(
+        timeMs: timeMs,
+        posX: sanitizedX,
+        posY: sanitizedY,
+        scale: sanitizedScale,
+        rotation: totalRotationDeg,
+        opacity: clip.opacity,
+        easing: EasingCurve.easeInOut,
+      );
     }
 
     _videoClips[index] = clip.copyWith(
@@ -2436,6 +2476,7 @@ class EditorViewModel extends ChangeNotifier {
       scale: sanitizedScale,
       rotationAngle: sanitizedRotation,
       keyframes: updatedKeyframes,
+      keyframeTracks: updatedTracks,
     );
     scheduleAutoSave();
     notifyListeners();
@@ -3050,6 +3091,7 @@ class EditorViewModel extends ChangeNotifier {
       id: 'audio_${DateTime.now().millisecondsSinceEpoch}',
       title: '${track.title} (Copy)',
       startTime: newStartTime,
+      keyframeTracks: track.effectiveKeyframeTracks.duplicate(),
     );
 
     _audioTracks.add(duplicate);
@@ -3505,6 +3547,25 @@ class EditorViewModel extends ChangeNotifier {
     if (_undoStack.length > 30) {
       _undoStack.removeAt(0);
     }
+
+    if (current.keyframes.isNotEmpty || current.effectiveKeyframeTracks.isNotEmpty) {
+      final relTime = (_playheadPosition - current.startTimeInSeconds).clamp(0.0, current.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+      final updatedTracks = current.effectiveKeyframeTracks.addTransformKeyframe(
+        timeMs: timeMs,
+        posX: current.position.dx,
+        posY: current.position.dy,
+        scale: current.scale,
+        rotation: 0.0,
+        opacity: 1.0,
+        easing: EasingCurve.easeInOut,
+      );
+      _textOverlays[index] = current.copyWith(
+        keyframeTracks: updatedTracks,
+        keyframes: updatedTracks.toVideoKeyframes(),
+      );
+    }
+
     scheduleAutoSave();
     notifyListeners();
   }
@@ -3818,6 +3879,10 @@ class EditorViewModel extends ChangeNotifier {
     final duplicated = text.copyWith(
       id: '${text.id}_dup_${DateTime.now().millisecondsSinceEpoch}',
       startTime: newStart,
+      keyframeTracks: text.effectiveKeyframeTracks.duplicate(),
+      keyframes: text.keyframes
+          .map((k) => k.copyWith(id: 'kf_${DateTime.now().microsecondsSinceEpoch}_${k.timestamp.inMilliseconds}'))
+          .toList(),
     );
 
     if (index != -1) {
@@ -3916,6 +3981,10 @@ class EditorViewModel extends ChangeNotifier {
       id: 'overlay_dup_${DateTime.now().millisecondsSinceEpoch}',
       title: '${original.title} (Copy)',
       startTime: original.startTime + const Duration(milliseconds: 300),
+      keyframeTracks: original.effectiveKeyframeTracks.duplicate(),
+      keyframes: original.keyframes
+          .map((k) => k.copyWith(id: 'kf_${DateTime.now().microsecondsSinceEpoch}_${k.timestamp.inMilliseconds}'))
+          .toList(),
     );
     _overlayClips.add(duplicated);
     _selectedOverlayIndex = _overlayClips.length - 1;
@@ -4215,10 +4284,14 @@ class EditorViewModel extends ChangeNotifier {
     final partBDurMs = original.duration.inMilliseconds - partADurMs;
     final timestamp = DateTime.now().microsecondsSinceEpoch;
 
+    final (overlayTracksA, overlayTracksB) = original.effectiveKeyframeTracks.splitAt(partADurMs);
+
     final partA = original.copyWith(
       id: '${original.id}_part1_$timestamp',
       title: '${original.title} (Part 1)',
       duration: Duration(milliseconds: partADurMs),
+      keyframeTracks: overlayTracksA,
+      keyframes: overlayTracksA.toVideoKeyframes(),
       clearOutAnimation: false,
     );
 
@@ -4227,6 +4300,8 @@ class EditorViewModel extends ChangeNotifier {
       title: '${original.title} (Part 2)',
       startTime: Duration(milliseconds: (splitTime * 1000).round()),
       duration: Duration(milliseconds: partBDurMs),
+      keyframeTracks: overlayTracksB,
+      keyframes: overlayTracksB.toVideoKeyframes(),
       clearInAnimation: false,
     );
 
@@ -4260,10 +4335,14 @@ class EditorViewModel extends ChangeNotifier {
     final partBDurMs = original.duration.inMilliseconds - partADurMs;
     final timestamp = DateTime.now().microsecondsSinceEpoch;
 
+    final (textTracksA, textTracksB) = original.effectiveKeyframeTracks.splitAt(partADurMs);
+
     final partA = original.copyWith(
       id: '${original.id}_part1_$timestamp',
       text: original.text,
       duration: Duration(milliseconds: partADurMs),
+      keyframeTracks: textTracksA,
+      keyframes: textTracksA.toVideoKeyframes(),
     );
 
     final partB = original.copyWith(
@@ -4271,6 +4350,8 @@ class EditorViewModel extends ChangeNotifier {
       text: original.text,
       startTime: Duration(milliseconds: (splitTime * 1000).round()),
       duration: Duration(milliseconds: partBDurMs),
+      keyframeTracks: textTracksB,
+      keyframes: textTracksB.toVideoKeyframes(),
     );
 
     _textOverlays.removeAt(index);
@@ -4305,10 +4386,13 @@ class EditorViewModel extends ChangeNotifier {
     final splitTrimEndMs = original.trimStart.inMilliseconds + splitOffsetMs;
     final timestamp = DateTime.now().microsecondsSinceEpoch;
 
+    final (audioTracksA, audioTracksB) = original.effectiveKeyframeTracks.splitAt(splitOffsetMs);
+
     final partA = original.copyWith(
       id: '${original.id}_part1_$timestamp',
       name: '${original.title} (Part 1)',
       trimEnd: Duration(milliseconds: splitTrimEndMs),
+      keyframeTracks: audioTracksA,
     );
 
     final partB = original.copyWith(
@@ -4316,6 +4400,7 @@ class EditorViewModel extends ChangeNotifier {
       name: '${original.title} (Part 2)',
       startTime: Duration(milliseconds: (_playheadPosition * 1000).round()),
       trimStart: Duration(milliseconds: splitTrimEndMs),
+      keyframeTracks: audioTracksB,
     );
 
     _audioTracks.removeAt(index);
@@ -5079,25 +5164,50 @@ class EditorViewModel extends ChangeNotifier {
   // KEYFRAME ANIMATION SYSTEM
   // ==========================================
 
-  /// Checks if a keyframe exists at the current playhead position for the selected clip or overlay
+  /// Checks if a keyframe exists at the current playhead position for the selected clip, overlay, text, or audio
   bool get hasKeyframeAtPlayhead {
     if (selectedClip != null) {
       final clip = selectedClip!;
       final clipStart = selectedClipStartTime;
       final relTime = _playheadPosition - clipStart;
-      return clip.keyframes.any((k) => (k.timeInSeconds - relTime).abs() < 0.08);
+      final timeMs = (relTime * 1000).round();
+      return clip.keyframes.any((k) => (k.timeInSeconds - relTime).abs() < 0.08) ||
+             clip.effectiveKeyframeTracks.hasKeyframeAt(timeMs, toleranceMs: 80);
     } else if (selectedOverlay != null) {
       final overlay = selectedOverlay!;
       final relTime = _playheadPosition - overlay.startTimeInSeconds;
-      return overlay.keyframes.any((k) => (k.timeInSeconds - relTime).abs() < 0.08);
+      final timeMs = (relTime * 1000).round();
+      return overlay.keyframes.any((k) => (k.timeInSeconds - relTime).abs() < 0.08) ||
+             overlay.effectiveKeyframeTracks.hasKeyframeAt(timeMs, toleranceMs: 80);
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      final relTime = _playheadPosition - text.startTimeInSeconds;
+      final timeMs = (relTime * 1000).round();
+      return text.keyframes.any((k) => (k.timeInSeconds - relTime).abs() < 0.08) ||
+             text.effectiveKeyframeTracks.hasKeyframeAt(timeMs, toleranceMs: 80);
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final relTime = _playheadPosition - audio.startTimeInSeconds;
+      final timeMs = (relTime * 1000).round();
+      return audio.effectiveKeyframeTracks.hasKeyframeAt(timeMs, toleranceMs: 80);
     }
     return false;
   }
 
   /// Total keyframe count for the currently selected item
   int get currentKeyframeCount {
-    if (selectedClip != null) return selectedClip!.keyframes.length;
-    if (selectedOverlay != null) return selectedOverlay!.keyframes.length;
+    if (selectedClip != null) {
+      return math.max(selectedClip!.keyframes.length, selectedClip!.effectiveKeyframeTracks.getAllTimestampsMs().length);
+    }
+    if (selectedOverlay != null) {
+      return math.max(selectedOverlay!.keyframes.length, selectedOverlay!.effectiveKeyframeTracks.getAllTimestampsMs().length);
+    }
+    if (selectedTextOverlay != null) {
+      return math.max(selectedTextOverlay!.keyframes.length, selectedTextOverlay!.effectiveKeyframeTracks.getAllTimestampsMs().length);
+    }
+    if (selectedAudioTrack != null) {
+      return selectedAudioTrack!.effectiveKeyframeTracks.getAllTimestampsMs().length;
+    }
     return 0;
   }
 
@@ -5114,20 +5224,39 @@ class EditorViewModel extends ChangeNotifier {
   }
 
   List<double> _getActiveTimelineKeyframeTimes() {
+    final set = <double>{};
     if (selectedClip != null) {
       final clipStart = selectedClipStartTime;
-      return selectedClip!.keyframes
-          .map((k) => clipStart + k.timeInSeconds)
-          .toList()
-        ..sort();
+      for (final k in selectedClip!.keyframes) {
+        set.add(clipStart + k.timeInSeconds);
+      }
+      for (final ms in selectedClip!.effectiveKeyframeTracks.getAllTimestampsMs()) {
+        set.add(clipStart + (ms / 1000.0));
+      }
     } else if (selectedOverlay != null) {
       final overlayStart = selectedOverlay!.startTimeInSeconds;
-      return selectedOverlay!.keyframes
-          .map((k) => overlayStart + k.timeInSeconds)
-          .toList()
-        ..sort();
+      for (final k in selectedOverlay!.keyframes) {
+        set.add(overlayStart + k.timeInSeconds);
+      }
+      for (final ms in selectedOverlay!.effectiveKeyframeTracks.getAllTimestampsMs()) {
+        set.add(overlayStart + (ms / 1000.0));
+      }
+    } else if (selectedTextOverlay != null) {
+      final textStart = selectedTextOverlay!.startTimeInSeconds;
+      for (final k in selectedTextOverlay!.keyframes) {
+        set.add(textStart + k.timeInSeconds);
+      }
+      for (final ms in selectedTextOverlay!.effectiveKeyframeTracks.getAllTimestampsMs()) {
+        set.add(textStart + (ms / 1000.0));
+      }
+    } else if (selectedAudioTrack != null) {
+      final audioStart = selectedAudioTrack!.startTimeInSeconds;
+      for (final ms in selectedAudioTrack!.effectiveKeyframeTracks.getAllTimestampsMs()) {
+        set.add(audioStart + (ms / 1000.0));
+      }
     }
-    return const [];
+    final list = set.toList()..sort();
+    return list;
   }
 
   /// Jumps playhead to the nearest keyframe preceding current playhead position
@@ -5164,12 +5293,13 @@ class EditorViewModel extends ChangeNotifier {
       final clip = _videoClips[_selectedClipIndex!];
       final clipStart = selectedClipStartTime;
       final relTime = (_playheadPosition - clipStart).clamp(0.0, clip.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
 
       final totalRotationDeg = clip.rotationDegrees.toDouble() + (clip.rotationAngle * 180.0 / math.pi);
 
       final newKeyframe = VideoKeyframe(
         id: 'kf_${DateTime.now().millisecondsSinceEpoch}',
-        timestamp: Duration(milliseconds: (relTime * 1000).round()),
+        timestamp: Duration(milliseconds: timeMs),
         scale: clip.scale,
         rotationDegrees: totalRotationDeg,
         positionX: clip.xPos,
@@ -5178,23 +5308,49 @@ class EditorViewModel extends ChangeNotifier {
         curve: KeyframeCurve.easeInOut,
       );
 
-      final updated = List<VideoKeyframe>.from(
+      final updatedKeyframes = List<VideoKeyframe>.from(
         clip.keyframes.where((k) => (k.timeInSeconds - relTime).abs() >= 0.08),
       )..add(newKeyframe);
-      updated.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      updatedKeyframes.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-      _videoClips[_selectedClipIndex!] = clip.copyWith(keyframes: updated);
+      // Synchronize into KeyframeTrackGroup
+      var group = clip.effectiveKeyframeTracks.addTransformKeyframe(
+        timeMs: timeMs,
+        posX: clip.xPos,
+        posY: clip.yPos,
+        scale: clip.scale,
+        rotation: totalRotationDeg,
+        opacity: clip.opacity,
+        easing: EasingCurve.easeInOut,
+      );
+
+      // Also record color adjustments if present
+      final adj = _colorAdjustments;
+      group = group.addKeyframe(AnimatableProperty.brightness, timeMs, adj.brightness);
+      group = group.addKeyframe(AnimatableProperty.contrast, timeMs, adj.contrast);
+      group = group.addKeyframe(AnimatableProperty.saturation, timeMs, adj.saturation);
+      group = group.addKeyframe(AnimatableProperty.exposure, timeMs, adj.exposure);
+      group = group.addKeyframe(AnimatableProperty.temperature, timeMs, adj.temperature);
+      group = group.addKeyframe(AnimatableProperty.tint, timeMs, adj.tint);
+      group = group.addKeyframe(AnimatableProperty.vignette, timeMs, adj.vignette);
+      group = group.addKeyframe(AnimatableProperty.sharpness, timeMs, adj.sharpness);
+
+      _videoClips[_selectedClipIndex!] = clip.copyWith(
+        keyframes: updatedKeyframes,
+        keyframeTracks: group,
+      );
       HapticFeedback.mediumImpact();
       scheduleAutoSave();
-      TtsService.announce('Added keyframe at ${(relTime).toStringAsFixed(1)} seconds');
+      TtsService.announce('Added keyframe at ${relTime.toStringAsFixed(1)} seconds');
       notifyListeners();
     } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
       final overlay = _overlayClips[_selectedOverlayIndex!];
       final relTime = (_playheadPosition - overlay.startTimeInSeconds).clamp(0.0, overlay.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
 
       final newKeyframe = VideoKeyframe(
         id: 'kf_${DateTime.now().millisecondsSinceEpoch}',
-        timestamp: Duration(milliseconds: (relTime * 1000).round()),
+        timestamp: Duration(milliseconds: timeMs),
         scale: overlay.scale,
         rotationDegrees: overlay.rotation * 180.0 / math.pi,
         positionX: overlay.position.dx,
@@ -5203,15 +5359,99 @@ class EditorViewModel extends ChangeNotifier {
         curve: KeyframeCurve.easeInOut,
       );
 
-      final updated = List<VideoKeyframe>.from(
+      final updatedKeyframes = List<VideoKeyframe>.from(
         overlay.keyframes.where((k) => (k.timeInSeconds - relTime).abs() >= 0.08),
       )..add(newKeyframe);
-      updated.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      updatedKeyframes.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(keyframes: updated);
+      // Synchronize into KeyframeTrackGroup
+      var group = overlay.effectiveKeyframeTracks.addTransformKeyframe(
+        timeMs: timeMs,
+        posX: overlay.position.dx,
+        posY: overlay.position.dy,
+        scale: overlay.scale,
+        rotation: overlay.rotation * 180.0 / math.pi,
+        opacity: overlay.opacity,
+        easing: EasingCurve.easeInOut,
+      );
+
+      if (overlay.filterIntensity > 0) {
+        group = group.addKeyframe(AnimatableProperty.filterIntensity, timeMs, overlay.filterIntensity);
+      }
+      if (overlay.effectIntensity > 0) {
+        group = group.addKeyframe(AnimatableProperty.effectIntensity, timeMs, overlay.effectIntensity);
+      }
+
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+        keyframes: updatedKeyframes,
+        keyframeTracks: group,
+      );
       HapticFeedback.mediumImpact();
       scheduleAutoSave();
-      TtsService.announce('Added PIP keyframe at ${(relTime).toStringAsFixed(1)} seconds');
+      TtsService.announce('Added PIP keyframe at ${relTime.toStringAsFixed(1)} seconds');
+      notifyListeners();
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      final relTime = (_playheadPosition - text.startTimeInSeconds).clamp(0.0, text.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      final newKeyframe = VideoKeyframe(
+        id: 'kf_${DateTime.now().millisecondsSinceEpoch}',
+        timestamp: Duration(milliseconds: timeMs),
+        scale: text.scale,
+        rotationDegrees: 0.0,
+        positionX: text.position.dx,
+        positionY: text.position.dy,
+        opacity: 1.0,
+        curve: KeyframeCurve.easeInOut,
+      );
+
+      final updatedKeyframes = List<VideoKeyframe>.from(
+        text.keyframes.where((k) => (k.timeInSeconds - relTime).abs() >= 0.08),
+      )..add(newKeyframe);
+      updatedKeyframes.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+      var group = text.effectiveKeyframeTracks.addTransformKeyframe(
+        timeMs: timeMs,
+        posX: text.position.dx,
+        posY: text.position.dy,
+        scale: text.scale,
+        rotation: 0.0,
+        opacity: 1.0,
+        easing: EasingCurve.easeInOut,
+      );
+
+      updateTextOverlay(
+        text.copyWith(
+          keyframes: updatedKeyframes,
+          keyframeTracks: group,
+        ),
+        saveSnapshot: false,
+        notify: true,
+      );
+      HapticFeedback.mediumImpact();
+      scheduleAutoSave();
+      TtsService.announce('Added text keyframe at ${relTime.toStringAsFixed(1)} seconds');
+      notifyListeners();
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final relTime = (_playheadPosition - audio.startTimeInSeconds).clamp(0.0, audio.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      final group = audio.effectiveKeyframeTracks.addKeyframe(
+        AnimatableProperty.volume,
+        timeMs,
+        audio.volume,
+        easing: EasingCurve.easeInOut,
+      );
+
+      final index = _audioTracks.indexWhere((a) => a.id == audio.id);
+      if (index != -1) {
+        _audioTracks[index] = audio.copyWith(keyframeTracks: group);
+      }
+      HapticFeedback.mediumImpact();
+      scheduleAutoSave();
+      TtsService.announce('Added audio volume keyframe at ${relTime.toStringAsFixed(1)} seconds');
       notifyListeners();
     }
   }
@@ -5222,12 +5462,17 @@ class EditorViewModel extends ChangeNotifier {
       final clip = _videoClips[_selectedClipIndex!];
       final clipStart = selectedClipStartTime;
       final relTime = _playheadPosition - clipStart;
+      final timeMs = (relTime * 1000).round();
 
       final updated = List<VideoKeyframe>.from(
         clip.keyframes.where((k) => (k.timeInSeconds - relTime).abs() >= 0.08),
       );
+      final updatedTracks = clip.effectiveKeyframeTracks.removeKeyframeAtTime(timeMs, toleranceMs: 80);
 
-      _videoClips[_selectedClipIndex!] = clip.copyWith(keyframes: updated);
+      _videoClips[_selectedClipIndex!] = clip.copyWith(
+        keyframes: updated,
+        keyframeTracks: updatedTracks,
+      );
       HapticFeedback.lightImpact();
       scheduleAutoSave();
       TtsService.announce('Removed keyframe');
@@ -5235,17 +5480,317 @@ class EditorViewModel extends ChangeNotifier {
     } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
       final overlay = _overlayClips[_selectedOverlayIndex!];
       final relTime = _playheadPosition - overlay.startTimeInSeconds;
+      final timeMs = (relTime * 1000).round();
 
       final updated = List<VideoKeyframe>.from(
         overlay.keyframes.where((k) => (k.timeInSeconds - relTime).abs() >= 0.08),
       );
+      final updatedTracks = overlay.effectiveKeyframeTracks.removeKeyframeAtTime(timeMs, toleranceMs: 80);
 
-      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(keyframes: updated);
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+        keyframes: updated,
+        keyframeTracks: updatedTracks,
+      );
       HapticFeedback.lightImpact();
       scheduleAutoSave();
       TtsService.announce('Removed PIP keyframe');
       notifyListeners();
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      final relTime = _playheadPosition - text.startTimeInSeconds;
+      final timeMs = (relTime * 1000).round();
+
+      final updated = List<VideoKeyframe>.from(
+        text.keyframes.where((k) => (k.timeInSeconds - relTime).abs() >= 0.08),
+      );
+      final updatedTracks = text.effectiveKeyframeTracks.removeKeyframeAtTime(timeMs, toleranceMs: 80);
+
+      updateTextOverlay(
+        text.copyWith(
+          keyframes: updated,
+          keyframeTracks: updatedTracks,
+        ),
+        saveSnapshot: false,
+        notify: true,
+      );
+      HapticFeedback.lightImpact();
+      scheduleAutoSave();
+      TtsService.announce('Removed text keyframe');
+      notifyListeners();
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final relTime = _playheadPosition - audio.startTimeInSeconds;
+      final timeMs = (relTime * 1000).round();
+
+      final updatedTracks = audio.effectiveKeyframeTracks.removeKeyframeAtTime(timeMs, toleranceMs: 80);
+      final index = _audioTracks.indexWhere((a) => a.id == audio.id);
+      if (index != -1) {
+        _audioTracks[index] = audio.copyWith(keyframeTracks: updatedTracks);
+      }
+      HapticFeedback.lightImpact();
+      scheduleAutoSave();
+      TtsService.announce('Removed audio keyframe');
+      notifyListeners();
     }
+  }
+
+  /// Updates easing curve for all keyframes at target timestamp on selected layer
+  void updateKeyframeEasing(AnimatableProperty property, int timeMs, EasingCurve easing) {
+    _saveSnapshot();
+    if (_selectedClipIndex != null) {
+      final clip = _videoClips[_selectedClipIndex!];
+      final currentTrack = clip.effectiveKeyframeTracks.tracks[property];
+      if (currentTrack != null) {
+        final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
+        if (kf != null) {
+          final updatedGroup = clip.effectiveKeyframeTracks.addKeyframe(
+            property,
+            kf.timestampMs,
+            kf.value,
+            easing: easing,
+          );
+          _videoClips[_selectedClipIndex!] = clip.copyWith(
+            keyframeTracks: updatedGroup,
+            keyframes: updatedGroup.toVideoKeyframes(),
+          );
+        }
+      }
+    } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
+      final overlay = _overlayClips[_selectedOverlayIndex!];
+      final currentTrack = overlay.effectiveKeyframeTracks.tracks[property];
+      if (currentTrack != null) {
+        final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
+        if (kf != null) {
+          final updatedGroup = overlay.effectiveKeyframeTracks.addKeyframe(
+            property,
+            kf.timestampMs,
+            kf.value,
+            easing: easing,
+          );
+          _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+            keyframeTracks: updatedGroup,
+            keyframes: updatedGroup.toVideoKeyframes(),
+          );
+        }
+      }
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      final currentTrack = text.effectiveKeyframeTracks.tracks[property];
+      if (currentTrack != null) {
+        final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
+        if (kf != null) {
+          final updatedGroup = text.effectiveKeyframeTracks.addKeyframe(
+            property,
+            kf.timestampMs,
+            kf.value,
+            easing: easing,
+          );
+          updateTextOverlay(
+            text.copyWith(
+              keyframeTracks: updatedGroup,
+              keyframes: updatedGroup.toVideoKeyframes(),
+            ),
+            saveSnapshot: false,
+            notify: true,
+          );
+        }
+      }
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final currentTrack = audio.effectiveKeyframeTracks.tracks[property];
+      if (currentTrack != null) {
+        final kf = currentTrack.getKeyframeAt(timeMs, toleranceMs: 80);
+        if (kf != null) {
+          final updatedGroup = audio.effectiveKeyframeTracks.addKeyframe(
+            property,
+            kf.timestampMs,
+            kf.value,
+            easing: easing,
+          );
+          final index = _audioTracks.indexWhere((a) => a.id == audio.id);
+          if (index != -1) {
+            _audioTracks[index] = audio.copyWith(keyframeTracks: updatedGroup);
+          }
+        }
+      }
+    }
+    TtsService.announce('${easing.displayName} curve applied');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  /// Moves keyframe in time for the selected layer
+  void moveSelectedKeyframe(AnimatableProperty property, int oldTimeMs, int newTimeMs) {
+    if (_selectedClipIndex != null) {
+      final clip = _videoClips[_selectedClipIndex!];
+      final maxMs = (clip.durationInSeconds * 1000).round();
+      final clampedNewMs = newTimeMs.clamp(0, maxMs);
+      final track = clip.effectiveKeyframeTracks.tracks[property];
+      if (track != null) {
+        final kf = track.getKeyframeAt(oldTimeMs, toleranceMs: 80);
+        if (kf != null) {
+          var group = clip.effectiveKeyframeTracks.removeKeyframeAtTime(oldTimeMs, toleranceMs: 80);
+          group = group.addKeyframe(property, clampedNewMs, kf.value, easing: kf.easing);
+          _videoClips[_selectedClipIndex!] = clip.copyWith(
+            keyframeTracks: group,
+            keyframes: group.toVideoKeyframes(),
+          );
+        }
+      }
+    } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
+      final overlay = _overlayClips[_selectedOverlayIndex!];
+      final maxMs = (overlay.durationInSeconds * 1000).round();
+      final clampedNewMs = newTimeMs.clamp(0, maxMs);
+      final track = overlay.effectiveKeyframeTracks.tracks[property];
+      if (track != null) {
+        final kf = track.getKeyframeAt(oldTimeMs, toleranceMs: 80);
+        if (kf != null) {
+          var group = overlay.effectiveKeyframeTracks.removeKeyframeAtTime(oldTimeMs, toleranceMs: 80);
+          group = group.addKeyframe(property, clampedNewMs, kf.value, easing: kf.easing);
+          _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+            keyframeTracks: group,
+            keyframes: group.toVideoKeyframes(),
+          );
+        }
+      }
+    }
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  /// Sets keyframe property value at current playhead relative time for selected layer
+  void setKeyframePropertyValue(AnimatableProperty property, double value) {
+    _saveSnapshot();
+    if (_selectedClipIndex != null) {
+      final clip = _videoClips[_selectedClipIndex!];
+      final clipStart = selectedClipStartTime;
+      final relTime = (_playheadPosition - clipStart).clamp(0.0, clip.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      final updatedGroup = clip.effectiveKeyframeTracks.addKeyframe(property, timeMs, value);
+      _videoClips[_selectedClipIndex!] = clip.copyWith(
+        keyframeTracks: updatedGroup,
+        keyframes: updatedGroup.toVideoKeyframes(),
+      );
+    } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
+      final overlay = _overlayClips[_selectedOverlayIndex!];
+      final relTime = (_playheadPosition - overlay.startTimeInSeconds).clamp(0.0, overlay.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      final updatedGroup = overlay.effectiveKeyframeTracks.addKeyframe(property, timeMs, value);
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+        keyframeTracks: updatedGroup,
+        keyframes: updatedGroup.toVideoKeyframes(),
+      );
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      final relTime = (_playheadPosition - text.startTimeInSeconds).clamp(0.0, text.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      final updatedGroup = text.effectiveKeyframeTracks.addKeyframe(property, timeMs, value);
+      updateTextOverlay(
+        text.copyWith(
+          keyframeTracks: updatedGroup,
+          keyframes: updatedGroup.toVideoKeyframes(),
+        ),
+        saveSnapshot: false,
+        notify: true,
+      );
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final relTime = (_playheadPosition - audio.startTimeInSeconds).clamp(0.0, audio.durationInSeconds);
+      final timeMs = (relTime * 1000).round();
+
+      final updatedGroup = audio.effectiveKeyframeTracks.addKeyframe(property, timeMs, value);
+      final index = _audioTracks.indexWhere((a) => a.id == audio.id);
+      if (index != -1) {
+        _audioTracks[index] = audio.copyWith(keyframeTracks: updatedGroup);
+      }
+    }
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  /// Resets all keyframe animations on the currently selected layer
+  void resetAnimationForSelectedLayer() {
+    _saveSnapshot();
+    if (_selectedClipIndex != null) {
+      final clip = _videoClips[_selectedClipIndex!];
+      _videoClips[_selectedClipIndex!] = clip.copyWith(
+        keyframes: const [],
+        keyframeTracks: const KeyframeTrackGroup(),
+      );
+    } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
+      final overlay = _overlayClips[_selectedOverlayIndex!];
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+        keyframes: const [],
+        keyframeTracks: const KeyframeTrackGroup(),
+      );
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      updateTextOverlay(
+        text.copyWith(
+          keyframes: const [],
+          keyframeTracks: const KeyframeTrackGroup(),
+        ),
+        saveSnapshot: false,
+        notify: true,
+      );
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final index = _audioTracks.indexWhere((a) => a.id == audio.id);
+      if (index != -1) {
+        _audioTracks[index] = audio.copyWith(
+          keyframeTracks: const KeyframeTrackGroup(),
+        );
+      }
+    }
+    HapticFeedback.mediumImpact();
+    TtsService.announce('Reset animation');
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  /// Alias for total keyframe count on selected layer
+  int get keyframeCountForSelected => currentKeyframeCount;
+
+  /// Resets keyframe animation on the selected layer or target layer
+  void resetKeyframeAnimation([String? layerId]) {
+    resetAnimationForSelectedLayer();
+  }
+
+  /// Updates keyframe value for a property on the selected layer
+  void updateKeyframeValue({
+    String? layerId,
+    required AnimatableProperty property,
+    String? keyframeId,
+    required double newValue,
+  }) {
+    setKeyframePropertyValue(property, newValue);
+  }
+
+  /// Changes keyframe easing curve on the selected layer
+  void changeKeyframeEasing({
+    String? layerId,
+    required AnimatableProperty property,
+    String? keyframeId,
+    required EasingCurve easing,
+    int? timeMs,
+  }) {
+    final effectiveMs = timeMs ?? (_playheadPosition * 1000).round();
+    updateKeyframeEasing(property, effectiveMs, easing);
+  }
+
+  /// Re-times keyframe on the selected layer
+  void moveKeyframe({
+    String? layerId,
+    required AnimatableProperty property,
+    String? keyframeId,
+    int? oldTimestampMs,
+    required int newTimestampMs,
+  }) {
+    final oldMs = oldTimestampMs ?? (_playheadPosition * 1000).round();
+    moveSelectedKeyframe(property, oldMs, newTimestampMs);
   }
 
   VideoKeyframe? getInterpolatedKeyframe(VideoClip clip, double currentClipTime) {
@@ -5259,6 +5804,13 @@ class EditorViewModel extends ChangeNotifier {
     return VideoKeyframe.interpolate(
       keyframes: overlay.keyframes,
       timeInSeconds: currentOverlayTime,
+    );
+  }
+
+  VideoKeyframe? getInterpolatedTextKeyframe(TextOverlay text, double currentTextTime) {
+    return VideoKeyframe.interpolate(
+      keyframes: text.keyframes,
+      timeInSeconds: currentTextTime,
     );
   }
 

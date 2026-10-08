@@ -30,6 +30,148 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
+ * Deterministic Keyframe Animation Evaluation Engine for Native Android Export.
+ * Matches Flutter domain KeyframeTrackGroup and EasingCurve with 100% mathematical parity.
+ */
+data class ExportMotionKeyframe(
+    val id: String,
+    val timestampMs: Long,
+    val value: Double,
+    val mode: String = "easeInOut",
+    val x1: Double = 0.42,
+    val y1: Double = 0.0,
+    val x2: Double = 0.58,
+    val y2: Double = 1.0
+)
+
+data class ExportKeyframeTrack(
+    val property: String,
+    val defaultValue: Double,
+    val keyframes: List<ExportMotionKeyframe>
+) {
+    fun evaluate(timeInSeconds: Double): Double {
+        if (keyframes.isEmpty()) return defaultValue
+        if (keyframes.size == 1) return keyframes[0].value
+        val timeMs = (timeInSeconds * 1000.0).toLong()
+        if (timeMs <= keyframes.first().timestampMs) return keyframes.first().value
+        if (timeMs >= keyframes.last().timestampMs) return keyframes.last().value
+
+        // Binary search for bounding interval [k_i, k_{i+1}]
+        var low = 0
+        var high = keyframes.size - 1
+        while (low <= high) {
+            val mid = (low + high) ushr 1
+            if (keyframes[mid].timestampMs <= timeMs) {
+                if (mid == keyframes.size - 1 || keyframes[mid + 1].timestampMs > timeMs) {
+                    val k1 = keyframes[mid]
+                    val k2 = keyframes[mid + 1]
+                    val durationMs = k2.timestampMs - k1.timestampMs
+                    if (durationMs <= 0L) return k1.value
+                    val progress = (timeMs - k1.timestampMs).toDouble() / durationMs.toDouble()
+                    val easedProgress = evaluateEasing(k1, progress.coerceIn(0.0, 1.0))
+                    return k1.value + (k2.value - k1.value) * easedProgress
+                }
+                low = mid + 1
+            } else {
+                high = mid - 1
+            }
+        }
+        return keyframes.last().value
+    }
+
+    private fun evaluateEasing(kf: ExportMotionKeyframe, t: Double): Double {
+        return when (kf.mode) {
+            "hold" -> if (t >= 1.0) 1.0 else 0.0
+            "linear" -> t
+            "easeIn" -> t * t * t
+            "easeOut" -> 1.0 - Math.pow(1.0 - t, 3.0)
+            "easeInOut" -> if (t < 0.5) 4.0 * t * t * t else 1.0 - Math.pow(-2.0 * t + 2.0, 3.0) / 2.0
+            "cubicBezier" -> evaluateCubicBezier(kf.x1, kf.y1, kf.x2, kf.y2, t)
+            else -> if (t < 0.5) 4.0 * t * t * t else 1.0 - Math.pow(-2.0 * t + 2.0, 3.0) / 2.0
+        }
+    }
+
+    private fun evaluateCubicBezier(x1: Double, y1: Double, x2: Double, y2: Double, t: Double): Double {
+        if (t <= 0.0) return 0.0
+        if (t >= 1.0) return 1.0
+        var s = t
+        for (i in 0 until 8) {
+            val currentX = sampleCurveX(x1, x2, s) - t
+            if (Math.abs(currentX) < 1e-5) break
+            val dx = sampleCurveDerivativeX(x1, x2, s)
+            if (Math.abs(dx) < 1e-5) break
+            s -= currentX / dx
+        }
+        s = s.coerceIn(0.0, 1.0)
+        return sampleCurveY(y1, y2, s).coerceIn(0.0, 1.0)
+    }
+
+    private fun sampleCurveX(x1: Double, x2: Double, t: Double): Double =
+        3.0 * (1.0 - t) * (1.0 - t) * t * x1 + 3.0 * (1.0 - t) * t * t * x2 + t * t * t
+
+    private fun sampleCurveDerivativeX(x1: Double, x2: Double, t: Double): Double =
+        3.0 * (1.0 - t) * (1.0 - t) * x1 + 6.0 * (1.0 - t) * t * (x2 - x1) + 3.0 * t * t * (1.0 - x2)
+
+    private fun sampleCurveY(y1: Double, y2: Double, t: Double): Double =
+        3.0 * (1.0 - t) * (1.0 - t) * t * y1 + 3.0 * (1.0 - t) * t * t * y2 + t * t * t
+}
+
+data class ExportKeyframeTrackGroup(
+    val tracks: Map<String, ExportKeyframeTrack> = emptyMap()
+) {
+    fun hasProperty(prop: String): Boolean = tracks[prop]?.keyframes?.isNotEmpty() == true
+
+    fun evaluate(prop: String, timeInSeconds: Double, fallback: Double): Double {
+        val track = tracks[prop] ?: return fallback
+        if (track.keyframes.isEmpty()) return fallback
+        return track.evaluate(timeInSeconds)
+    }
+}
+
+object KeyframeParser {
+    @Suppress("UNCHECKED_CAST")
+    fun parseTrackGroup(map: Map<String, Any>?): ExportKeyframeTrackGroup {
+        if (map == null) return ExportKeyframeTrackGroup()
+        val rawTracks = map["tracks"] as? Map<String, Any> ?: return ExportKeyframeTrackGroup()
+        val tracksMap = mutableMapOf<String, ExportKeyframeTrack>()
+
+        for ((propName, rawTrackObj) in rawTracks) {
+            val trackMap = rawTrackObj as? Map<String, Any> ?: continue
+            val defVal = (trackMap["defaultValue"] as? Number)?.toDouble() ?: 0.0
+            val rawKfs = trackMap["keyframes"] as? List<Map<String, Any>> ?: emptyList()
+            val kfs = rawKfs.map { kfMap ->
+                val id = kfMap["id"] as? String ?: ""
+                val ts = (kfMap["timestampMs"] as? Number)?.toLong() ?: 0L
+                val v = (kfMap["value"] as? Number)?.toDouble() ?: 0.0
+                val easingMap = kfMap["easing"] as? Map<String, Any>
+                val mode = easingMap?.get("mode") as? String ?: (kfMap["easing"] as? String ?: "easeInOut")
+                val x1 = (easingMap?.get("x1") as? Number)?.toDouble() ?: 0.42
+                val y1 = (easingMap?.get("y1") as? Number)?.toDouble() ?: 0.0
+                val x2 = (easingMap?.get("x2") as? Number)?.toDouble() ?: 0.58
+                val y2 = (easingMap?.get("y2") as? Number)?.toDouble() ?: 1.0
+                ExportMotionKeyframe(
+                    id = id,
+                    timestampMs = ts,
+                    value = v,
+                    mode = mode,
+                    x1 = x1,
+                    y1 = y1,
+                    x2 = x2,
+                    y2 = y2
+                )
+            }.sortedBy { it.timestampMs }
+
+            tracksMap[propName] = ExportKeyframeTrack(
+                property = propName,
+                defaultValue = defVal,
+                keyframes = kfs
+            )
+        }
+        return ExportKeyframeTrackGroup(tracksMap)
+    }
+}
+
+/**
  * Data structures for video export payload passed from Flutter
  */
 data class ExportClip(
@@ -65,7 +207,8 @@ data class ExportClip(
     val vignetteSoftness: Double = 0.5,
     val sharpness: Double = 0.0,
     val filterId: String? = null,
-    val filterIntensity: Double = 1.0
+    val filterIntensity: Double = 1.0,
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
 ) {
     val activeDurationMs: Long
         get() {
@@ -110,7 +253,8 @@ data class ExportAudioTrack(
     val speed: Double = 1.0,
     val fadeInMs: Long = 0L,
     val fadeOutMs: Long = 0L,
-    val isMuted: Boolean = false
+    val isMuted: Boolean = false,
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
 )
 
 data class AudioSourceSpec(
@@ -121,7 +265,8 @@ data class AudioSourceSpec(
     val volume: Double,
     val speed: Double = 1.0,
     val fadeInMs: Long = 0L,
-    val fadeOutMs: Long = 0L
+    val fadeOutMs: Long = 0L,
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
 )
 
 data class ExportTextOverlay(
@@ -139,7 +284,9 @@ data class ExportTextOverlay(
     val isUnderline: Boolean = false,
     val textAlign: String = "center",
     val fontFamily: String? = null,
-    val boxWidth: Double? = null
+    val boxWidth: Double? = null,
+    val scale: Double = 1.0,
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
 )
 
 data class ExportPipOverlay(
@@ -204,7 +351,8 @@ data class ExportPipOverlay(
     val glowEnabled: Boolean = false,
     val glowColor: Int = 0,
     val glowRadius: Double = 12.0,
-    val glowIntensity: Double = 0.7
+    val glowIntensity: Double = 0.7,
+    val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
 ) {
     val hasColorGrading: Boolean
         get() = (brightness != 0.0 || contrast != 0.0 || saturation != 0.0 || exposure != 0.0 ||
@@ -648,6 +796,7 @@ class VideoExportEngine(private val context: Context) {
         private var oesVignetteSoftnessLoc = 0
         private var oesSharpenLoc = 0
         private var oesTexelSizeLoc = 0
+        private var oesAlphaLoc = 0
 
         private var tex2DProgram = 0
         private var tex2DPosLoc = 0
@@ -807,6 +956,7 @@ class VideoExportEngine(private val context: Context) {
                 uniform float uVignetteSoftness;
                 uniform float uSharpen;
                 uniform vec2 uTexelSize;
+                uniform float uAlpha;
 
                 void main() {
                     vec4 col;
@@ -829,7 +979,7 @@ class VideoExportEngine(private val context: Context) {
                         float vig = smoothstep(uVignetteRadius, uVignetteRadius - max(uVignetteSoftness, 0.001), dist);
                         col.rgb = mix(col.rgb, col.rgb * vig, uVignette);
                     }
-                    gl_FragColor = col;
+                    gl_FragColor = vec4(col.rgb, col.a * uAlpha);
                 }
             """.trimIndent()
 
@@ -846,6 +996,7 @@ class VideoExportEngine(private val context: Context) {
             oesVignetteSoftnessLoc = GLES20.glGetUniformLocation(oesProgram, "uVignetteSoftness")
             oesSharpenLoc = GLES20.glGetUniformLocation(oesProgram, "uSharpen")
             oesTexelSizeLoc = GLES20.glGetUniformLocation(oesProgram, "uTexelSize")
+            oesAlphaLoc = GLES20.glGetUniformLocation(oesProgram, "uAlpha")
 
             // 2. Texture2D Program
             val tex2DVS = """
@@ -1138,6 +1289,7 @@ class VideoExportEngine(private val context: Context) {
             mvpMatrix: FloatArray,
             stMatrix: FloatArray,
             quadBuffer: FloatBuffer,
+            alpha: Float = 1.0f,
             colorMatrix: FloatArray? = null,
             colorOffset: FloatArray? = null,
             vignette: Float = 0f,
@@ -1153,6 +1305,9 @@ class VideoExportEngine(private val context: Context) {
 
             GLES20.glUniformMatrix4fv(oesMVPLoc, 1, false, mvpMatrix, 0)
             GLES20.glUniformMatrix4fv(oesSTLoc, 1, false, stMatrix, 0)
+            if (oesAlphaLoc >= 0) {
+                GLES20.glUniform1f(oesAlphaLoc, alpha)
+            }
 
             if (colorMatrix != null && colorOffset != null && oesHasColorGradingLoc >= 0) {
                 GLES20.glUniform1f(oesHasColorGradingLoc, 1.0f)
@@ -1596,7 +1751,7 @@ class VideoExportEngine(private val context: Context) {
         // 1. Primary video clips audio
         for (i in clips.indices) {
             val clip = clips[i]
-            if (!clip.isPhoto && clip.volume > 0.0 && !clip.path.isNullOrBlank() && File(clip.path).exists()) {
+            if (!clip.isPhoto && (clip.volume > 0.0 || clip.keyframeTracks.hasProperty("volume")) && !clip.path.isNullOrBlank() && File(clip.path).exists()) {
                 audioSources.add(
                     AudioSourceSpec(
                         path = clip.path,
@@ -1606,7 +1761,8 @@ class VideoExportEngine(private val context: Context) {
                         volume = clip.volume,
                         speed = clip.speed,
                         fadeInMs = 0L,
-                        fadeOutMs = 0L
+                        fadeOutMs = 0L,
+                        keyframeTracks = clip.keyframeTracks
                     )
                 )
             }
@@ -1614,7 +1770,7 @@ class VideoExportEngine(private val context: Context) {
 
         // 2. Audio tracks & PIP audio
         for (track in audioTracks) {
-            if (!track.isMuted && track.volume > 0.0 && track.path.isNotBlank() && File(track.path).exists()) {
+            if (!track.isMuted && (track.volume > 0.0 || track.keyframeTracks.hasProperty("volume")) && track.path.isNotBlank() && File(track.path).exists()) {
                 audioSources.add(
                     AudioSourceSpec(
                         path = track.path,
@@ -1624,7 +1780,8 @@ class VideoExportEngine(private val context: Context) {
                         volume = track.volume,
                         speed = track.speed,
                         fadeInMs = track.fadeInMs,
-                        fadeOutMs = track.fadeOutMs
+                        fadeOutMs = track.fadeOutMs,
+                        keyframeTracks = track.keyframeTracks
                     )
                 )
             }
@@ -1878,16 +2035,26 @@ class VideoExportEngine(private val context: Context) {
             val path = clip.path
             val decoder = if (!clip.isPhoto && path != null) getDecoderForClip(clip) else null
 
-            // 1. Calculate transform matrices (reusable)
+            val localTimeSec = localTimeMs / 1000.0
+            val kfTracks = clip.keyframeTracks
+
+            // 1. Calculate transform matrices (reusable) with keyframe evaluation
             val centerX = width / 2f
             val centerY = height / 2f
             val kCanvas = width.toFloat() / 360f
-            val xExport = clip.safeXPos.toFloat() * kCanvas
-            val yExport = clip.safeYPos.toFloat() * kCanvas
-            val s = clip.safeScale.toFloat()
+
+            val evalX = kfTracks.evaluate("positionX", localTimeSec, clip.safeXPos)
+            val evalY = kfTracks.evaluate("positionY", localTimeSec, clip.safeYPos)
+            val evalScale = kfTracks.evaluate("scale", localTimeSec, clip.safeScale)
+            val evalRotationAngle = kfTracks.evaluate("rotation", localTimeSec, clip.safeRotationAngle)
+            val evalOpacity = kfTracks.evaluate("opacity", localTimeSec, 1.0).coerceIn(0.0, 1.0).toFloat()
+
+            val xExport = evalX.toFloat() * kCanvas
+            val yExport = evalY.toFloat() * kCanvas
+            val s = evalScale.toFloat()
             val scaleX = (if (clip.flipHorizontal) -1f else 1f) * s
             val scaleY = (if (clip.flipVertical) -1f else 1f) * s
-            val continuousDeg = (clip.safeRotationAngle.toFloat() * 180f / Math.PI.toFloat())
+            val continuousDeg = (evalRotationAngle.toFloat() * 180f / Math.PI.toFloat())
             val totalRotationDeg = clip.rotationDegrees.toFloat() + continuousDeg
 
             val modelMatrix = inputSurface.reusableModelMatrix
@@ -1965,25 +2132,51 @@ class VideoExportEngine(private val context: Context) {
             totalProcessNs += (processEnd - processStart - decodeDurationNs)
 
             val renderStart = System.nanoTime()
-            val clipColorMatrix = if (clip.hasColorGrading) FloatArray(16) else null
-            val clipColorOffset = if (clip.hasColorGrading) FloatArray(4) else null
-            if (clip.hasColorGrading && clipColorMatrix != null && clipColorOffset != null) {
+            val effBrightness = kfTracks.evaluate("brightness", localTimeSec, clip.brightness).toFloat()
+            val effContrast = kfTracks.evaluate("contrast", localTimeSec, clip.contrast).toFloat()
+            val effSaturation = kfTracks.evaluate("saturation", localTimeSec, clip.saturation).toFloat()
+            val effExposure = kfTracks.evaluate("exposure", localTimeSec, clip.exposure).toFloat()
+            val effTemperature = kfTracks.evaluate("temperature", localTimeSec, clip.temperature).toFloat()
+            val effTint = kfTracks.evaluate("tint", localTimeSec, clip.tint).toFloat()
+            val effHighlights = kfTracks.evaluate("highlights", localTimeSec, clip.highlights).toFloat()
+            val effShadows = kfTracks.evaluate("shadows", localTimeSec, clip.shadows).toFloat()
+            val effBlacks = kfTracks.evaluate("blacks", localTimeSec, clip.blacks).toFloat()
+            val effWhites = kfTracks.evaluate("whites", localTimeSec, clip.whites).toFloat()
+            val effVignette = kfTracks.evaluate("vignette", localTimeSec, clip.vignette).toFloat()
+            val effVignetteRadius = clip.vignetteRadius.toFloat()
+            val effVignetteSoftness = clip.vignetteSoftness.toFloat()
+            val effSharpness = kfTracks.evaluate("sharpness", localTimeSec, clip.sharpness).toFloat()
+            val effFilterIntensity = kfTracks.evaluate("filterIntensity", localTimeSec, clip.filterIntensity).toFloat()
+
+            val hasColorGrading = clip.hasColorGrading || effBrightness != 0f || effContrast != 0f ||
+                effSaturation != 0f || effExposure != 0f || effTemperature != 0f || effTint != 0f ||
+                effHighlights != 0f || effShadows != 0f || effBlacks != 0f || effWhites != 0f ||
+                (clip.filterId != null && effFilterIntensity > 0f)
+
+            val clipColorMatrix = if (hasColorGrading) FloatArray(16) else null
+            val clipColorOffset = if (hasColorGrading) FloatArray(4) else null
+            if (hasColorGrading && clipColorMatrix != null && clipColorOffset != null) {
                 ColorGradingHelper.calculateMatrixAndOffset(
-                    brightness = clip.brightness.toFloat(),
-                    contrast = clip.contrast.toFloat(),
-                    saturation = clip.saturation.toFloat(),
-                    exposure = clip.exposure.toFloat(),
-                    temperature = clip.temperature.toFloat(),
-                    tint = clip.tint.toFloat(),
-                    highlights = clip.highlights.toFloat(),
-                    shadows = clip.shadows.toFloat(),
-                    blacks = clip.blacks.toFloat(),
-                    whites = clip.whites.toFloat(),
+                    brightness = effBrightness,
+                    contrast = effContrast,
+                    saturation = effSaturation,
+                    exposure = effExposure,
+                    temperature = effTemperature,
+                    tint = effTint,
+                    highlights = effHighlights,
+                    shadows = effShadows,
+                    blacks = effBlacks,
+                    whites = effWhites,
                     filterId = clip.filterId,
-                    filterIntensity = clip.filterIntensity.toFloat(),
+                    filterIntensity = effFilterIntensity,
                     outMatrix = clipColorMatrix,
                     outOffset = clipColorOffset
                 )
+            }
+
+            if (evalOpacity < 1.0f) {
+                GLES20.glEnable(GLES20.GL_BLEND)
+                GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
             }
 
             if (isVideo && decoder != null) {
@@ -1992,12 +2185,13 @@ class VideoExportEngine(private val context: Context) {
                     mvpMatrix,
                     decoder.stMatrix,
                     inputSurface.reusableQuadBuffer,
+                    alpha = evalOpacity,
                     colorMatrix = clipColorMatrix,
                     colorOffset = clipColorOffset,
-                    vignette = clip.vignette.toFloat(),
-                    vignetteRadius = clip.vignetteRadius.toFloat(),
-                    vignetteSoftness = clip.vignetteSoftness.toFloat(),
-                    sharpen = clip.sharpness.toFloat(),
+                    vignette = effVignette,
+                    vignetteRadius = effVignetteRadius,
+                    vignetteSoftness = effVignetteSoftness,
+                    sharpen = effSharpness,
                     texW = contentW.toFloat(),
                     texH = contentH.toFloat()
                 )
@@ -2007,17 +2201,22 @@ class VideoExportEngine(private val context: Context) {
                     tex,
                     mvpMatrix,
                     inputSurface.reusableQuadBuffer,
+                    alpha = evalOpacity,
                     colorMatrix = clipColorMatrix,
                     colorOffset = clipColorOffset,
-                    vignette = clip.vignette.toFloat(),
-                    vignetteRadius = clip.vignetteRadius.toFloat(),
-                    vignetteSoftness = clip.vignetteSoftness.toFloat(),
-                    sharpen = clip.sharpness.toFloat(),
+                    vignette = effVignette,
+                    vignetteRadius = effVignetteRadius,
+                    vignetteSoftness = effVignetteSoftness,
+                    sharpen = effSharpness,
                     texW = contentW.toFloat(),
                     texH = contentH.toFloat()
                 )
             } else {
                 inputSurface.renderSolidColor(clip.color, mvpMatrix, inputSurface.fullQuadBuffer)
+            }
+
+            if (evalOpacity < 1.0f) {
+                GLES20.glDisable(GLES20.GL_BLEND)
             }
             totalRenderNs += (System.nanoTime() - renderStart)
         }
@@ -2214,28 +2413,51 @@ class VideoExportEngine(private val context: Context) {
                                     }
                                 }
 
-                                val effScale = (pip.scale.toFloat() * animScale).coerceIn(0.05f, 10f)
-                                val effRotation = pip.rotation.toFloat() + animRotation
-                                val effOpacity = (pip.opacity.toFloat() * animOpacity).coerceIn(0f, 1f)
-                                val effCenterX = centerX + animOffsetX
-                                val effCenterY = centerY + animOffsetY
+                                val pipSec = (currentTimeMs - pip.startTimeMs) / 1000.0
+                                val pipKfs = pip.keyframeTracks
 
-                                val pipColorMatrix = if (pip.hasColorGrading) FloatArray(16) else null
-                                val pipColorOffset = if (pip.hasColorGrading) FloatArray(4) else null
-                                if (pip.hasColorGrading && pipColorMatrix != null && pipColorOffset != null) {
+                                val baseCenterX = (pipKfs.evaluate("positionX", pipSec, pip.x) * width).toFloat()
+                                val baseCenterY = (pipKfs.evaluate("positionY", pipSec, pip.y) * height).toFloat()
+                                val baseScale = pipKfs.evaluate("scale", pipSec, pip.scale).toFloat()
+                                val baseRotation = pipKfs.evaluate("rotation", pipSec, pip.rotation).toFloat()
+                                val baseOpacity = pipKfs.evaluate("opacity", pipSec, pip.opacity).toFloat()
+
+                                val effScale = (baseScale * animScale).coerceIn(0.05f, 10f)
+                                val effRotation = baseRotation + animRotation
+                                val effOpacity = (baseOpacity * animOpacity).coerceIn(0f, 1f)
+                                val effCenterX = baseCenterX + animOffsetX
+                                val effCenterY = baseCenterY + animOffsetY
+
+                                val kfBrightness = pipKfs.evaluate("brightness", pipSec, pip.brightness).toFloat()
+                                val kfContrast = pipKfs.evaluate("contrast", pipSec, pip.contrast).toFloat()
+                                val kfSaturation = pipKfs.evaluate("saturation", pipSec, pip.saturation).toFloat()
+                                val kfExposure = pipKfs.evaluate("exposure", pipSec, pip.exposure).toFloat()
+                                val kfTemp = pipKfs.evaluate("temperature", pipSec, pip.temperature).toFloat()
+                                val kfTint = pipKfs.evaluate("tint", pipSec, pip.tint).toFloat()
+                                val kfVignette = pipKfs.evaluate("vignette", pipSec, pip.vignette).toFloat()
+                                val kfSharpness = pipKfs.evaluate("sharpness", pipSec, pip.sharpness).toFloat()
+                                val kfFilterIntensity = pipKfs.evaluate("filterIntensity", pipSec, pip.filterIntensity).toFloat()
+
+                                val pipHasGrading = pip.hasColorGrading || kfBrightness != 0f || kfContrast != 0f ||
+                                    kfSaturation != 0f || kfExposure != 0f || kfTemp != 0f || kfTint != 0f ||
+                                    (pip.filterId != null && kfFilterIntensity > 0f)
+
+                                val pipColorMatrix = if (pipHasGrading) FloatArray(16) else null
+                                val pipColorOffset = if (pipHasGrading) FloatArray(4) else null
+                                if (pipHasGrading && pipColorMatrix != null && pipColorOffset != null) {
                                     ColorGradingHelper.calculateMatrixAndOffset(
-                                        brightness = pip.brightness.toFloat(),
-                                        contrast = pip.contrast.toFloat(),
-                                        saturation = pip.saturation.toFloat(),
-                                        exposure = pip.exposure.toFloat(),
-                                        temperature = pip.temperature.toFloat(),
-                                        tint = pip.tint.toFloat(),
+                                        brightness = kfBrightness,
+                                        contrast = kfContrast,
+                                        saturation = kfSaturation,
+                                        exposure = kfExposure,
+                                        temperature = kfTemp,
+                                        tint = kfTint,
                                         highlights = 0f,
                                         shadows = 0f,
                                         blacks = 0f,
                                         whites = 0f,
                                         filterId = pip.filterId,
-                                        filterIntensity = pip.filterIntensity.toFloat(),
+                                        filterIntensity = kfFilterIntensity,
                                         outMatrix = pipColorMatrix,
                                         outOffset = pipColorOffset
                                     )
@@ -2266,8 +2488,8 @@ class VideoExportEngine(private val context: Context) {
                                     cornerBrY = pip.cornerBottomRightY.toFloat(),
                                     colorMatrix = pipColorMatrix,
                                     colorOffset = pipColorOffset,
-                                    vignette = pip.vignette.toFloat(),
-                                    sharpen = pip.sharpness.toFloat()
+                                    vignette = kfVignette,
+                                    sharpen = kfSharpness
                                 )
                             }
                         }
@@ -2283,12 +2505,41 @@ class VideoExportEngine(private val context: Context) {
                             val texId = data.second
                             val bW = data.first.width.toFloat()
                             val bH = data.first.height.toFloat()
-                            val dstLeft = ((width - bW) * txt.x.toFloat()).coerceIn(0f, (width - bW).coerceAtLeast(0f))
-                            val dstTop = ((height - bH) * txt.y.toFloat()).coerceIn(0f, (height - bH).coerceAtLeast(0f))
-                            val dstRight = dstLeft + bW
-                            val dstBottom = dstTop + bH
 
-                            inputSurface.renderOverlay(texId, dstLeft, dstTop, dstRight, dstBottom)
+                            val txtSec = (currentTimeMs - txt.startTimeMs) / 1000.0
+                            val txtKfs = txt.keyframeTracks
+
+                            if (txtKfs.tracks.isNotEmpty() || txt.scale != 1.0) {
+                                val evalX = txtKfs.evaluate("positionX", txtSec, txt.x).coerceIn(0.0, 1.0)
+                                val evalY = txtKfs.evaluate("positionY", txtSec, txt.y).coerceIn(0.0, 1.0)
+                                val evalScale = txtKfs.evaluate("scale", txtSec, txt.scale).coerceIn(0.05, 10.0).toFloat()
+                                val evalRotationDeg = txtKfs.evaluate("rotation", txtSec, 0.0).toFloat()
+                                val evalRotationRad = (evalRotationDeg * Math.PI / 180.0).toFloat()
+                                val evalOpacity = txtKfs.evaluate("opacity", txtSec, 1.0).coerceIn(0.0, 1.0).toFloat()
+
+                                val centerX = (evalX * width).toFloat()
+                                val centerY = (evalY * height).toFloat()
+
+                                inputSurface.renderPipOverlay(
+                                    textureId = texId,
+                                    dstCenterX = centerX,
+                                    dstCenterY = centerY,
+                                    baseW = bW,
+                                    baseH = bH,
+                                    scale = evalScale,
+                                    rotationRad = evalRotationRad,
+                                    opacity = evalOpacity,
+                                    flipH = false,
+                                    flipV = false
+                                )
+                            } else {
+                                val dstLeft = ((width - bW) * txt.x.toFloat()).coerceIn(0f, (width - bW).coerceAtLeast(0f))
+                                val dstTop = ((height - bH) * txt.y.toFloat()).coerceIn(0f, (height - bH).coerceAtLeast(0f))
+                                val dstRight = dstLeft + bW
+                                val dstBottom = dstTop + bH
+
+                                inputSurface.renderOverlay(texId, dstLeft, dstTop, dstRight, dstBottom)
+                            }
                         }
                     }
                 }
@@ -2582,7 +2833,7 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
         var anySourceMixed = false
 
         for (source in sources) {
-            if (source.volume <= 0.0 || source.path.isBlank()) continue
+            if ((source.volume <= 0.0 && !source.keyframeTracks.hasProperty("volume")) || source.path.isBlank()) continue
             val file = File(source.path)
             if (!file.exists()) continue
 
@@ -2794,7 +3045,13 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
                             fade = ((targetDurationFrames - f).toDouble() / fadeOutFrames).coerceIn(0.0, 1.0)
                         }
 
-                        val gain = (source.volume * fade).toFloat()
+                        val sampleSec = f.toDouble() / targetSampleRate.toDouble()
+                        val baseVolume = if (source.keyframeTracks.hasProperty("volume")) {
+                            source.keyframeTracks.evaluate("volume", sampleSec, source.volume)
+                        } else {
+                            source.volume
+                        }
+                        val gain = (baseVolume * fade).toFloat()
                         masterLeft[masterFrame] += rawL * gain
                         masterRight[masterFrame] += rawR * gain
                     }

@@ -1475,13 +1475,52 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
       clipTime = (viewModel.playheadPosition - activeClipStart).clamp(0.0, activeClip.durationInSeconds);
     }
     final VideoKeyframe? keyframe = activeClip is VideoClip ? viewModel.getInterpolatedKeyframe(activeClip, clipTime) : null;
-    final animScale = keyframe?.scale ?? 1.0;
-    final animRotation = keyframe?.rotationDegrees ?? (activeClip.rotationDegrees as num).toDouble();
-    final animPosX = keyframe?.positionX ?? 0.0;
-    final animPosY = keyframe?.positionY ?? 0.0;
-    final animOpacity = (keyframe?.opacity ?? (activeClip.opacity as num).toDouble()).clamp(0.0, 1.0);
+    double animScale = keyframe?.scale ?? 1.0;
+    double animRotation = keyframe?.rotationDegrees ?? (activeClip is VideoClip ? (activeClip.rotationDegrees as num).toDouble() : 0.0);
+    double animPosX = keyframe?.positionX ?? 0.0;
+    double animPosY = keyframe?.positionY ?? 0.0;
+    double animOpacity = keyframe?.opacity ?? (activeClip is VideoClip ? (activeClip.opacity as num).toDouble() : 1.0);
+    bool hasKeyframes = activeClip is VideoClip && (activeClip.keyframes.isNotEmpty || activeClip.effectiveKeyframeTracks.tracks.isNotEmpty);
 
-    final ClipSpatialTransform? keyframeTransform = (activeClip is VideoClip && activeClip.keyframes.isNotEmpty && keyframe != null)
+    ColorFilter? effectiveAdjustments = adjustments;
+    if (activeClip is VideoClip && hasKeyframes) {
+      final tracks = activeClip.effectiveKeyframeTracks;
+      animPosX = tracks.evaluate(AnimatableProperty.positionX, clipTime, fallback: animPosX);
+      animPosY = tracks.evaluate(AnimatableProperty.positionY, clipTime, fallback: animPosY);
+      animScale = tracks.evaluate(AnimatableProperty.scale, clipTime, fallback: animScale);
+      animRotation = tracks.evaluate(AnimatableProperty.rotation, clipTime, fallback: animRotation);
+      animOpacity = tracks.evaluate(AnimatableProperty.opacity, clipTime, fallback: animOpacity);
+
+      // Evaluate animated color grading / adjustment tracks if present
+      if (tracks.hasProperty(AnimatableProperty.brightness) ||
+          tracks.hasProperty(AnimatableProperty.contrast) ||
+          tracks.hasProperty(AnimatableProperty.saturation) ||
+          tracks.hasProperty(AnimatableProperty.exposure) ||
+          tracks.hasProperty(AnimatableProperty.temperature) ||
+          tracks.hasProperty(AnimatableProperty.tint) ||
+          tracks.hasProperty(AnimatableProperty.highlights) ||
+          tracks.hasProperty(AnimatableProperty.shadows) ||
+          tracks.hasProperty(AnimatableProperty.vignette) ||
+          tracks.hasProperty(AnimatableProperty.sharpen)) {
+        final baseAdj = viewModel.colorAdjustments;
+        final evalAdj = baseAdj.copyWith(
+          brightness: tracks.evaluate(AnimatableProperty.brightness, clipTime, fallback: baseAdj.brightness),
+          contrast: tracks.evaluate(AnimatableProperty.contrast, clipTime, fallback: baseAdj.contrast),
+          saturation: tracks.evaluate(AnimatableProperty.saturation, clipTime, fallback: baseAdj.saturation),
+          exposure: tracks.evaluate(AnimatableProperty.exposure, clipTime, fallback: baseAdj.exposure),
+          temperature: tracks.evaluate(AnimatableProperty.temperature, clipTime, fallback: baseAdj.temperature),
+          tint: tracks.evaluate(AnimatableProperty.tint, clipTime, fallback: baseAdj.tint),
+          highlights: tracks.evaluate(AnimatableProperty.highlights, clipTime, fallback: baseAdj.highlights),
+          shadows: tracks.evaluate(AnimatableProperty.shadows, clipTime, fallback: baseAdj.shadows),
+          vignette: tracks.evaluate(AnimatableProperty.vignette, clipTime, fallback: baseAdj.vignette),
+          sharpness: tracks.evaluate(AnimatableProperty.sharpen, clipTime, fallback: baseAdj.sharpness),
+        );
+        effectiveAdjustments = evalAdj.getColorFilter();
+      }
+    }
+    animOpacity = animOpacity.clamp(0.0, 1.0);
+
+    final ClipSpatialTransform? keyframeTransform = (activeClip is VideoClip && hasKeyframes)
         ? ClipSpatialTransform(
             clipId: activeClip.id,
             xPos: animPosX,
@@ -1500,8 +1539,8 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     if (filter != null) {
       visualChild = ColorFiltered(colorFilter: filter, child: visualChild);
     }
-    if (adjustments != null) {
-      visualChild = ColorFiltered(colorFilter: adjustments, child: visualChild);
+    if (effectiveAdjustments != null) {
+      visualChild = ColorFiltered(colorFilter: effectiveAdjustments, child: visualChild);
     }
 
     if (viewModel.canvasBlurSigma > 0.0) {
@@ -2988,10 +3027,26 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
       animScale = 1.0 + 0.04 * math.sin(elapsedSec * 6.0);
     }
 
-    final effScale = _liveScale * animScale;
+    Offset currentPos = _livePosition;
+    double currentScale = _liveScale;
+    double currentRotation = 0.0;
+    double currentBaseOpacity = 1.0;
 
-    final posX = _livePosition.dx.clamp(0.0, 1.0) * widget.canvasWidth;
-    final posY = _livePosition.dy.clamp(0.0, 1.0) * widget.canvasHeight;
+    final tracks = text.effectiveKeyframeTracks;
+    if (!_isGestureActive && (tracks.tracks.isNotEmpty || text.keyframes.isNotEmpty)) {
+      final kfPosX = tracks.evaluate(AnimatableProperty.positionX, elapsedSec, fallback: currentPos.dx);
+      final kfPosY = tracks.evaluate(AnimatableProperty.positionY, elapsedSec, fallback: currentPos.dy);
+      currentPos = Offset(kfPosX, kfPosY);
+      currentScale = tracks.evaluate(AnimatableProperty.scale, elapsedSec, fallback: currentScale);
+      currentRotation = tracks.evaluate(AnimatableProperty.rotation, elapsedSec, fallback: currentRotation);
+      currentBaseOpacity = tracks.evaluate(AnimatableProperty.opacity, elapsedSec, fallback: currentBaseOpacity);
+    }
+
+    final effScale = currentScale * animScale;
+    final effOpacity = (currentBaseOpacity * opacity).clamp(0.0, 1.0);
+
+    final posX = currentPos.dx.clamp(0.0, 1.0) * widget.canvasWidth;
+    final posY = currentPos.dy.clamp(0.0, 1.0) * widget.canvasHeight;
 
     return Positioned(
       left: posX,
@@ -3000,11 +3055,13 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
         translation: const Offset(-0.5, -0.5),
         child: Transform.translate(
         offset: Offset(0, slideY),
-        child: Transform.scale(
-          scale: effScale,
-          child: Opacity(
-            opacity: opacity.clamp(0.0, 1.0),
-            child: Stack(
+        child: Transform.rotate(
+          angle: currentRotation * math.pi / 180.0,
+          child: Transform.scale(
+            scale: effScale,
+            child: Opacity(
+              opacity: effOpacity,
+              child: Stack(
               clipBehavior: Clip.none,
               alignment: Alignment.center,
               children: [
@@ -3271,6 +3328,7 @@ class _InteractiveTextOverlayWidgetState extends State<InteractiveTextOverlayWid
           ),
         ),
       ),
+    ),
     ),
   );
 }
@@ -3715,18 +3773,35 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
       return const SizedBox.shrink();
     }
 
-    final posX = _livePosition.dx.clamp(0.0, 1.0) * widget.canvasWidth;
-    final posY = _livePosition.dy.clamp(0.0, 1.0) * widget.canvasHeight;
-
-    // Base media dimension inside canvas
-    final baseWidth = widget.canvasWidth * 0.45;
-    final baseHeight = baseWidth * (9.0 / 16.0);
-
     // Compute animated parameters at playhead (clamped, non-destructive to timeline trimming)
     final currentPlayheadMs = (widget.viewModel.playheadPosition * 1000.0).round();
     final durationMs = (overlay.endTimeMs - overlay.startTimeMs).clamp(1, 99999999);
     final elapsedMs = (currentPlayheadMs - overlay.startTimeMs).clamp(0, durationMs);
     final remainingMs = (overlay.endTimeMs - currentPlayheadMs).clamp(0, durationMs);
+
+    Offset currentPos = _livePosition;
+    double currentScale = _liveScale;
+    double currentRotation = _liveRotation;
+    double currentBaseOpacity = overlay.opacity;
+
+    final tracks = overlay.effectiveKeyframeTracks;
+    if (!_isGestureActive && (tracks.tracks.isNotEmpty || overlay.keyframes.isNotEmpty)) {
+      final elapsedSec = elapsedMs / 1000.0;
+      final kfPosX = tracks.evaluate(AnimatableProperty.positionX, elapsedSec, fallback: currentPos.dx);
+      final kfPosY = tracks.evaluate(AnimatableProperty.positionY, elapsedSec, fallback: currentPos.dy);
+      currentPos = Offset(kfPosX, kfPosY);
+      currentScale = tracks.evaluate(AnimatableProperty.scale, elapsedSec, fallback: currentScale);
+      final kfRotDeg = tracks.evaluate(AnimatableProperty.rotation, elapsedSec, fallback: currentRotation * 180.0 / math.pi);
+      currentRotation = kfRotDeg * math.pi / 180.0;
+      currentBaseOpacity = tracks.evaluate(AnimatableProperty.opacity, elapsedSec, fallback: currentBaseOpacity);
+    }
+
+    final posX = currentPos.dx.clamp(0.0, 1.0) * widget.canvasWidth;
+    final posY = currentPos.dy.clamp(0.0, 1.0) * widget.canvasHeight;
+
+    // Base media dimension inside canvas
+    final baseWidth = widget.canvasWidth * 0.45;
+    final baseHeight = baseWidth * (9.0 / 16.0);
 
     final inDurationMs = math.min(500, (durationMs * 0.3).round());
     final outDurationMs = math.min(500, (durationMs * 0.3).round());
@@ -3835,9 +3910,9 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
       }
     }
 
-    final effScale = (_liveScale * animScale).clamp(0.05, 10.0);
-    final effRotation = _liveRotation + animRotation;
-    final effOpacity = (overlay.opacity * animOpacity).clamp(0.0, 1.0);
+    final effScale = (currentScale * animScale).clamp(0.05, 10.0);
+    final effRotation = currentRotation + animRotation;
+    final effOpacity = (currentBaseOpacity * animOpacity).clamp(0.0, 1.0);
 
     final shadows = <BoxShadow>[];
     final sh = overlay.shadow;

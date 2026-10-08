@@ -12,6 +12,7 @@ import 'package:capcut_video_editor/ui/features/editor/views/widgets/beat_option
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/pip_overlay_sheet.dart';
 import 'package:capcut_video_editor/domain/models/text_overlay.dart';
 import 'package:capcut_video_editor/ui/features/editor/views/widgets/text_animation_sheet.dart';
+import 'package:capcut_video_editor/ui/features/editor/views/widgets/motion_graph_sheet.dart';
 
 /// Middle Action Toolbar containing Split, Trim Left/Right, Delete, Duplicate (with PIP option),
 /// Speed, Volume, Add Clip (Media Picker), and Export.
@@ -27,7 +28,7 @@ class ActionToolbar extends StatelessWidget {
     final hasSelectedText = viewModel.selectedTextId != null;
     final hasSelectedOverlay = viewModel.selectedOverlay != null;
     final hasAnySelection = hasSelectedClip || hasSelectedAudio || hasSelectedText || hasSelectedOverlay;
-    final canKeyframe = hasSelectedClip || hasSelectedOverlay;
+    final canKeyframe = hasSelectedClip || hasSelectedOverlay || hasSelectedText || hasSelectedAudio;
     final isAtKeyframe = canKeyframe && viewModel.hasKeyframeAtPlayhead;
     final kfCount = canKeyframe ? viewModel.currentKeyframeCount : 0;
 
@@ -465,6 +466,9 @@ class ActionToolbar extends StatelessWidget {
                                 );
                               }
                             : null,
+                        onLongPress: canKeyframe
+                            ? () => MotionGraphSheet.show(context, viewModel)
+                            : null,
                         borderRadius: BorderRadius.circular(3),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
@@ -534,6 +538,16 @@ class ActionToolbar extends StatelessWidget {
                     ],
                   ),
                 ),
+
+                // Curves & Motion Graph
+                if (canKeyframe)
+                  _buildActionButton(
+                    context: context,
+                    icon: Icons.show_chart_rounded,
+                    label: 'Curves',
+                    enabled: canKeyframe,
+                    onTap: () => MotionGraphSheet.show(context, viewModel),
+                  ),
 
                 // Speed Controller
                 _buildActionButton(
