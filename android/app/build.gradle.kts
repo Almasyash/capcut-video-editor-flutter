@@ -56,8 +56,15 @@ android {
         applicationId = "com.example.capcut_video_editor"
         minSdk = 24
         targetSdk = 34
-        versionCode = flutter.versionCode
-        versionName = flutter.versionName
+
+        // Support CLI/Property override via -PversionCode or -PversionName while respecting Flutter's pubspec version
+        val resolvedVersionCode = project.findProperty("versionCode")?.toString()?.toIntOrNull()
+            ?: flutter.versionCode
+        val resolvedVersionName = project.findProperty("versionName")?.toString()
+            ?: flutter.versionName
+
+        versionCode = resolvedVersionCode
+        versionName = resolvedVersionName
     }
 
     signingConfigs {
@@ -67,6 +74,9 @@ android {
                 keyPassword = keyPasswordProp
                 storeFile = resolvedStoreFile
                 storePassword = storePasswordProp
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
             println("[SigningConfig] Configured release signing with keystore: ${resolvedStoreFile?.absolutePath}")
         }
@@ -81,7 +91,13 @@ android {
             }
         }
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            // When release signing is configured, use the production signing key for debug builds too
+            // to ensure seamless in-place updates between development and release APKs on test devices
+            if (isReleaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 }
