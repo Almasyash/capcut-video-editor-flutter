@@ -240,10 +240,22 @@ class VideoMask {
     );
   }
 
+  double get safePositionX => positionX.isFinite ? positionX.clamp(-2.0, 2.0) : 0.0;
+  double get safePositionY => positionY.isFinite ? positionY.clamp(-2.0, 2.0) : 0.0;
+  double get safeScale => scale.isFinite ? scale.clamp(0.01, 10.0) : 1.0;
+  double get safeRotation => rotation.isFinite ? rotation : 0.0;
+  double get safeOpacity => opacity.isFinite ? opacity.clamp(0.0, 1.0) : 1.0;
+  double get safeFeather => feather.isFinite ? feather.clamp(0.0, 100.0) : 0.0;
+  double get safeExpansion => expansion.isFinite ? expansion.clamp(-100.0, 100.0) : 0.0;
+  double get safeWidth => width.isFinite ? width.clamp(0.01, 2.0) : 0.5;
+  double get safeHeight => height.isFinite ? height.clamp(0.01, 2.0) : 0.5;
+
   /// Evaluates animated mask state at the given time in seconds
-  VideoMask evaluateAt(double timeInSeconds) {
-    if (keyframeTracks == null || keyframeTracks!.isEmpty) return this;
-    final tracks = keyframeTracks!;
+  VideoMask evaluateAt(double timeInSeconds, {KeyframeTrackGroup? externalTracks}) {
+    final tracks = (keyframeTracks != null && keyframeTracks!.isNotEmpty)
+        ? keyframeTracks!
+        : externalTracks;
+    if (tracks == null || tracks.isEmpty) return this;
     return copyWith(
       positionX: tracks.evaluate(AnimatableProperty.maskPositionX, timeInSeconds, fallback: positionX),
       positionY: tracks.evaluate(AnimatableProperty.maskPositionY, timeInSeconds, fallback: positionY),
@@ -296,26 +308,26 @@ class VideoMask {
         break;
 
       case MaskType.polygon:
-        if (points.length >= 3) {
-          final matrix = Matrix4.identity()
-            ..translate(center.dx, center.dy)
-            ..rotateZ(rotation * math.pi / 180.0)
-            ..scale(canvasSize.width * effectiveScale, canvasSize.height * effectiveScale);
+        final safePoints = (points.length >= 3) ? points : defaultPolygonPoints;
+        final matrix = Matrix4.identity()
+          ..translate(center.dx, center.dy)
+          ..rotateZ(safeRotation * math.pi / 180.0)
+          ..scale(canvasSize.width * effectiveScale, canvasSize.height * effectiveScale);
 
-          final transformedPoints = points.map((p) {
-            final vec = matrix.transform3Boxed(Vector3(p.dx, p.dy, 0.0));
-            return Offset(vec.x, vec.y);
-          }).toList();
+        final transformedPoints = safePoints.map((p) {
+          final px = p.dx.isFinite ? p.dx : 0.0;
+          final py = p.dy.isFinite ? p.dy : 0.0;
+          final vec = matrix.transform3Boxed(Vector3(px, py, 0.0));
+          return Offset(vec.x, vec.y);
+        }).toList();
 
-          rawPath.moveTo(transformedPoints.first.dx, transformedPoints.first.dy);
-          for (int i = 1; i < transformedPoints.length; i++) {
-            rawPath.lineTo(transformedPoints[i].dx, transformedPoints[i].dy);
-          }
-          rawPath.close();
-          // Skip standard rotation transform since polygon applies rotation matrix above
-          return _finalizePath(rawPath, canvasSize, skipRotation: true);
+        rawPath.moveTo(transformedPoints.first.dx, transformedPoints.first.dy);
+        for (int i = 1; i < transformedPoints.length; i++) {
+          rawPath.lineTo(transformedPoints[i].dx, transformedPoints[i].dy);
         }
-        break;
+        rawPath.close();
+        // Skip standard rotation transform since polygon applies rotation matrix above
+        return _finalizePath(rawPath, canvasSize, skipRotation: true);
 
       case MaskType.linear:
         // Half-plane defined by normal from linearStart to linearEnd

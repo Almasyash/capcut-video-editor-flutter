@@ -423,4 +423,182 @@ void main() {
       expect(vm.selectedClip?.masks.first.type, MaskType.rectangle);
     });
   });
+
+  group('Advanced Masking & Compositing v1.6.0 Engine Tests', () {
+    test('Polygon geometry fallback and point updates', () {
+      // Empty points falls back to default hexagon points
+      const emptyPoly = VideoMask(
+        id: 'p_empty',
+        type: MaskType.polygon,
+        points: [],
+      );
+      final path = emptyPoly.toPath(const Size(1920, 1080));
+      expect(path, isNotNull);
+      expect(path.getBounds().isEmpty, isFalse);
+
+      // Custom polygon with 4 points
+      const customPoly = VideoMask(
+        id: 'p_custom',
+        type: MaskType.polygon,
+        points: [
+          Offset(-0.3, -0.3),
+          Offset(0.3, -0.3),
+          Offset(0.3, 0.3),
+          Offset(-0.3, 0.3),
+        ],
+      );
+      expect(customPoly.points.length, 4);
+      final customPath = customPoly.toPath(const Size(1000, 1000));
+      final bounds = customPath.getBounds();
+      expect(bounds.width, closeTo(600, 10));
+      expect(bounds.height, closeTo(600, 10));
+    });
+
+    test('Linear and Radial masks generate correct geometric bounds', () {
+      const linear = VideoMask(
+        id: 'lin1',
+        type: MaskType.linear,
+        linearStart: Offset(0.0, -0.3),
+        linearEnd: Offset(0.0, 0.3),
+      );
+      final linPath = linear.toPath(const Size(1000, 1000));
+      expect(linPath, isNotNull);
+      expect(linPath.getBounds().isEmpty, isFalse);
+
+      const radial = VideoMask(
+        id: 'rad1',
+        type: MaskType.radial,
+        radialCenter: Offset(0.0, 0.0),
+        radialRadius: 0.25,
+      );
+      final radPath = radial.toPath(const Size(1000, 1000));
+      final radBounds = radPath.getBounds();
+      expect(radBounds.width, closeTo(500, 20));
+      expect(radBounds.height, closeTo(500, 20));
+    });
+
+    test('Safe getters handle NaN and Infinity without crashing', () {
+      const nanMask = VideoMask(
+        id: 'nan1',
+        positionX: double.nan,
+        positionY: double.infinity,
+        scale: double.negativeInfinity,
+        rotation: double.nan,
+        opacity: double.nan,
+        feather: double.infinity,
+        expansion: double.nan,
+        width: double.nan,
+        height: double.infinity,
+      );
+
+      expect(nanMask.safePositionX, 0.0);
+      expect(nanMask.safePositionY, 0.0);
+      expect(nanMask.safeScale, 1.0);
+      expect(nanMask.safeRotation, 0.0);
+      expect(nanMask.safeOpacity, 1.0);
+      expect(nanMask.safeFeather, 0.0);
+      expect(nanMask.safeExpansion, 0.0);
+      expect(nanMask.safeWidth, 0.5);
+      expect(nanMask.safeHeight, 0.5);
+    });
+
+    test('Dual-track keyframe resolution: evaluates clip keyframes when mask tracks are null', () {
+      const clipTracks = KeyframeTrackGroup(
+        tracks: {
+          AnimatableProperty.maskPositionX: KeyframeTrack(
+            property: AnimatableProperty.maskPositionX,
+            defaultValue: 0.0,
+            keyframes: [
+              MotionKeyframe(id: 'k1', timestampMs: 0, value: -0.5),
+              MotionKeyframe(id: 'k2', timestampMs: 2000, value: 0.5),
+            ],
+          ),
+        },
+      );
+
+      const maskWithoutTracks = VideoMask(
+        id: 'no_tracks',
+        positionX: 0.0,
+        keyframeTracks: null,
+      );
+
+      final evaluated = maskWithoutTracks.evaluateAt(1.0, externalTracks: clipTracks);
+      expect(evaluated.positionX, closeTo(0.0, 0.05));
+
+      final evaluatedAtEnd = maskWithoutTracks.evaluateAt(2.0, externalTracks: clipTracks);
+      expect(evaluatedAtEnd.positionX, closeTo(0.5, 0.05));
+    });
+
+    test('Gesture coalescing: commitMaskGesture creates exactly one undo point', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(
+        id: 'gesture_clip',
+        title: 'Gesture Clip',
+        duration: const Duration(seconds: 10),
+      ));
+      vm.selectClip(0);
+      vm.addMaskToSelectedClip(const VideoMask(id: 'g_mask', name: 'Gesture Mask', type: MaskType.rectangle));
+
+      vm.setMaskModeActive(true);
+      expect(vm.isMaskModeActive, isTrue);
+
+      // Continuous drag updates mask property without creating undo steps
+      vm.updateActiveMask(vm.activeMask!.copyWith(positionX: 0.1));
+      vm.updateActiveMask(vm.activeMask!.copyWith(positionX: 0.2));
+      vm.updateActiveMask(vm.activeMask!.copyWith(positionX: 0.3));
+      vm.updateActiveMask(vm.activeMask!.copyWith(positionX: 0.4));
+
+      // Commit gesture at drag end
+      vm.commitMaskGesture();
+
+      expect(vm.activeMask?.positionX, closeTo(0.4, 0.001));
+
+      // Single undo should revert the entire drag back to initial state
+      vm.undo();
+      expect(vm.activeMask?.positionX, closeTo(0.0, 0.001));
+
+      // Redo restores to end of drag
+      vm.redo();
+      expect(vm.activeMask?.positionX, closeTo(0.4, 0.001));
+    });
+
+    test('updateMaskPolygonPoint correctly modifies specific vertex', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(
+        id: 'poly_clip',
+        title: 'Poly Clip',
+        duration: const Duration(seconds: 10),
+      ));
+      vm.selectClip(0);
+      vm.addMaskToSelectedClip(const VideoMask(
+        id: 'p_mask',
+        name: 'Poly Mask',
+        type: MaskType.polygon,
+        points: [
+          Offset(0.0, -0.4),
+          Offset(0.35, -0.2),
+          Offset(0.35, 0.2),
+        ],
+      ));
+
+      vm.updateMaskPolygonPoint(0, 1, const Offset(0.5, -0.3));
+      expect(vm.selectedClip?.masks.first.points[1], const Offset(0.5, -0.3));
+    });
+
+    test('Clip split preserves masks and keyframes on both resulting clips', () {
+      final vm = EditorViewModel();
+      final initialCount = vm.videoClips.length;
+      vm.selectClip(0);
+      vm.addMaskToSelectedClip(const VideoMask(id: 'split_mask', name: 'Mask', type: MaskType.rectangle, positionX: 0.25));
+      vm.seekTo(2.0);
+
+      vm.splitClipAtPlayhead();
+
+      expect(vm.videoClips.length, initialCount + 1);
+      expect(vm.videoClips[0].masks.length, 1);
+      expect(vm.videoClips[0].masks.first.positionX, 0.25);
+      expect(vm.videoClips[1].masks.length, 1);
+      expect(vm.videoClips[1].masks.first.positionX, 0.25);
+    });
+  });
 }

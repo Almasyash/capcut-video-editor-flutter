@@ -20,6 +20,18 @@ class MaskAdjustmentSheet extends StatefulWidget {
 class _MaskAdjustmentSheetState extends State<MaskAdjustmentSheet> {
   int _activeMaskIndex = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    widget.viewModel.setMaskModeActive(true);
+  }
+
+  @override
+  void dispose() {
+    widget.viewModel.setMaskModeActive(false);
+    super.dispose();
+  }
+
   List<VideoMask> get _currentMasks {
     if (widget.viewModel.selectedClip != null) {
       return widget.viewModel.selectedClip!.masks;
@@ -423,8 +435,9 @@ class _MaskAdjustmentSheetState extends State<MaskAdjustmentSheet> {
           min: min,
           max: max,
           activeColor: AppColors.primary,
-          inactiveColor: AppColors.surfaceLight,
           onChanged: onChanged,
+          onChangeStart: (_) => widget.viewModel.beginMaskGesture(),
+          onChangeEnd: (_) => widget.viewModel.commitMaskGesture(),
         ),
       ],
     );

@@ -6321,6 +6321,50 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _isMaskModeActive = false;
+  bool get isMaskModeActive => _isMaskModeActive;
+  void setMaskModeActive(bool active) {
+    _isMaskModeActive = active;
+    notifyListeners();
+  }
+
+  VideoMask? get activeMask {
+    if (selectedClip != null && selectedClip!.masks.isNotEmpty) {
+      if (_selectedMaskIndex >= 0 && _selectedMaskIndex < selectedClip!.masks.length) {
+        return selectedClip!.masks[_selectedMaskIndex];
+      }
+      return selectedClip!.masks.first;
+    } else if (selectedOverlay != null && selectedOverlay!.masks.isNotEmpty) {
+      if (_selectedMaskIndex >= 0 && _selectedMaskIndex < selectedOverlay!.masks.length) {
+        return selectedOverlay!.masks[_selectedMaskIndex];
+      }
+      return selectedOverlay!.masks.first;
+    }
+    return null;
+  }
+
+  bool _isMaskGestureInProgress = false;
+
+  /// Begins an interactive mask gesture, capturing an undo snapshot before drag updates.
+  void beginMaskGesture() {
+    if (!_isMaskGestureInProgress) {
+      _saveSnapshot();
+      _isMaskGestureInProgress = true;
+    }
+  }
+
+  /// Updates the currently active mask on selected clip or overlay without saving an undo snapshot per update
+  void updateActiveMask(VideoMask updated) {
+    if (!_isMaskGestureInProgress) {
+      beginMaskGesture();
+    }
+    if (_selectedClipIndex != null) {
+      updateMaskInSelectedClip(_selectedMaskIndex, updated);
+    } else if (_selectedOverlayIndex != null) {
+      updateMaskInSelectedOverlay(_selectedMaskIndex, updated);
+    }
+  }
+
   void addMaskToSelectedClip(VideoMask mask) {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
@@ -6497,6 +6541,32 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Commits a completed interactive mask transform/adjustment gesture into the undo history.
+  /// Exactly ONE undo snapshot is created for the complete gesture interaction.
+  void commitMaskGesture() {
+    _isMaskGestureInProgress = false;
+    scheduleAutoSave();
+  }
+
+  /// Updates a single polygon vertex coordinate in the specified mask
+  void updateMaskPolygonPoint(int maskIndex, int pointIndex, Offset newPoint) {
+    if (_selectedClipIndex != null) {
+      final clip = _videoClips[_selectedClipIndex!];
+      if (maskIndex < 0 || maskIndex >= clip.masks.length) return;
+      final mask = clip.masks[maskIndex];
+      if (pointIndex < 0 || pointIndex >= mask.points.length) return;
+      final newPoints = List<Offset>.from(mask.points)..[pointIndex] = newPoint;
+      updateMaskInSelectedClip(maskIndex, mask.copyWith(points: newPoints));
+    } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
+      final overlay = _overlayClips[_selectedOverlayIndex!];
+      if (maskIndex < 0 || maskIndex >= overlay.masks.length) return;
+      final mask = overlay.masks[maskIndex];
+      if (pointIndex < 0 || pointIndex >= mask.points.length) return;
+      final newPoints = List<Offset>.from(mask.points)..[pointIndex] = newPoint;
+      updateMaskInSelectedOverlay(maskIndex, mask.copyWith(points: newPoints));
+    }
+  }
+
   /// Adds a dedicated keyframe at the current playhead for the active mask
   void addMaskKeyframeAtPlayhead() {
     _saveSnapshot();
@@ -6521,7 +6591,24 @@ class EditorViewModel extends ChangeNotifier {
       group = group.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
       group = group.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
 
-      _videoClips[_selectedClipIndex!] = clip.copyWith(keyframeTracks: group);
+      var maskGroup = m.keyframeTracks ?? const KeyframeTrackGroup();
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskPositionX, timeMs, m.positionX);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskPositionY, timeMs, m.positionY);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskScale, timeMs, m.scale);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskRotation, timeMs, m.rotation);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskOpacity, timeMs, m.opacity);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskFeather, timeMs, m.feather);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskExpansion, timeMs, m.expansion);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
+
+      final updatedMask = m.copyWith(keyframeTracks: maskGroup);
+      final updatedMasks = List<VideoMask>.from(clip.masks);
+      if (_selectedMaskIndex < updatedMasks.length) {
+        updatedMasks[_selectedMaskIndex] = updatedMask;
+      }
+
+      _videoClips[_selectedClipIndex!] = clip.copyWith(keyframeTracks: group, masks: updatedMasks);
       HapticFeedback.mediumImpact();
       scheduleAutoSave();
       TtsService.announce('Mask keyframe');
@@ -6547,7 +6634,24 @@ class EditorViewModel extends ChangeNotifier {
       group = group.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
       group = group.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
 
-      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(keyframeTracks: group);
+      var maskGroup = m.keyframeTracks ?? const KeyframeTrackGroup();
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskPositionX, timeMs, m.positionX);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskPositionY, timeMs, m.positionY);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskScale, timeMs, m.scale);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskRotation, timeMs, m.rotation);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskOpacity, timeMs, m.opacity);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskFeather, timeMs, m.feather);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskExpansion, timeMs, m.expansion);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskWidth, timeMs, m.width);
+      maskGroup = maskGroup.addKeyframe(AnimatableProperty.maskHeight, timeMs, m.height);
+
+      final updatedMask = m.copyWith(keyframeTracks: maskGroup);
+      final updatedMasks = List<VideoMask>.from(overlay.masks);
+      if (_selectedMaskIndex < updatedMasks.length) {
+        updatedMasks[_selectedMaskIndex] = updatedMask;
+      }
+
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(keyframeTracks: group, masks: updatedMasks);
       HapticFeedback.mediumImpact();
       scheduleAutoSave();
       TtsService.announce('Mask keyframe');
