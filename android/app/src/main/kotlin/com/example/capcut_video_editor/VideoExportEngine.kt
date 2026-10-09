@@ -681,6 +681,278 @@ data class ExportPipOverlay(
                 temperature != 0.0 || tint != 0.0 || (filterId != null && filterId != "none" && filterIntensity > 0.0))
 }
 
+/**
+ * Proactive Hardware Encoder Capability Resolver and Deterministic Fallback Engine.
+ * Queries Android MediaCodecList before configuring MediaCodec to ensure safe, stable
+ * export across all resolution, frame rate, and profile/level combinations.
+ */
+data class ResolvedEncoderConfig(
+    val requestedWidth: Int,
+    val requestedHeight: Int,
+    val requestedFps: Int,
+    val requestedBitrate: Int,
+    val actualWidth: Int,
+    val actualHeight: Int,
+    val actualFps: Int,
+    val actualBitrate: Int,
+    val profile: Int,
+    val level: Int,
+    val isFallback: Boolean,
+    val fallbackReason: String? = null,
+    val codecName: String
+)
+
+object HardwareEncoderCapabilityResolver {
+    private const val TAG = "EncoderCapResolver"
+    private const val MIME_TYPE = "video/avc"
+
+    fun resolveConfiguration(
+        requestedWidth: Int,
+        requestedHeight: Int,
+        requestedFps: Int,
+        requestedBitrate: Int
+    ): ResolvedEncoderConfig {
+        val codecInfo = findHardwareEncoder(MIME_TYPE) ?: findAnyEncoder(MIME_TYPE)
+        val defaultProfile = MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
+        val defaultLevel = MediaCodecInfo.CodecProfileLevel.AVCLevel41
+
+        if (codecInfo == null) {
+            Log.w(TAG, "No H.264 encoder found via MediaCodecList, using default requested params")
+            val w = ((requestedWidth / 2) * 2).coerceAtLeast(320)
+            val h = ((requestedHeight / 2) * 2).coerceAtLeast(240)
+            return ResolvedEncoderConfig(
+                requestedWidth = requestedWidth,
+                requestedHeight = requestedHeight,
+                requestedFps = requestedFps,
+                requestedBitrate = requestedBitrate,
+                actualWidth = w,
+                actualHeight = h,
+                actualFps = requestedFps.coerceIn(15, 60),
+                actualBitrate = requestedBitrate.coerceAtLeast(1_000_000),
+                profile = defaultProfile,
+                level = defaultLevel,
+                isFallback = false,
+                fallbackReason = null,
+                codecName = "unknown"
+            )
+        }
+
+        val capabilities = try {
+            codecInfo.getCapabilitiesForType(MIME_TYPE)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get capabilities for $MIME_TYPE: ${e.message}")
+            null
+        }
+
+        if (capabilities == null) {
+            val w = ((requestedWidth / 2) * 2).coerceAtLeast(320)
+            val h = ((requestedHeight / 2) * 2).coerceAtLeast(240)
+            return ResolvedEncoderConfig(
+                requestedWidth = requestedWidth,
+                requestedHeight = requestedHeight,
+                requestedFps = requestedFps,
+                requestedBitrate = requestedBitrate,
+                actualWidth = w,
+                actualHeight = h,
+                actualFps = requestedFps.coerceIn(15, 60),
+                actualBitrate = requestedBitrate.coerceAtLeast(1_000_000),
+                profile = defaultProfile,
+                level = defaultLevel,
+                isFallback = false,
+                fallbackReason = null,
+                codecName = codecInfo.name
+            )
+        }
+
+        val videoCaps = capabilities.videoCapabilities
+        var targetW = ((requestedWidth / 2) * 2).coerceAtLeast(320)
+        var targetH = ((requestedHeight / 2) * 2).coerceAtLeast(240)
+        var targetFps = requestedFps.coerceIn(15, 60)
+        var isFallback = false
+        val reasons = mutableListOf<String>()
+
+        if (videoCaps != null) {
+            // 1. Resolution Validation & Deterministic Fallback Ladder
+            if (!videoCaps.isSizeSupported(targetW, targetH)) {
+                isFallback = true
+                val maxDim = max(targetW, targetH)
+                val aspectRatio = targetW.toDouble() / targetH.toDouble()
+
+                // Resolution Ladder: 2560 (2K), 1920 (1080p), 1280 (720p), 960 (540p), 720 (480p)
+                val resolutionLadder = mutableListOf<Int>()
+                if (maxDim > 2560) resolutionLadder.add(2560)
+                if (maxDim > 1920) resolutionLadder.add(1920)
+                if (maxDim > 1280) resolutionLadder.add(1280)
+                resolutionLadder.addAll(listOf(960, 720))
+
+                var resolvedSize = false
+                for (maxBoundary in resolutionLadder) {
+                    val candidateW: Int
+                    val candidateH: Int
+                    if (aspectRatio >= 1.0) {
+                        candidateW = maxBoundary
+                        candidateH = ((maxBoundary / aspectRatio).toInt() / 2) * 2
+                    } else {
+                        candidateH = maxBoundary
+                        candidateW = ((maxBoundary * aspectRatio).toInt() / 2) * 2
+                    }
+
+                    if (videoCaps.isSizeSupported(candidateW, candidateH)) {
+                        reasons.add("Resolution ${targetW}x${targetH} unsupported by ${codecInfo.name}; downscaled to ${candidateW}x${candidateH}")
+                        targetW = candidateW
+                        targetH = candidateH
+                        resolvedSize = true
+                        break
+                    }
+                }
+
+                if (!resolvedSize) {
+                    val supportedW = videoCaps.supportedWidths
+                    val supportedH = videoCaps.supportedHeights
+                    val clampedW = (targetW.coerceIn(supportedW.lower, supportedW.upper) / 2) * 2
+                    val clampedH = (targetH.coerceIn(supportedH.lower, supportedH.upper) / 2) * 2
+                    reasons.add("Clamped size to supported bounds ${clampedW}x${clampedH}")
+                    targetW = clampedW
+                    targetH = clampedH
+                }
+            }
+
+            // 2. Frame Rate Validation
+            if (!videoCaps.areSizeAndRateSupported(targetW, targetH, targetFps.toDouble())) {
+                isFallback = true
+                val supportedFpsRange = try {
+                    videoCaps.getSupportedFrameRatesFor(targetW, targetH)
+                } catch (e: Exception) {
+                    null
+                }
+
+                val maxSupportedFps = supportedFpsRange?.upper?.toInt() ?: 30
+                val fpsLadder = listOf(50, 30, 25, 24, 20).filter { it <= maxSupportedFps }
+                val fallbackFps = fpsLadder.firstOrNull {
+                    try {
+                        videoCaps.areSizeAndRateSupported(targetW, targetH, it.toDouble())
+                    } catch (e: Exception) {
+                        false
+                    }
+                } ?: min(targetFps, maxSupportedFps)
+
+                reasons.add("FPS ${targetFps} unsupported at ${targetW}x${targetH}; fallback to ${fallbackFps}fps")
+                targetFps = fallbackFps
+            }
+        }
+
+        // 3. Profile & Level Validation
+        val (profile, level) = selectSupportedProfileAndLevel(capabilities, targetW, targetH, targetFps)
+
+        // 4. Bitrate Adjustment
+        val targetBitrate = if (isFallback) {
+            val scaleFactor = (targetW.toDouble() * targetH * targetFps) / (requestedWidth.toDouble() * requestedHeight * requestedFps)
+            val adjusted = (requestedBitrate * scaleFactor).toInt().coerceAtLeast(1_500_000)
+            if (videoCaps != null && videoCaps.bitrateRange != null) {
+                adjusted.coerceIn(videoCaps.bitrateRange.lower, videoCaps.bitrateRange.upper)
+            } else {
+                adjusted
+            }
+        } else {
+            if (videoCaps != null && videoCaps.bitrateRange != null) {
+                requestedBitrate.coerceIn(videoCaps.bitrateRange.lower, videoCaps.bitrateRange.upper)
+            } else {
+                requestedBitrate
+            }
+        }
+
+        return ResolvedEncoderConfig(
+            requestedWidth = requestedWidth,
+            requestedHeight = requestedHeight,
+            requestedFps = requestedFps,
+            requestedBitrate = requestedBitrate,
+            actualWidth = targetW,
+            actualHeight = targetH,
+            actualFps = targetFps,
+            actualBitrate = targetBitrate,
+            profile = profile,
+            level = level,
+            isFallback = isFallback,
+            fallbackReason = if (reasons.isNotEmpty()) reasons.joinToString("; ") else null,
+            codecName = codecInfo.name
+        )
+    }
+
+    private fun selectSupportedProfileAndLevel(
+        capabilities: MediaCodecInfo.CodecCapabilities,
+        width: Int,
+        height: Int,
+        fps: Int
+    ): Pair<Int, Int> {
+        val supportedPairs = capabilities.profileLevels ?: emptyArray()
+        val maxDim = max(width, height)
+        val desiredLevel = when {
+            maxDim >= 3840 -> if (fps >= 50) MediaCodecInfo.CodecProfileLevel.AVCLevel52 else MediaCodecInfo.CodecProfileLevel.AVCLevel51
+            maxDim >= 2560 -> MediaCodecInfo.CodecProfileLevel.AVCLevel51
+            maxDim >= 1920 -> MediaCodecInfo.CodecProfileLevel.AVCLevel41
+            else -> MediaCodecInfo.CodecProfileLevel.AVCLevel31
+        }
+
+        val hasHighProfile = supportedPairs.any { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
+        val hasMainProfile = supportedPairs.any { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileMain }
+        val targetProfile = when {
+            hasHighProfile -> MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
+            hasMainProfile -> MediaCodecInfo.CodecProfileLevel.AVCProfileMain
+            else -> MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline
+        }
+
+        val profilePairs = supportedPairs.filter { it.profile == targetProfile }
+        val maxSupportedLevel = profilePairs.maxOfOrNull { it.level } ?: MediaCodecInfo.CodecProfileLevel.AVCLevel31
+
+        val finalLevel = if (profilePairs.any { it.level == desiredLevel }) {
+            desiredLevel
+        } else if (maxSupportedLevel >= desiredLevel) {
+            desiredLevel
+        } else {
+            maxSupportedLevel
+        }
+
+        return Pair(targetProfile, finalLevel)
+    }
+
+    private fun findHardwareEncoder(mimeType: String): MediaCodecInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return null
+        return try {
+            val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            list.codecInfos.firstOrNull { info ->
+                info.isEncoder &&
+                info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) } &&
+                isHardwareAccelerated(info)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun findAnyEncoder(mimeType: String): MediaCodecInfo? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return null
+        return try {
+            val list = MediaCodecList(MediaCodecList.REGULAR_CODECS)
+            list.codecInfos.firstOrNull { info ->
+                info.isEncoder && info.supportedTypes.any { it.equals(mimeType, ignoreCase = true) }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun isHardwareAccelerated(info: MediaCodecInfo): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            return info.isHardwareAccelerated
+        }
+        val name = info.name.lowercase()
+        return !name.startsWith("omx.google.") &&
+               !name.startsWith("c2.android.") &&
+               !name.contains("sw") &&
+               !name.contains("software")
+    }
+}
+
 object ColorGradingHelper {
     fun calculateMatrixAndOffset(
         brightness: Float,
@@ -2301,11 +2573,21 @@ class VideoExportEngine(private val context: Context) {
 
         val startTimeNs = System.nanoTime()
 
-        // Align dimensions to multiples of 2 for video encoder compatibility (YUV 4:2:0 subsampling)
-        val width = (targetWidth / 2) * 2
-        val height = (targetHeight / 2) * 2
-        val fps = if (targetFps in 15..60) targetFps else 30
-        val bitrate = if (targetBitrate > 500_000) targetBitrate else 4_000_000
+        // Proactively query hardware encoder capabilities & determine deterministic fallback if unsupported
+        val resolvedConfig = HardwareEncoderCapabilityResolver.resolveConfiguration(
+            requestedWidth = targetWidth,
+            requestedHeight = targetHeight,
+            requestedFps = targetFps,
+            requestedBitrate = targetBitrate
+        )
+        val width = resolvedConfig.actualWidth
+        val height = resolvedConfig.actualHeight
+        val fps = resolvedConfig.actualFps
+        val bitrate = resolvedConfig.actualBitrate
+
+        if (resolvedConfig.isFallback) {
+            Log.w(TAG, "[CAPABILITY_FALLBACK] Requested preset (${targetWidth}x${targetHeight} @ ${targetFps}fps) unsupported on ${resolvedConfig.codecName}. Applied deterministic fallback: ${resolvedConfig.fallbackReason}")
+        }
 
         // Calculate timeline boundaries and total duration
         var totalDurationMs = 0L
@@ -2320,43 +2602,22 @@ class VideoExportEngine(private val context: Context) {
         }
 
         val totalFrames = ((totalDurationMs / 1000.0) * fps).toInt().coerceAtLeast(1)
-        Log.i(TAG, "Hardware Export starting: ${width}x${height} @ ${fps}fps, totalDuration=${totalDurationMs}ms, frames=$totalFrames")
+        Log.i(TAG, "Hardware Export starting: ${width}x${height} @ ${fps}fps ($bitrate bps), totalDuration=${totalDurationMs}ms, frames=$totalFrames")
 
         // Prepare temporary output file
         val tempDir = File(context.cacheDir, "export_tmp").apply { if (!exists()) mkdirs() }
         val tempOutputFile = File(tempDir, "export_${System.currentTimeMillis()}.mp4")
         if (tempOutputFile.exists()) tempOutputFile.delete()
 
-        // Configure MediaCodec Encoder with optimal profile, level, and bitrate mode
-        val maxDim = max(width, height)
+        // Configure MediaCodec Encoder with resolved profile, level, and bitrate mode
         val videoFormat = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, IFRAME_INTERVAL)
             setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
-
-            // Select optimal H.264 profile & level for target resolution & FPS combinations
-            val (targetProfile, targetLevel) = when {
-                maxDim >= 3840 -> Pair(
-                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
-                    if (fps >= 50) MediaCodecInfo.CodecProfileLevel.AVCLevel52 else MediaCodecInfo.CodecProfileLevel.AVCLevel51
-                )
-                maxDim >= 2560 -> Pair(
-                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
-                    MediaCodecInfo.CodecProfileLevel.AVCLevel51
-                )
-                maxDim >= 1920 -> Pair(
-                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
-                    MediaCodecInfo.CodecProfileLevel.AVCLevel41
-                )
-                else -> Pair(
-                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
-                    MediaCodecInfo.CodecProfileLevel.AVCLevel31
-                )
-            }
-            setInteger(MediaFormat.KEY_PROFILE, targetProfile)
-            setInteger(MediaFormat.KEY_LEVEL, targetLevel)
+            setInteger(MediaFormat.KEY_PROFILE, resolvedConfig.profile)
+            setInteger(MediaFormat.KEY_LEVEL, resolvedConfig.level)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 setInteger(MediaFormat.KEY_PRIORITY, 0)
@@ -2368,7 +2629,7 @@ class VideoExportEngine(private val context: Context) {
         try {
             encoder.configure(videoFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         } catch (e: Exception) {
-            Log.w(TAG, "Hardware encoder rejected target profile/level, applying fallback format: ${e.message}")
+            Log.w(TAG, "Hardware encoder rejected target profile/level, applying baseline fallback format: ${e.message}")
             val fallbackFormat = MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
@@ -2382,6 +2643,7 @@ class VideoExportEngine(private val context: Context) {
         encoder.start()
 
         val muxer = MediaMuxer(tempOutputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        var muxerStopped = false
 
         // Gather all active audio sources across video clips, audio tracks, and PIP overlays
         val audioSources = ArrayList<AudioSourceSpec>()
@@ -3268,6 +3530,7 @@ class VideoExportEngine(private val context: Context) {
                     }
                     val audioBuffer = ByteBuffer.allocateDirect(maxBufferSize)
                     val audioBufferInfo = MediaCodec.BufferInfo()
+                    var lastAudioPtsUs = -1L
 
                     while (true) {
                         audioBufferInfo.offset = 0
@@ -3276,11 +3539,16 @@ class VideoExportEngine(private val context: Context) {
                             break
                         }
                         val rawSampleTimeUs = audioExtractor.sampleTime
-                        val presentationTimeUs = rawSampleTimeUs.coerceAtLeast(0L)
-                        if (presentationTimeUs > totalDurationMs * 1000L) {
+                        val safePts = if (rawSampleTimeUs > lastAudioPtsUs) {
+                            rawSampleTimeUs.coerceAtLeast(0L)
+                        } else {
+                            lastAudioPtsUs + 1L
+                        }
+                        lastAudioPtsUs = safePts
+                        if (safePts > totalDurationMs * 1000L) {
                             break
                         }
-                        audioBufferInfo.presentationTimeUs = presentationTimeUs
+                        audioBufferInfo.presentationTimeUs = safePts
                         audioBufferInfo.flags = audioExtractor.sampleFlags
                         if ((audioBufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
                             muxer.writeSampleData(drainThread.audioTrackIndex, audioBuffer, audioBufferInfo)
@@ -3296,8 +3564,9 @@ class VideoExportEngine(private val context: Context) {
             // 5. Finalize Muxer
             val muxStart = System.nanoTime()
             try {
-                if (drainThread.muxerStarted) {
+                if (drainThread.muxerStarted && !muxerStopped) {
                     muxer.stop()
+                    muxerStopped = true
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Muxer stop exception: ${e.message}")
@@ -3398,8 +3667,9 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
                 }
             } catch (e: Exception) {}
             try {
-                if (drainThread.muxerStarted) {
+                if (drainThread.muxerStarted && !muxerStopped) {
                     muxer.stop()
+                    muxerStopped = true
                 }
             } catch (e: Exception) {}
             try { muxer.release() } catch (e: Exception) {}
@@ -3446,7 +3716,45 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
             throw RuntimeException("Export failed: Output file was empty or not generated.")
         }
 
-        // 6. Register video into MediaStore Gallery
+        // 6. Inspect output file metadata with MediaMetadataRetriever for absolute verification
+        val retriever = MediaMetadataRetriever()
+        var actualWidth = -1
+        var actualHeight = -1
+        var actualDurationMs = -1L
+        var actualBitrate = -1L
+        var actualRotation = 0
+        var hasAudio = false
+        try {
+            retriever.setDataSource(tempOutputFile.absolutePath)
+            val wStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            val hStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            val durStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            val brStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)
+            val rotStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            val audioStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO)
+
+            actualWidth = wStr?.toIntOrNull() ?: -1
+            actualHeight = hStr?.toIntOrNull() ?: -1
+            actualDurationMs = durStr?.toLongOrNull() ?: -1L
+            actualBitrate = brStr?.toLongOrNull() ?: -1L
+            actualRotation = rotStr?.toIntOrNull() ?: 0
+            hasAudio = audioStr != null && (audioStr.equals("yes", ignoreCase = true) || audioStr == "1")
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaMetadataRetriever inspection exception: ${e.message}")
+        } finally {
+            try { retriever.release() } catch (e: Exception) {}
+        }
+
+        // Validate preset match: preset is verified iff actual output metadata matches requested preset without downscale fallback
+        val isPresetVerified = (actualWidth == targetWidth && actualHeight == targetHeight && !resolvedConfig.isFallback)
+        val presetStatus = when {
+            isPresetVerified -> "VERIFIED"
+            resolvedConfig.isFallback -> "FALLBACK_APPLIED"
+            actualWidth > 0 && actualHeight > 0 -> "RESOLUTION_MISMATCH"
+            else -> "UNVERIFIED"
+        }
+
+        // 7. Register video into MediaStore Gallery
         val galleryResult = registerToMediaStore(tempOutputFile, customOutputName)
         progressCallback?.onProgress(1.0)
 
@@ -3460,12 +3768,31 @@ SUB-STAGE FINE-GRAINED BREAKDOWN:
             "uri" to (galleryResult["uri"] ?: ""),
             "displayName" to (galleryResult["displayName"] ?: tempOutputFile.name),
             "sizeBytes" to tempOutputFile.length(),
-            "durationMs" to totalDurationMs,
-            "width" to width,
-            "height" to height,
+            "durationMs" to if (actualDurationMs > 0) actualDurationMs else totalDurationMs,
+            "width" to if (actualWidth > 0) actualWidth else width,
+            "height" to if (actualHeight > 0) actualHeight else height,
             "fps" to fps,
-            "bitrate" to bitrate,
+            "bitrate" to if (actualBitrate > 0) actualBitrate else bitrate.toLong(),
             "codec" to "H.264 / AVC",
+            "presetStatus" to presetStatus,
+            "isHardwarePresetVerified" to isPresetVerified,
+            "requestedPreset" to mapOf(
+                "width" to targetWidth,
+                "height" to targetHeight,
+                "fps" to targetFps,
+                "bitrate" to targetBitrate
+            ),
+            "actualMetadata" to mapOf(
+                "width" to actualWidth,
+                "height" to actualHeight,
+                "durationMs" to actualDurationMs,
+                "bitrate" to actualBitrate,
+                "rotation" to actualRotation,
+                "hasAudio" to hasAudio
+            ),
+            "fallbackApplied" to resolvedConfig.isFallback,
+            "fallbackReason" to (resolvedConfig.fallbackReason ?: ""),
+            "codecName" to resolvedConfig.codecName,
             "exportMetrics" to mapOf(
                 "wallClockSec" to finalElapsedSec,
                 "effectiveFps" to finalEffectiveFps,

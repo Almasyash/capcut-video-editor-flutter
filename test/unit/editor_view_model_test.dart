@@ -1056,19 +1056,28 @@ void main() {
       });
 
       test('2. ProjectStorageService saves and retrieves drafts', () async {
-        final project = await ProjectStorageService.instance.createNewProject(name: 'AutoSaved Draft');
-        expect(project.id, startsWith('proj_'));
+        final tempDir = await Directory.systemTemp.createTemp('draft_test_');
+        ProjectStorageService.instance.overrideDirectoryForTesting(tempDir);
+        try {
+          final project = await ProjectStorageService.instance.createNewProject(name: 'AutoSaved Draft');
+          expect(project.id, startsWith('proj_'));
 
-        final fetched = await ProjectStorageService.instance.getProjectById(project.id);
-        expect(fetched, isNotNull);
-        expect(fetched?.name, equals('AutoSaved Draft'));
+          final fetched = await ProjectStorageService.instance.getProjectById(project.id);
+          expect(fetched, isNotNull);
+          expect(fetched?.name, equals('AutoSaved Draft'));
 
-        final all = await ProjectStorageService.instance.getAllProjects();
-        expect(all.any((p) => p.id == project.id), isTrue);
+          final all = await ProjectStorageService.instance.getAllProjects();
+          expect(all.any((p) => p.id == project.id), isTrue);
 
-        await ProjectStorageService.instance.deleteProject(project.id);
-        final afterDelete = await ProjectStorageService.instance.getProjectById(project.id);
-        expect(afterDelete, isNull);
+          await ProjectStorageService.instance.deleteProject(project.id);
+          final afterDelete = await ProjectStorageService.instance.getProjectById(project.id);
+          expect(afterDelete, isNull);
+        } finally {
+          ProjectStorageService.instance.overrideDirectoryForTesting(null);
+          if (await tempDir.exists()) {
+            await tempDir.delete(recursive: true);
+          }
+        }
       });
 
       test('3. EditorViewModel loads existing project and retains full timeline state', () {

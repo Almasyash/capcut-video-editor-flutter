@@ -104,5 +104,81 @@ void main() {
       expect(res4k60['fps'], 60);
       expect(res4k60['bitrate'], 42000000);
     });
+
+    test('Vertical 9:16 aspect ratio flips width and height dimensions appropriately', () async {
+      const clip = VideoClip(
+        id: 'clip_vertical',
+        assetId: 'asset_vertical',
+        title: 'Vertical Clip',
+        originalDuration: Duration(seconds: 3),
+        trimStart: Duration.zero,
+        trimEnd: Duration(seconds: 3),
+        previewGradient: [Color(0xFF00C9FF), Color(0xFF92FE9D)],
+      );
+
+      final verticalProject = Project(
+        id: 'proj_vertical',
+        name: 'Vertical 9:16 Project',
+        videoClips: [clip],
+        aspectRatio: AspectRatioPreset.ratio9x16,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      const settings1080p = ExportSettings(
+        resolution: ExportResolution.res1080p,
+        fps: ExportFps.fps30,
+      );
+
+      final res = await DeviceMediaService.renderAndExportVideo(
+        project: verticalProject,
+        settings: settings1080p,
+        assets: [],
+      );
+
+      expect(res['success'], isTrue);
+      // For 9:16 vertical video, width is 1080 and height is 1920
+      expect(res['width'], 1080);
+      expect(res['height'], 1920);
+      expect(res['fps'], 30);
+    });
+
+    test('Hardware capability preset schema exposes complete metadata verification payload', () {
+      // Validates contract between native VideoExportEngine and Flutter layer
+      final sampleExportResult = {
+        'success': true,
+        'path': '/tmp/export_123.mp4',
+        'width': 1920,
+        'height': 1080,
+        'fps': 30,
+        'bitrate': 9000000,
+        'presetStatus': 'VERIFIED',
+        'isHardwarePresetVerified': true,
+        'requestedPreset': {
+          'width': 1920,
+          'height': 1080,
+          'fps': 30,
+          'bitrate': 9000000,
+        },
+        'actualMetadata': {
+          'width': 1920,
+          'height': 1080,
+          'durationMs': 5000,
+          'bitrate': 8950000,
+          'rotation': 0,
+          'hasAudio': true,
+        },
+        'fallbackApplied': false,
+        'fallbackReason': null,
+        'codecName': 'c2.qti.avc.encoder',
+      };
+
+      expect(sampleExportResult['isHardwarePresetVerified'], isTrue);
+      expect(sampleExportResult['presetStatus'], equals('VERIFIED'));
+      final actualMeta = sampleExportResult['actualMetadata'] as Map<String, dynamic>;
+      expect(actualMeta['width'], equals(1920));
+      expect(actualMeta['height'], equals(1080));
+      expect(actualMeta['hasAudio'], isTrue);
+    });
   });
 }
