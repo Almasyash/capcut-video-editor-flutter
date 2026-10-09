@@ -1298,6 +1298,22 @@ class EditorViewModel extends ChangeNotifier {
       }
     }
 
+    final masksA = originalClip.masks.map((m) {
+      if (m.keyframeTracks != null && m.keyframeTracks!.isNotEmpty) {
+        final (tA, _) = m.keyframeTracks!.splitAt(splitOffsetMs);
+        return m.copyWith(keyframeTracks: tA);
+      }
+      return m;
+    }).toList();
+
+    final masksB = originalClip.masks.map((m) {
+      if (m.keyframeTracks != null && m.keyframeTracks!.isNotEmpty) {
+        final (_, tB) = m.keyframeTracks!.splitAt(splitOffsetMs);
+        return m.copyWith(keyframeTracks: tB);
+      }
+      return m;
+    }).toList();
+
     final clipPartA = originalClip.copyWith(
       id: '${originalClip.id}_a_$timestamp',
       title: '${originalClip.title} (Part 1)',
@@ -1308,6 +1324,7 @@ class EditorViewModel extends ChangeNotifier {
       clearFreezeFrame: freezePartA == null && originalClip.freezeFrame != null,
       keyframeTracks: clipTracksA,
       keyframes: clipTracksA.toVideoKeyframes(),
+      masks: masksA,
     );
 
     final clipPartB = originalClip.copyWith(
@@ -1320,6 +1337,7 @@ class EditorViewModel extends ChangeNotifier {
       clearFreezeFrame: freezePartB == null && originalClip.freezeFrame != null,
       keyframeTracks: clipTracksB,
       keyframes: clipTracksB.toVideoKeyframes(),
+      masks: masksB,
     );
 
     _videoClips.removeAt(targetIndex);
@@ -1553,8 +1571,15 @@ class EditorViewModel extends ChangeNotifier {
   void duplicateSelectedClip() {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
-
     final original = _videoClips[_selectedClipIndex!];
+    final clonedMasks = original.masks.map((m) {
+      final newId = 'mask_${DateTime.now().microsecondsSinceEpoch}_${math.Random().nextInt(10000)}';
+      return m.copyWith(
+        id: newId,
+        keyframeTracks: m.keyframeTracks?.duplicate(),
+      );
+    }).toList();
+
     final duplicated = original.copyWith(
       id: 'clip_dup_${DateTime.now().millisecondsSinceEpoch}',
       title: '${original.title} (Copy)',
@@ -1564,6 +1589,7 @@ class EditorViewModel extends ChangeNotifier {
       keyframes: original.keyframes
           .map((k) => k.copyWith(id: 'kf_${DateTime.now().microsecondsSinceEpoch}_${k.timestamp.inMilliseconds}'))
           .toList(),
+      masks: clonedMasks,
     );
 
     _videoClips.insert(_selectedClipIndex! + 1, duplicated);
@@ -1579,6 +1605,14 @@ class EditorViewModel extends ChangeNotifier {
     final original = _videoClips[_selectedClipIndex!];
     final clipStart = getClipStartTime(_selectedClipIndex!);
     final asset = mediaLibrary.where((a) => a.id == original.assetId).firstOrNull;
+
+    final clonedMasks = original.masks.map((m) {
+      final newId = 'mask_${DateTime.now().microsecondsSinceEpoch}_${math.Random().nextInt(10000)}';
+      return m.copyWith(
+        id: newId,
+        keyframeTracks: m.keyframeTracks?.duplicate(),
+      );
+    }).toList();
 
     final overlay = OverlayClip(
       id: 'overlay_${DateTime.now().millisecondsSinceEpoch}',
@@ -1599,7 +1633,7 @@ class EditorViewModel extends ChangeNotifier {
       scale: 0.45,
       opacity: original.opacity,
       blendMode: original.blendMode,
-      masks: original.masks,
+      masks: clonedMasks,
     );
 
     _overlayClips.add(overlay);
@@ -4391,6 +4425,14 @@ class EditorViewModel extends ChangeNotifier {
     if (selectedOverlay == null) return null;
     _saveSnapshot();
     final original = selectedOverlay!;
+    final clonedMasks = original.masks.map((m) {
+      final newId = 'mask_${DateTime.now().microsecondsSinceEpoch}_${math.Random().nextInt(10000)}';
+      return m.copyWith(
+        id: newId,
+        keyframeTracks: m.keyframeTracks?.duplicate(),
+      );
+    }).toList();
+
     final duplicated = original.copyWith(
       id: 'overlay_dup_${DateTime.now().millisecondsSinceEpoch}',
       title: '${original.title} (Copy)',
@@ -4399,6 +4441,7 @@ class EditorViewModel extends ChangeNotifier {
       keyframes: original.keyframes
           .map((k) => k.copyWith(id: 'kf_${DateTime.now().microsecondsSinceEpoch}_${k.timestamp.inMilliseconds}'))
           .toList(),
+      masks: clonedMasks,
     );
     _overlayClips.add(duplicated);
     _selectedOverlayIndex = _overlayClips.length - 1;
@@ -6388,6 +6431,46 @@ class EditorViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  void updateMaskDiscreteInSelectedClip(int index, VideoMask mask) {
+    if (_selectedClipIndex == null) return;
+    final clip = _videoClips[_selectedClipIndex!];
+    if (index < 0 || index >= clip.masks.length) return;
+    _saveSnapshot();
+    final updatedMasks = List<VideoMask>.from(clip.masks);
+    updatedMasks[index] = mask;
+    _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void renameMaskInSelectedClip(int index, String newName) {
+    if (_selectedClipIndex == null) return;
+    final clip = _videoClips[_selectedClipIndex!];
+    if (index < 0 || index >= clip.masks.length) return;
+    _saveSnapshot();
+    final updatedMasks = List<VideoMask>.from(clip.masks);
+    updatedMasks[index] = updatedMasks[index].copyWith(name: newName);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    TtsService.announce('Renamed mask to $newName');
+    notifyListeners();
+  }
+
+  void toggleMaskEnabledInSelectedClip(int index) {
+    if (_selectedClipIndex == null) return;
+    final clip = _videoClips[_selectedClipIndex!];
+    if (index < 0 || index >= clip.masks.length) return;
+    _saveSnapshot();
+    final updatedMasks = List<VideoMask>.from(clip.masks);
+    final cur = updatedMasks[index];
+    final newState = !cur.enabled;
+    updatedMasks[index] = cur.copyWith(enabled: newState);
+    _videoClips[_selectedClipIndex!] = clip.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    TtsService.announce(newState ? 'Enabled mask' : 'Bypassed mask');
+    notifyListeners();
+  }
+
   void removeMaskFromSelectedClip(int index) {
     if (_selectedClipIndex == null) return;
     _saveSnapshot();
@@ -6488,6 +6571,46 @@ class EditorViewModel extends ChangeNotifier {
     updatedMasks[index] = mask;
     _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
     scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void updateMaskDiscreteInSelectedOverlay(int index, VideoMask mask) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    if (index < 0 || index >= overlay.masks.length) return;
+    _saveSnapshot();
+    final updatedMasks = List<VideoMask>.from(overlay.masks);
+    updatedMasks[index] = mask;
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  void renameMaskInSelectedOverlay(int index, String newName) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    if (index < 0 || index >= overlay.masks.length) return;
+    _saveSnapshot();
+    final updatedMasks = List<VideoMask>.from(overlay.masks);
+    updatedMasks[index] = updatedMasks[index].copyWith(name: newName);
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    TtsService.announce('Renamed mask to $newName');
+    notifyListeners();
+  }
+
+  void toggleMaskEnabledInSelectedOverlay(int index) {
+    if (_selectedOverlayIndex == null || _selectedOverlayIndex! >= _overlayClips.length) return;
+    final overlay = _overlayClips[_selectedOverlayIndex!];
+    if (index < 0 || index >= overlay.masks.length) return;
+    _saveSnapshot();
+    final updatedMasks = List<VideoMask>.from(overlay.masks);
+    final cur = updatedMasks[index];
+    final newState = !cur.enabled;
+    updatedMasks[index] = cur.copyWith(enabled: newState);
+    _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(masks: updatedMasks);
+    scheduleAutoSave();
+    TtsService.announce(newState ? 'Enabled mask' : 'Bypassed mask');
     notifyListeners();
   }
 

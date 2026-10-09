@@ -600,5 +600,174 @@ void main() {
       expect(vm.videoClips[1].masks.length, 1);
       expect(vm.videoClips[1].masks.first.positionX, 0.25);
     });
+
+    test('v1.7.0: Mask renaming updates mask label and supports undo/redo on clips and overlays', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(id: 'clip_rename', title: 'Clip', duration: const Duration(seconds: 10)));
+      vm.selectClip(0);
+      vm.addMaskToSelectedClip(const VideoMask(id: 'm_orig', name: 'Mask 1', type: MaskType.rectangle));
+
+      expect(vm.selectedClip?.masks.first.name, 'Mask 1');
+
+      vm.renameMaskInSelectedClip(0, 'Face Mask');
+      expect(vm.selectedClip?.masks.first.name, 'Face Mask');
+
+      vm.undo();
+      expect(vm.selectedClip?.masks.first.name, 'Mask 1');
+
+      vm.redo();
+      expect(vm.selectedClip?.masks.first.name, 'Face Mask');
+
+      // Test Overlay
+      const overlay = OverlayClip(
+        id: 'ov_rename',
+        title: 'Overlay',
+        startTime: Duration.zero,
+        duration: Duration(seconds: 5),
+        masks: [VideoMask(id: 'ov_m1', name: 'Overlay Mask 1', type: MaskType.ellipse)],
+      );
+      vm.addOverlayClip(overlay);
+      vm.selectOverlay(vm.overlayClips.length - 1);
+
+      vm.renameMaskInSelectedOverlay(0, 'PIP Vignette');
+      expect(vm.selectedOverlay?.masks.first.name, 'PIP Vignette');
+
+      vm.undo();
+      expect(vm.selectedOverlay?.masks.first.name, 'Overlay Mask 1');
+    });
+
+    test('v1.7.0: Mask enable/bypass toggle updates enabled and isActive with undo/redo', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(id: 'clip_toggle', title: 'Clip', duration: const Duration(seconds: 10)));
+      vm.selectClip(0);
+      vm.addMaskToSelectedClip(const VideoMask(id: 'm_tog', name: 'Mask', type: MaskType.rectangle, enabled: true));
+
+      expect(vm.selectedClip?.masks.first.enabled, isTrue);
+      expect(vm.selectedClip?.masks.first.isActive, isTrue);
+
+      vm.toggleMaskEnabledInSelectedClip(0);
+      expect(vm.selectedClip?.masks.first.enabled, isFalse);
+      expect(vm.selectedClip?.masks.first.isActive, isFalse);
+
+      vm.undo();
+      expect(vm.selectedClip?.masks.first.enabled, isTrue);
+      expect(vm.selectedClip?.masks.first.isActive, isTrue);
+
+      vm.redo();
+      expect(vm.selectedClip?.masks.first.enabled, isFalse);
+    });
+
+    test('v1.7.0: Mask reordering alters evaluation sequence with undo/redo', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(id: 'clip_reorder', title: 'Clip', duration: const Duration(seconds: 10)));
+      vm.selectClip(0);
+      vm.addMaskToSelectedClip(const VideoMask(id: 'm1', name: 'First', type: MaskType.rectangle));
+      vm.addMaskToSelectedClip(const VideoMask(id: 'm2', name: 'Second', type: MaskType.ellipse));
+
+      expect(vm.selectedClip?.masks[0].name, 'First');
+      expect(vm.selectedClip?.masks[1].name, 'Second');
+
+      vm.reorderMasksInSelectedClip(0, 1);
+      expect(vm.selectedClip?.masks[0].name, 'Second');
+      expect(vm.selectedClip?.masks[1].name, 'First');
+
+      vm.undo();
+      expect(vm.selectedClip?.masks[0].name, 'First');
+      expect(vm.selectedClip?.masks[1].name, 'Second');
+
+      vm.redo();
+      expect(vm.selectedClip?.masks[0].name, 'Second');
+      expect(vm.selectedClip?.masks[1].name, 'First');
+    });
+
+    test('v1.7.0: Discrete mask update records undo snapshot for non-drag edits', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(id: 'clip_disc', title: 'Clip', duration: const Duration(seconds: 10)));
+      vm.selectClip(0);
+      vm.addMaskToSelectedClip(const VideoMask(id: 'm_disc', name: 'Mask', type: MaskType.rectangle, inverted: false));
+
+      final updated = vm.selectedClip!.masks.first.copyWith(inverted: true, combineMode: MaskCombineMode.subtract);
+      vm.updateMaskDiscreteInSelectedClip(0, updated);
+
+      expect(vm.selectedClip?.masks.first.inverted, isTrue);
+      expect(vm.selectedClip?.masks.first.combineMode, MaskCombineMode.subtract);
+
+      vm.undo();
+      expect(vm.selectedClip?.masks.first.inverted, isFalse);
+      expect(vm.selectedClip?.masks.first.combineMode, MaskCombineMode.add);
+    });
+
+    test('v1.7.0: Split clip splits individual mask keyframe tracks proportionally', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(id: 'clip_split_kf', title: 'Clip', duration: const Duration(seconds: 10)));
+      vm.selectClip(0);
+
+      var maskTracks = const KeyframeTrackGroup();
+      maskTracks = maskTracks.addKeyframe(AnimatableProperty.maskFeather, 0, 10.0);
+      maskTracks = maskTracks.addKeyframe(AnimatableProperty.maskFeather, 2000, 20.0);
+      maskTracks = maskTracks.addKeyframe(AnimatableProperty.maskFeather, 4000, 40.0);
+
+      final maskWithTracks = VideoMask(
+        id: 'm_kf_split',
+        name: 'Animated Mask',
+        type: MaskType.rectangle,
+        keyframeTracks: maskTracks,
+      );
+      vm.addMaskToSelectedClip(maskWithTracks);
+
+      // Seek to 2.0s and split
+      vm.seekTo(2.0);
+      final splitOk = vm.splitClipAtPlayhead();
+      expect(splitOk, isTrue);
+
+      final part1 = vm.videoClips[0];
+      final part2 = vm.videoClips[1];
+
+      expect(part1.masks.length, 1);
+      expect(part2.masks.length, 1);
+
+      // Part 1 mask should have keyframes up to 2000ms
+      final p1Track = part1.masks.first.keyframeTracks?.tracks[AnimatableProperty.maskFeather];
+      expect(p1Track, isNotNull);
+      expect(p1Track!.keyframes.length, 2);
+      expect(p1Track.keyframes.last.value, 20.0);
+
+      // Part 2 mask should have keyframes shifted starting from 0ms
+      final p2Track = part2.masks.first.keyframeTracks?.tracks[AnimatableProperty.maskFeather];
+      expect(p2Track, isNotNull);
+      expect(p2Track!.keyframes.first.timestampMs, 0);
+      expect(p2Track.keyframes.first.value, 20.0);
+      expect(p2Track.keyframes.last.timestampMs, 2000); // 4000 - 2000
+      expect(p2Track.keyframes.last.value, 40.0);
+    });
+
+    test('v1.7.0: Clip duplicate deeply clones masks with unique IDs and cloned keyframes', () {
+      final vm = EditorViewModel();
+      vm.addClip(createTestClip(id: 'clip_dup_mask', title: 'Clip', duration: const Duration(seconds: 10)));
+      vm.selectClip(0);
+
+      var maskTracks = const KeyframeTrackGroup();
+      maskTracks = maskTracks.addKeyframe(AnimatableProperty.maskScale, 0, 1.0);
+      maskTracks = maskTracks.addKeyframe(AnimatableProperty.maskScale, 1000, 2.0);
+
+      vm.addMaskToSelectedClip(VideoMask(
+        id: 'original_mask_id',
+        name: 'Original Mask',
+        type: MaskType.ellipse,
+        keyframeTracks: maskTracks,
+      ));
+
+      final initialCount = vm.videoClips.length;
+      vm.duplicateSelectedClip();
+
+      expect(vm.videoClips.length, initialCount + 1);
+      final origClip = vm.videoClips[0];
+      final dupClip = vm.videoClips[1];
+
+      expect(dupClip.masks.length, 1);
+      expect(dupClip.masks.first.id, isNot(equals(origClip.masks.first.id)));
+      expect(dupClip.masks.first.type, MaskType.ellipse);
+      expect(dupClip.masks.first.keyframeTracks?.tracks[AnimatableProperty.maskScale]?.keyframes.length, 2);
+    });
   });
 }
