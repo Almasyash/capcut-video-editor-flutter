@@ -2,6 +2,19 @@
 
 All notable changes to **Editor FS** are documented in this file.
 
+## [1.6.1] - 2026-10-09
+
+### 🌟 Professional Masking & Compositing Hardening Suite (v1.6.0 Milestone Completion)
+- **Interactive Preview Touch & Mouse Canvas Overlay (`_MaskTouchHandlesOverlay`)**: Direct manipulation canvas handles for translation, uniform scaling, rotation, polygon vertex dragging, linear pin directional lines, and radial radius rings.
+- **Single-Gesture Undo Coalescing**: Integrated `beginMaskGesture()` and `commitMaskGesture()` in `EditorViewModel` across touch handles and adjustment sheet sliders, coalescing continuous drag gestures into single atomic undo actions.
+- **Analytical 2D Polygon SDF & Fragment Shaders**: Added GLSL ES 2.0 analytical polygon signed distance field in `oesFS` and `tex2DFS` with Euclidean edge distance calculation and inside/outside ray-casting parity for smooth feathered edges on arbitrary polygons.
+- **Dual-Track Keyframe Fallback**: Dynamic resolution across internal mask track groups and parent clip/overlay keyframe tracks with seamless Newton-Raphson bisection easing evaluation.
+- **Coordinate Space & Feather Normalization**: Harmonized Dart project coordinates $[-1.0, 1.0]$ with OpenGL ES UV coordinates $[0.0, 1.0]$, correcting feather blur calculation from $0.0 - 100.0$ to normalized $0.0 - 1.0$.
+- **Defensive Numeric Bounds & Safe Getters**: Added non-crashing safe getters (`safePositionX`, `safePositionY`, `safeScale`, `safeRotation`, `safeOpacity`, `safeFeather`, `safeExpansion`, `safeWidth`, `safeHeight`) guarding against NaN and Infinity.
+- **Full Test Suite & Quality Assurance**: 737 / 737 passing unit, widget, and architecture tests (100% pass rate) with 0 static analysis issues across both canonical repositories.
+
+---
+
 ## [1.6.0] - 2026-10-08
 
 ### 🌟 Professional Masking & Compositing Engine Suite

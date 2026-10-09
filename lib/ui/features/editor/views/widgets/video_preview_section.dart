@@ -580,9 +580,17 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
             ...activeTexts.map((text) => _buildTextOverlay(text, canvasWidth: width, canvasHeight: height, canvasKey: effectiveCanvasKey)),
 
             // 7. Interactive Crop Area Resize Handles (Priority when crop mode active)
-            if (viewModel.isCropModeActive ||
-                (viewModel.selectedClip?.mask?.isActive == true && viewModel.selectedTextId == null))
+            if (viewModel.isCropModeActive)
               _CropAreaHandlesOverlay(
+                viewModel: viewModel,
+                canvasWidth: width,
+                canvasHeight: height,
+                canvasKey: effectiveCanvasKey,
+              ),
+
+            // 8. Interactive Mask Touch Handles Overlay (Priority when mask adjustment mode active)
+            if (viewModel.isMaskModeActive && viewModel.activeMask != null && viewModel.activeMask!.isActive && viewModel.selectedTextId == null)
+              _MaskTouchHandlesOverlay(
                 viewModel: viewModel,
                 canvasWidth: width,
                 canvasHeight: height,
@@ -1614,7 +1622,7 @@ class VideoPreviewSectionState extends State<VideoPreviewSection> {
     if (activeClip is VideoClip && activeClip.masks.any((m) => m.isActive)) {
       final relTime = (viewModel.playheadPosition - viewModel.selectedClipStartTime)
           .clamp(0.0, activeClip.durationInSeconds);
-      final evaluatedMasks = activeClip.masks.map((m) => m.evaluateAt(relTime)).toList();
+      final evaluatedMasks = activeClip.masks.map((m) => m.evaluateAt(relTime, externalTracks: activeClip.effectiveKeyframeTracks)).toList();
       videoContent = SoftMaskWidget(
         masks: evaluatedMasks,
         child: videoContent,
@@ -4321,7 +4329,7 @@ class _InteractivePipOverlayWidgetState extends State<InteractivePipOverlayWidge
     if (overlay.masks.any((m) => m.isActive)) {
       final relTime = (widget.viewModel.playheadPosition - overlay.startTimeInSeconds)
           .clamp(0.0, overlay.durationInSeconds);
-      final evaluatedMasks = overlay.masks.map((m) => m.evaluateAt(relTime)).toList();
+      final evaluatedMasks = overlay.masks.map((m) => m.evaluateAt(relTime, externalTracks: overlay.effectiveKeyframeTracks)).toList();
       visual = SoftMaskWidget(
         masks: evaluatedMasks,
         child: visual,
@@ -4741,6 +4749,307 @@ class _CropAreaHandlesOverlayState extends State<_CropAreaHandlesOverlay> {
   }
 }
 
+/// Interactive On-Screen Touch & Mouse Handles Overlay for direct manipulation of video masks.
+class _MaskTouchHandlesOverlay extends StatefulWidget {
+  final EditorViewModel viewModel;
+  final double canvasWidth;
+  final double canvasHeight;
+  final GlobalKey canvasKey;
+
+  const _MaskTouchHandlesOverlay({
+    required this.viewModel,
+    required this.canvasWidth,
+    required this.canvasHeight,
+    required this.canvasKey,
+  });
+
+  @override
+  State<_MaskTouchHandlesOverlay> createState() => _MaskTouchHandlesOverlayState();
+}
+
+class _MaskTouchHandlesOverlayState extends State<_MaskTouchHandlesOverlay> {
+  void _onPanStart() {
+    widget.viewModel.beginMaskGesture();
+  }
+
+  void _onPanEnd() {
+    widget.viewModel.commitMaskGesture();
+  }
+
+  void _updateActiveMask(VideoMask updated) {
+    final maskIdx = widget.viewModel.selectedMaskIndex;
+    if (widget.viewModel.selectedClip != null) {
+      widget.viewModel.updateMaskInSelectedClip(maskIdx, updated);
+    } else if (widget.viewModel.selectedOverlay != null) {
+      widget.viewModel.updateMaskInSelectedOverlay(maskIdx, updated);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mask = widget.viewModel.activeMask;
+    if (mask == null || !mask.isActive) return const SizedBox.shrink();
+
+    final w = widget.canvasWidth > 0 ? widget.canvasWidth : 360.0;
+    final h = widget.canvasHeight > 0 ? widget.canvasHeight : 640.0;
+
+    final cx = w / 2.0 + (mask.safePositionX * w / 2.0);
+    final cy = h / 2.0 + (mask.safePositionY * h / 2.0);
+    final effScale = mask.safeScale;
+    final maskW = (w * mask.safeWidth * effScale).clamp(20.0, w * 4.0);
+    final maskH = (h * mask.safeHeight * effScale).clamp(20.0, h * 4.0);
+    final rad = mask.safeRotation * math.pi / 180.0;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // 1. Center Translation Handle (Drag center crosshair to reposition)
+        Positioned(
+          left: cx - 20,
+          top: cy - 20,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onPanStart(),
+            onPanUpdate: (d) {
+              final newX = (mask.safePositionX + d.delta.dx / (w / 2.0)).clamp(-2.0, 2.0);
+              final newY = (mask.safePositionY + d.delta.dy / (h / 2.0)).clamp(-2.0, 2.0);
+              _updateActiveMask(mask.copyWith(positionX: newX, positionY: newY));
+            },
+            onPanEnd: (_) => _onPanEnd(),
+            child: Container(
+              width: 40,
+              height: 40,
+              alignment: Alignment.center,
+              child: Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 2.0),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                ),
+                child: const Icon(Icons.open_with_rounded, color: Colors.black, size: 16),
+              ),
+            ),
+          ),
+        ),
+
+        // 2. Corner Scaling Handle (Drag to uniformly scale)
+        Positioned(
+          left: (cx + (maskW / 2.0) * math.cos(rad) - (maskH / 2.0) * math.sin(rad)) - 18,
+          top: (cy + (maskW / 2.0) * math.sin(rad) + (maskH / 2.0) * math.cos(rad)) - 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onPanStart(),
+            onPanUpdate: (d) {
+              final deltaScale = (d.delta.dx + d.delta.dy) / (w * 0.5);
+              final newScale = (mask.safeScale + deltaScale).clamp(0.05, 10.0);
+              _updateActiveMask(mask.copyWith(scale: newScale, size: newScale));
+            },
+            onPanEnd: (_) => _onPanEnd(),
+            child: Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.primary, width: 2.5),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // 3. Top Rotation Pin Handle (Drag to rotate)
+        Positioned(
+          left: (cx - (maskH / 2.0 + 32.0) * math.sin(rad)) - 16,
+          top: (cy - (maskH / 2.0 + 32.0) * math.cos(rad)) - 16,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) => _onPanStart(),
+            onPanUpdate: (d) {
+              final touchPos = Offset(
+                (cx - (maskH / 2.0 + 32.0) * math.sin(rad)) + d.delta.dx,
+                (cy - (maskH / 2.0 + 32.0) * math.cos(rad)) + d.delta.dy,
+              );
+              final angleRad = math.atan2(touchPos.dy - cy, touchPos.dx - cx);
+              final deg = (angleRad * 180.0 / math.pi) + 90.0;
+              _updateActiveMask(mask.copyWith(rotation: deg % 360.0));
+            },
+            onPanEnd: (_) => _onPanEnd(),
+            child: Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                  boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                ),
+                child: const Icon(Icons.rotate_right_rounded, size: 14, color: Colors.black),
+              ),
+            ),
+          ),
+        ),
+
+        // 4. Polygon Vertices (if polygon mask)
+        if (mask.type == MaskType.polygon)
+          for (int i = 0; i < mask.points.length; i++) ...[
+            Builder(builder: (ctx) {
+              final p = mask.points[i];
+              final px = cx + (p.dx * w * effScale * math.cos(rad) - p.dy * h * effScale * math.sin(rad));
+              final py = cy + (p.dx * w * effScale * math.sin(rad) + p.dy * h * effScale * math.cos(rad));
+              return Positioned(
+                left: px - 16,
+                top: py - 16,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (_) => _onPanStart(),
+                  onPanUpdate: (d) {
+                    final normDx = d.delta.dx / (w * effScale);
+                    final normDy = d.delta.dy / (h * effScale);
+                    final newPoint = Offset(
+                      (p.dx + normDx).clamp(-1.0, 1.0),
+                      (p.dy + normDy).clamp(-1.0, 1.0),
+                    );
+                    widget.viewModel.updateMaskPolygonPoint(widget.viewModel.selectedMaskIndex, i, newPoint);
+                  },
+                  onPanEnd: (_) => _onPanEnd(),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.center,
+                    child: Container(
+                      width: 14,
+                      height: 14,
+                      decoration: BoxDecoration(
+                        color: Colors.amber,
+                        shape: BoxShape.rectangle,
+                        borderRadius: BorderRadius.circular(3),
+                        border: Border.all(color: Colors.black, width: 1.5),
+                        boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 3)],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+
+        // 5. Linear Mask Directional Handles (Start & End pins)
+        if (mask.type == MaskType.linear) ...[
+          Positioned(
+            left: (w / 2.0 + mask.linearStart.dx * w) - 16,
+            top: (h / 2.0 + mask.linearStart.dy * h) - 16,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (_) => _onPanStart(),
+              onPanUpdate: (d) {
+                final newStart = Offset(
+                  (mask.linearStart.dx + d.delta.dx / w).clamp(-1.0, 1.0),
+                  (mask.linearStart.dy + d.delta.dy / h).clamp(-1.0, 1.0),
+                );
+                _updateActiveMask(mask.copyWith(linearStart: newStart));
+              },
+              onPanEnd: (_) => _onPanEnd(),
+              child: Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: Colors.cyanAccent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black, width: 1.5),
+                    boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                  ),
+                  child: const Center(child: Text('A', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black))),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: (w / 2.0 + mask.linearEnd.dx * w) - 16,
+            top: (h / 2.0 + mask.linearEnd.dy * h) - 16,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (_) => _onPanStart(),
+              onPanUpdate: (d) {
+                final newEnd = Offset(
+                  (mask.linearEnd.dx + d.delta.dx / w).clamp(-1.0, 1.0),
+                  (mask.linearEnd.dy + d.delta.dy / h).clamp(-1.0, 1.0),
+                );
+                _updateActiveMask(mask.copyWith(linearEnd: newEnd));
+              },
+              onPanEnd: (_) => _onPanEnd(),
+              child: Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: Colors.cyanAccent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black, width: 1.5),
+                    boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                  ),
+                  child: const Center(child: Text('B', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.black))),
+                ),
+              ),
+            ),
+          ),
+        ],
+
+        // 6. Radial Mask Radius Handle
+        if (mask.type == MaskType.radial) ...[
+          Positioned(
+            left: (cx + (w * mask.radialRadius * effScale)) - 16,
+            top: cy - 16,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onPanStart: (_) => _onPanStart(),
+              onPanUpdate: (d) {
+                final newR = (mask.radialRadius + d.delta.dx / (w * effScale)).clamp(0.05, 2.0);
+                _updateActiveMask(mask.copyWith(radialRadius: newR));
+              },
+              onPanEnd: (_) => _onPanEnd(),
+              child: Container(
+                width: 32,
+                height: 32,
+                alignment: Alignment.center,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: Colors.purpleAccent,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 1.5),
+                    boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 4)],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class MaskPathClipper extends CustomClipper<Path> {
   final VideoMask mask;
 
@@ -4828,9 +5137,10 @@ class RenderSoftMask extends RenderProxyBox {
     }
 
     final rect = offset & size;
-    final maxFeather = activeMasks.fold<double>(0.0, (maxVal, m) => math.max(maxVal, m.feather));
+    final maxFeather = activeMasks.fold<double>(0.0, (maxVal, m) => math.max(maxVal, m.safeFeather));
+    final minOpacity = activeMasks.fold<double>(1.0, (minVal, m) => math.min(minVal, m.safeOpacity));
 
-    if (maxFeather <= 0.0) {
+    if (maxFeather <= 0.0 && minOpacity >= 0.999) {
       final combinedPath = MultiMaskPathClipper.computeCombinedPath(activeMasks, size).shift(offset);
       context.pushClipPath(needsCompositing, offset, rect, combinedPath, (context, offset) {
         super.paint(context, offset);
@@ -4844,11 +5154,14 @@ class RenderSoftMask extends RenderProxyBox {
     context.canvas.saveLayer(rect, Paint());
     super.paint(context, offset);
 
-    final sigma = (maxFeather * (size.shortestSide / 400.0)).clamp(1.0, 30.0);
+    final sigma = (maxFeather * (size.shortestSide / 400.0)).clamp(0.5, 30.0);
     final maskPaint = Paint()
       ..style = PaintingStyle.fill
-      ..blendMode = BlendMode.dstIn
-      ..maskFilter = MaskFilter.blur(BlurStyle.normal, sigma);
+      ..color = Color.fromRGBO(0, 0, 0, minOpacity.clamp(0.0, 1.0))
+      ..blendMode = BlendMode.dstIn;
+    if (maxFeather > 0.0) {
+      maskPaint.maskFilter = MaskFilter.blur(BlurStyle.normal, sigma);
+    }
 
     context.canvas.drawPath(combinedPath, maskPaint);
     context.canvas.restore();

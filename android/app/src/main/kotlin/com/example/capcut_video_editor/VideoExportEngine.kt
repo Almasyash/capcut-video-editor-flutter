@@ -404,33 +404,51 @@ data class ExportMaskDefinition(
     val opacity: Double = 1.0,
     val feather: Double = 0.0,
     val expansion: Double = 0.0,
-    val positionX: Double = 0.5,
-    val positionY: Double = 0.5,
+    val positionX: Double = 0.0,
+    val positionY: Double = 0.0,
     val scale: Double = 1.0,
     val rotation: Double = 0.0,
     val width: Double = 0.5,
     val height: Double = 0.5,
     val cornerRadius: Double = 0.0,
     val combineMode: String = "add",
+    val linearStartX: Double = 0.0,
+    val linearStartY: Double = -0.25,
+    val linearEndX: Double = 0.0,
+    val linearEndY: Double = 0.25,
+    val radialCenterX: Double = 0.0,
+    val radialCenterY: Double = 0.0,
+    val radialRadius: Double = 0.3,
+    val polygonPoints: List<Pair<Double, Double>> = emptyList(),
     val keyframeTracks: ExportKeyframeTrackGroup = ExportKeyframeTrackGroup()
 ) {
-    fun evaluateAt(timeInSeconds: Double): ExportMaskDefinition {
-        if (keyframeTracks.tracks.isEmpty()) return this
+    fun evaluateAt(timeInSeconds: Double, clipKeyframes: ExportKeyframeTrackGroup? = null): ExportMaskDefinition {
+        val kfs = if (keyframeTracks.tracks.isNotEmpty()) keyframeTracks else (clipKeyframes ?: keyframeTracks)
+        if (kfs.tracks.isEmpty()) return this
         return copy(
-            positionX = keyframeTracks.evaluate("maskPositionX", timeInSeconds, positionX).coerceIn(-2.0, 2.0),
-            positionY = keyframeTracks.evaluate("maskPositionY", timeInSeconds, positionY).coerceIn(-2.0, 2.0),
-            scale = keyframeTracks.evaluate("maskScale", timeInSeconds, scale).coerceIn(0.01, 10.0),
-            rotation = keyframeTracks.evaluate("maskRotation", timeInSeconds, rotation),
-            opacity = keyframeTracks.evaluate("maskOpacity", timeInSeconds, opacity).coerceIn(0.0, 1.0),
-            feather = keyframeTracks.evaluate("maskFeather", timeInSeconds, feather).coerceIn(0.0, 1.0),
-            expansion = keyframeTracks.evaluate("maskExpansion", timeInSeconds, expansion).coerceIn(-1.0, 1.0),
-            width = keyframeTracks.evaluate("maskWidth", timeInSeconds, width).coerceIn(0.01, 2.0),
-            height = keyframeTracks.evaluate("maskHeight", timeInSeconds, height).coerceIn(0.01, 2.0)
+            positionX = kfs.evaluate("maskPositionX", timeInSeconds, positionX).coerceIn(-2.0, 2.0),
+            positionY = kfs.evaluate("maskPositionY", timeInSeconds, positionY).coerceIn(-2.0, 2.0),
+            scale = kfs.evaluate("maskScale", timeInSeconds, scale).coerceIn(0.01, 10.0),
+            rotation = kfs.evaluate("maskRotation", timeInSeconds, rotation),
+            opacity = kfs.evaluate("maskOpacity", timeInSeconds, opacity).coerceIn(0.0, 1.0),
+            feather = kfs.evaluate("maskFeather", timeInSeconds, feather).coerceIn(0.0, 100.0),
+            expansion = kfs.evaluate("maskExpansion", timeInSeconds, expansion).coerceIn(-100.0, 100.0),
+            width = kfs.evaluate("maskWidth", timeInSeconds, width).coerceIn(0.01, 2.0),
+            height = kfs.evaluate("maskHeight", timeInSeconds, height).coerceIn(0.01, 2.0)
         )
     }
 }
 
 object MaskParser {
+    private val DEFAULT_POLYGON_POINTS = listOf(
+        Pair(0.0, -0.4),
+        Pair(0.35, -0.2),
+        Pair(0.35, 0.2),
+        Pair(0.0, 0.4),
+        Pair(-0.35, 0.2),
+        Pair(-0.35, -0.2)
+    )
+
     @Suppress("UNCHECKED_CAST")
     fun parseMasks(rawList: List<Any>?): List<ExportMaskDefinition> {
         if (rawList == null) return emptyList()
@@ -446,14 +464,51 @@ object MaskParser {
             val opacity = (map["opacity"] as? Number)?.toDouble() ?: 1.0
             val feather = (map["feather"] as? Number)?.toDouble() ?: 0.0
             val expansion = (map["expansion"] as? Number)?.toDouble() ?: 0.0
-            val positionX = (map["positionX"] as? Number)?.toDouble() ?: 0.5
-            val positionY = (map["positionY"] as? Number)?.toDouble() ?: 0.5
-            val scale = (map["scale"] as? Number)?.toDouble() ?: 1.0
+            val positionX = (map["positionX"] as? Number)?.toDouble() ?: 0.0
+            val positionY = (map["positionY"] as? Number)?.toDouble() ?: 0.0
+            val scale = (map["scale"] as? Number)?.toDouble() ?: ((map["size"] as? Number)?.toDouble() ?: 1.0)
             val rotation = (map["rotation"] as? Number)?.toDouble() ?: 0.0
-            val width = (map["width"] as? Number)?.toDouble() ?: 0.5
-            val height = (map["height"] as? Number)?.toDouble() ?: 0.5
+            val width = (map["width"] as? Number)?.toDouble() ?: ((map["rectWidth"] as? Number)?.toDouble() ?: 0.5)
+            val height = (map["height"] as? Number)?.toDouble() ?: ((map["rectHeight"] as? Number)?.toDouble() ?: 0.5)
             val cornerRadius = (map["cornerRadius"] as? Number)?.toDouble() ?: 0.0
             val combineMode = map["combineMode"] as? String ?: "add"
+
+            val linearStartX = (map["linearStartX"] as? Number)?.toDouble() ?: 0.0
+            val linearStartY = (map["linearStartY"] as? Number)?.toDouble() ?: -0.25
+            val linearEndX = (map["linearEndX"] as? Number)?.toDouble() ?: 0.0
+            val linearEndY = (map["linearEndY"] as? Number)?.toDouble() ?: 0.25
+
+            val radialCenterX = (map["radialCenterX"] as? Number)?.toDouble() ?: 0.0
+            val radialCenterY = (map["radialCenterY"] as? Number)?.toDouble() ?: 0.0
+            val radialRadius = (map["radialRadius"] as? Number)?.toDouble() ?: 0.3
+
+            val rawPoints = (map["points"] as? List<*>) ?: (map["polygonPoints"] as? List<*>)
+            val parsedPoints = rawPoints?.mapNotNull { pt ->
+                when (pt) {
+                    is Map<*, *> -> {
+                        val px = (pt["x"] as? Number ?: pt["dx"] as? Number)?.toDouble() ?: 0.0
+                        val py = (pt["y"] as? Number ?: pt["dy"] as? Number)?.toDouble() ?: 0.0
+                        Pair(px, py)
+                    }
+                    is List<*> -> {
+                        if (pt.size >= 2) {
+                            val px = (pt[0] as? Number)?.toDouble() ?: 0.0
+                            val py = (pt[1] as? Number)?.toDouble() ?: 0.0
+                            Pair(px, py)
+                        } else null
+                    }
+                    else -> null
+                }
+            } ?: emptyList()
+
+            val polygonPoints = if (parsedPoints.size >= 3) {
+                parsedPoints
+            } else if (type.lowercase() == "polygon") {
+                DEFAULT_POLYGON_POINTS
+            } else {
+                emptyList()
+            }
+
             val kfTracks = KeyframeParser.parseTrackGroup(map["keyframeTracks"] as? Map<String, Any>)
             result.add(
                 ExportMaskDefinition(
@@ -473,6 +528,14 @@ object MaskParser {
                     height = height,
                     cornerRadius = cornerRadius,
                     combineMode = combineMode,
+                    linearStartX = linearStartX,
+                    linearStartY = linearStartY,
+                    linearEndX = linearEndX,
+                    linearEndY = linearEndY,
+                    radialCenterX = radialCenterX,
+                    radialCenterY = radialCenterY,
+                    radialRadius = radialRadius,
+                    polygonPoints = polygonPoints,
                     keyframeTracks = kfTracks
                 )
             )
@@ -1400,6 +1463,8 @@ class VideoExportEngine(private val context: Context) {
         private var oesMaskRotLoc = 0
         private var oesMaskFeatherLoc = 0
         private var oesMaskOpacityLoc = 0
+        private var oesMaskPolyCountLoc = 0
+        private var oesMaskPolyPointsLoc = 0
 
         private var tex2DProgram = 0
         private var tex2DPosLoc = 0
@@ -1424,6 +1489,8 @@ class VideoExportEngine(private val context: Context) {
         private var tex2DMaskRotLoc = 0
         private var tex2DMaskFeatherLoc = 0
         private var tex2DMaskOpacityLoc = 0
+        private var tex2DMaskPolyCountLoc = 0
+        private var tex2DMaskPolyPointsLoc = 0
 
         private var solidProgram = 0
         private var solidPosLoc = 0
@@ -1580,6 +1647,8 @@ class VideoExportEngine(private val context: Context) {
                 uniform float uMaskRot[4];
                 uniform float uMaskFeather[4];
                 uniform float uMaskOpacity[4];
+                uniform int uMaskPolyCount[4];
+                uniform vec2 uMaskPolyPoints[32];
 
                 float evaluateMasks(vec2 uv) {
                     if (uMaskCount <= 0) return 1.0;
@@ -1612,6 +1681,35 @@ class VideoExportEngine(private val context: Context) {
                         } else if (mType == 4) { // Radial
                             float r = max(hSize.x, 0.001);
                             float dist = length(p) - r;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 5) { // Polygon SDF
+                            int pCount = uMaskPolyCount[i];
+                            if (pCount < 3) pCount = 3;
+                            float minDist = 1000.0;
+                            bool inside = false;
+                            int baseIdx = i * 8;
+                            for (int k = 0; k < 8; k++) {
+                                if (k >= pCount) break;
+                                int nextK = k + 1;
+                                if (nextK >= pCount) nextK = 0;
+                                vec2 va = uMaskPolyPoints[baseIdx + k];
+                                vec2 vb = uMaskPolyPoints[baseIdx + nextK];
+                                float denom = vb.y - va.y;
+                                if (abs(denom) < 0.00001) denom = 0.00001;
+                                if (((va.y > p.y) != (vb.y > p.y)) &&
+                                    (p.x < (vb.x - va.x) * (p.y - va.y) / denom + va.x)) {
+                                    inside = !inside;
+                                }
+                                vec2 ba = vb - va;
+                                vec2 pa = p - va;
+                                float h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.00001), 0.0, 1.0);
+                                float d = length(pa - ba * h);
+                                minDist = min(minDist, d);
+                            }
+                            float dist = inside ? -minDist : minDist;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 8) { // Filmstrip
+                            float dist = abs(p.y) - hSize.y;
                             a = 1.0 - smoothstep(-f, f, dist);
                         } else { // Star / Heart fallback
                             float dist = length(p / hSize) - 1.0;
@@ -1690,6 +1788,8 @@ class VideoExportEngine(private val context: Context) {
             oesMaskRotLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskRot")
             oesMaskFeatherLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskFeather")
             oesMaskOpacityLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskOpacity")
+            oesMaskPolyCountLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskPolyCount")
+            oesMaskPolyPointsLoc = GLES20.glGetUniformLocation(oesProgram, "uMaskPolyPoints")
 
             // 2. Texture2D Program
             val tex2DVS = """
@@ -1728,6 +1828,8 @@ class VideoExportEngine(private val context: Context) {
                 uniform float uMaskRot[4];
                 uniform float uMaskFeather[4];
                 uniform float uMaskOpacity[4];
+                uniform int uMaskPolyCount[4];
+                uniform vec2 uMaskPolyPoints[32];
 
                 float evaluateMasks(vec2 uv) {
                     if (uMaskCount <= 0) return 1.0;
@@ -1760,6 +1862,35 @@ class VideoExportEngine(private val context: Context) {
                         } else if (mType == 4) { // Radial
                             float r = max(hSize.x, 0.001);
                             float dist = length(p) - r;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 5) { // Polygon SDF
+                            int pCount = uMaskPolyCount[i];
+                            if (pCount < 3) pCount = 3;
+                            float minDist = 1000.0;
+                            bool inside = false;
+                            int baseIdx = i * 8;
+                            for (int k = 0; k < 8; k++) {
+                                if (k >= pCount) break;
+                                int nextK = k + 1;
+                                if (nextK >= pCount) nextK = 0;
+                                vec2 va = uMaskPolyPoints[baseIdx + k];
+                                vec2 vb = uMaskPolyPoints[baseIdx + nextK];
+                                float denom = vb.y - va.y;
+                                if (abs(denom) < 0.00001) denom = 0.00001;
+                                if (((va.y > p.y) != (vb.y > p.y)) &&
+                                    (p.x < (vb.x - va.x) * (p.y - va.y) / denom + va.x)) {
+                                    inside = !inside;
+                                }
+                                vec2 ba = vb - va;
+                                vec2 pa = p - va;
+                                float h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.00001), 0.0, 1.0);
+                                float d = length(pa - ba * h);
+                                minDist = min(minDist, d);
+                            }
+                            float dist = inside ? -minDist : minDist;
+                            a = 1.0 - smoothstep(-f, f, dist);
+                        } else if (mType == 8) { // Filmstrip
+                            float dist = abs(p.y) - hSize.y;
                             a = 1.0 - smoothstep(-f, f, dist);
                         } else { // Star / Heart fallback
                             float dist = length(p / hSize) - 1.0;
@@ -1838,6 +1969,8 @@ class VideoExportEngine(private val context: Context) {
             tex2DMaskRotLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskRot")
             tex2DMaskFeatherLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskFeather")
             tex2DMaskOpacityLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskOpacity")
+            tex2DMaskPolyCountLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskPolyCount")
+            tex2DMaskPolyPointsLoc = GLES20.glGetUniformLocation(tex2DProgram, "uMaskPolyPoints")
 
             // 3. Solid Color Program
             val solidVS = """
@@ -2068,6 +2201,8 @@ class VideoExportEngine(private val context: Context) {
             maskRotLoc: Int,
             maskFeatherLoc: Int,
             maskOpacityLoc: Int,
+            maskPolyCountLoc: Int,
+            maskPolyPointsLoc: Int,
             masks: List<ExportMaskDefinition>?
         ) {
             val activeMasks = masks?.filter { it.enabled && it.type != "none" }?.take(4) ?: emptyList()
@@ -2085,16 +2220,21 @@ class VideoExportEngine(private val context: Context) {
             val rot = FloatArray(4)
             val feather = FloatArray(4)
             val opacity = FloatArray(4)
+            val polyCount = IntArray(4)
+            val polyPoints = FloatArray(64)
 
             for (i in 0 until count) {
                 val m = activeMasks[i]
-                types[i] = when (m.type.lowercase()) {
+                val lowerType = m.type.lowercase()
+                types[i] = when (lowerType) {
                     "rectangle", "rect" -> 1
                     "ellipse", "circle" -> 2
                     "linear", "split" -> 3
                     "radial" -> 4
-                    "star" -> 5
-                    "heart" -> 6
+                    "polygon" -> 5
+                    "star" -> 6
+                    "heart" -> 7
+                    "filmstrip" -> 8
                     else -> 1
                 }
                 inverted[i] = if (m.inverted) 1 else 0
@@ -2102,20 +2242,53 @@ class VideoExportEngine(private val context: Context) {
                     "add" -> 0
                     "intersect" -> 1
                     "subtract" -> 2
-                    "xor" -> 3
+                    "xor", "difference" -> 3
                     else -> 0
                 }
-                pos[i * 2] = m.positionX.toFloat()
-                pos[i * 2 + 1] = m.positionY.toFloat()
 
-                val effHalfW = ((m.width * m.scale + m.expansion) / 2.0).coerceAtLeast(0.001).toFloat()
-                val effHalfH = ((m.height * m.scale + m.expansion) / 2.0).coerceAtLeast(0.001).toFloat()
+                if (lowerType == "linear") {
+                    val linearMidX = 0.5 + (m.linearStartX + m.linearEndX) * 0.5
+                    val linearMidY = 0.5 + (m.linearStartY + m.linearEndY) * 0.5
+                    val angle = Math.atan2(m.linearEndY - m.linearStartY, m.linearEndX - m.linearStartX)
+                    pos[i * 2] = linearMidX.toFloat()
+                    pos[i * 2 + 1] = linearMidY.toFloat()
+                    rot[i] = ((angle - Math.PI / 2.0) + (m.rotation * Math.PI / 180.0)).toFloat()
+                } else if (lowerType == "radial" && (m.radialCenterX != 0.0 || m.radialCenterY != 0.0)) {
+                    pos[i * 2] = (0.5 + m.radialCenterX).toFloat()
+                    pos[i * 2 + 1] = (0.5 + m.radialCenterY).toFloat()
+                    rot[i] = (m.rotation * Math.PI / 180.0).toFloat()
+                } else {
+                    pos[i * 2] = (0.5 + m.positionX * 0.5).toFloat()
+                    pos[i * 2 + 1] = (0.5 + m.positionY * 0.5).toFloat()
+                    rot[i] = (m.rotation * Math.PI / 180.0).toFloat()
+                }
+
+                val effScale = m.scale + (m.expansion * 0.01)
+                val effHalfW = if (lowerType == "radial") {
+                    (m.radialRadius * effScale).coerceAtLeast(0.001).toFloat()
+                } else {
+                    ((m.width * effScale) * 0.5).coerceAtLeast(0.001).toFloat()
+                }
+                val effHalfH = if (lowerType == "radial") {
+                    (m.radialRadius * effScale).coerceAtLeast(0.001).toFloat()
+                } else {
+                    ((m.height * effScale) * 0.5).coerceAtLeast(0.001).toFloat()
+                }
                 halfSize[i * 2] = effHalfW
                 halfSize[i * 2 + 1] = effHalfH
 
-                rot[i] = (m.rotation * Math.PI / 180.0).toFloat()
-                feather[i] = m.feather.coerceIn(0.0, 1.0).toFloat()
+                feather[i] = (m.feather / 100.0).coerceIn(0.001, 1.0).toFloat()
                 opacity[i] = m.opacity.coerceIn(0.0, 1.0).toFloat()
+
+                if (lowerType == "polygon" && m.polygonPoints.isNotEmpty()) {
+                    val pCount = min(m.polygonPoints.size, 8)
+                    polyCount[i] = pCount
+                    val baseIdx = i * 8
+                    for (k in 0 until pCount) {
+                        polyPoints[(baseIdx + k) * 2] = (m.polygonPoints[k].first * effScale).toFloat()
+                        polyPoints[(baseIdx + k) * 2 + 1] = (m.polygonPoints[k].second * effScale).toFloat()
+                    }
+                }
             }
 
             if (maskTypeLoc >= 0) GLES20.glUniform1iv(maskTypeLoc, 4, types, 0)
@@ -2126,6 +2299,8 @@ class VideoExportEngine(private val context: Context) {
             if (maskRotLoc >= 0) GLES20.glUniform1fv(maskRotLoc, 4, rot, 0)
             if (maskFeatherLoc >= 0) GLES20.glUniform1fv(maskFeatherLoc, 4, feather, 0)
             if (maskOpacityLoc >= 0) GLES20.glUniform1fv(maskOpacityLoc, 4, opacity, 0)
+            if (maskPolyCountLoc >= 0) GLES20.glUniform1iv(maskPolyCountLoc, 4, polyCount, 0)
+            if (maskPolyPointsLoc >= 0) GLES20.glUniform2fv(maskPolyPointsLoc, 32, polyPoints, 0)
         }
 
         fun renderOESTexture(
@@ -2182,6 +2357,8 @@ class VideoExportEngine(private val context: Context) {
                 oesMaskRotLoc,
                 oesMaskFeatherLoc,
                 oesMaskOpacityLoc,
+                oesMaskPolyCountLoc,
+                oesMaskPolyPointsLoc,
                 masks
             )
 
@@ -2251,6 +2428,8 @@ class VideoExportEngine(private val context: Context) {
                 tex2DMaskRotLoc,
                 tex2DMaskFeatherLoc,
                 tex2DMaskOpacityLoc,
+                tex2DMaskPolyCountLoc,
+                tex2DMaskPolyPointsLoc,
                 masks
             )
 
@@ -3077,7 +3256,7 @@ class VideoExportEngine(private val context: Context) {
                 )
             }
 
-            val evaluatedMasks = clip.masks.map { it.evaluateAt(localTimeSec) }
+            val evaluatedMasks = clip.masks.map { it.evaluateAt(localTimeSec, clip.keyframeTracks) }
             val hasActiveMask = evaluatedMasks.any { it.enabled && it.type != "none" }
 
             if (evalOpacity < 1.0f || hasActiveMask) {
@@ -3431,7 +3610,7 @@ class VideoExportEngine(private val context: Context) {
                                     colorOffset = pipColorOffset,
                                     vignette = kfVignette,
                                     sharpen = kfSharpness,
-                                    masks = pip.masks.map { it.evaluateAt(pipSec) }
+                                    masks = pip.masks.map { it.evaluateAt(pipSec, pip.keyframeTracks) }
                                 )
                             }
                         }
