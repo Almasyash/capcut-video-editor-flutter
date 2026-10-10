@@ -675,7 +675,7 @@ class _CurveCanvas extends StatelessWidget {
             for (int i = 0; i < points.length; i++) {
               final px = points[i].timeRatio * (w - 24) + 12;
               final py = _speedToY(points[i].speedMultiplier, h);
-              if ((Offset(px, py) - tapPos).distance < 20) {
+              if ((Offset(px, py) - tapPos).distance < 28) {
                 onSelectPoint(i);
                 return;
               }
@@ -684,6 +684,17 @@ class _CurveCanvas extends StatelessWidget {
             final tRatio = ((tapPos.dx - 12) / (w - 24)).clamp(0.0, 1.0);
             final speed = _yToSpeed(tapPos.dy, h);
             onAddPoint(SpeedCurvePoint(timeRatio: tRatio, speedMultiplier: speed));
+          },
+          onPanStart: (details) {
+            final tapPos = details.localPosition;
+            for (int i = 0; i < points.length; i++) {
+              final px = points[i].timeRatio * (w - 24) + 12;
+              final py = _speedToY(points[i].speedMultiplier, h);
+              if ((Offset(px, py) - tapPos).distance < 28) {
+                onSelectPoint(i);
+                return;
+              }
+            }
           },
           onPanUpdate: (details) {
             if (selectedPointIndex == null || selectedPointIndex! >= points.length) return;

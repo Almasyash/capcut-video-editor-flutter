@@ -77,7 +77,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
       AudioPlaybackService.instance.dispose();
     }
     VideoPlaybackService.instance.disposeAll();
-    _viewModel.saveCurrentProject();
+    _viewModel.saveOrCleanupOnExit();
     _viewModel.dispose();
     super.dispose();
   }
@@ -262,7 +262,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
                 if (_viewModel.activeDrawer != null) {
                   _viewModel.closeDrawer();
                 } else {
-                  await _viewModel.saveCurrentProject();
+                  await _viewModel.saveOrCleanupOnExit();
                   if (context.mounted) {
                     Navigator.of(context).maybePop();
                   }

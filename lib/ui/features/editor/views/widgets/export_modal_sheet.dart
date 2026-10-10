@@ -36,44 +36,45 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
     return ListenableBuilder(
       listenable: viewModel,
       builder: (context, _) {
-        if (viewModel.isExporting) {
-          return _buildExportingProgressView(viewModel);
-        }
-
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: AppDimensions.lg, vertical: AppDimensions.lg),
-          decoration: const BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24.0)),
-          ),
-          child: SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header Bar with Drag Handle
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.divider,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
+        final content = viewModel.isExporting
+            ? _buildExportingProgressView(viewModel)
+            : Container(
+                padding: const EdgeInsets.symmetric(horizontal: AppDimensions.lg, vertical: AppDimensions.lg),
+                decoration: const BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24.0)),
                 ),
-                const SizedBox(height: 16),
+                child: SafeArea(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                      // Header Bar with Drag Handle
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: AppColors.divider,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
 
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Export Video Settings', style: AppTypography.headerTitle),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.iconDefault),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Expanded(
+                            child: Text('Export Video Settings', style: AppTypography.headerTitle),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 20, color: AppColors.iconDefault),
+                            onPressed: () => Navigator.of(context).pop(),
+                          ),
+                        ],
+                      ),
 
                 const SizedBox(height: 16),
 
@@ -183,27 +184,33 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('Estimated File Size', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                          const SizedBox(height: 2),
-                          Text(
-                            '~${estimatedMb.toStringAsFixed(1)} MB',
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.primary),
-                          ),
-                        ],
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Estimated File Size', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                            const SizedBox(height: 2),
+                            Text(
+                              '~${estimatedMb.toStringAsFixed(1)} MB',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppColors.primary),
+                            ),
+                          ],
+                        ),
                       ),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('Render Engine', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
-                          SizedBox(height: 2),
-                          Text(
-                            'Editor FS Engine (H.264)',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-                          ),
-                        ],
+                      const SizedBox(width: 8),
+                      const Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('Render Engine', style: TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                            SizedBox(height: 2),
+                            Text(
+                              'Editor FS Engine (H.264)',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -264,6 +271,23 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
               ],
             ),
           ),
+        ),
+      );
+
+        return PopScope(
+          canPop: !viewModel.isExporting,
+          onPopInvokedWithResult: (didPop, result) {
+            if (!didPop && viewModel.isExporting && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Export in progress. Please wait or tap Cancel to abort.'),
+                  duration: Duration(seconds: 2),
+                  backgroundColor: AppColors.surfaceElevated,
+                ),
+              );
+            }
+          },
+          child: content,
         );
       },
     );
@@ -273,18 +297,19 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
     final percent = (viewModel.exportProgress * 100).toInt();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.xl, vertical: AppDimensions.xxl),
+      padding: const EdgeInsets.symmetric(horizontal: AppDimensions.xl, vertical: AppDimensions.lg),
       decoration: const BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24.0)),
       ),
       child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Exporting Video...', style: AppTypography.headerTitle),
-            const SizedBox(height: 6),
-            const Text('Please do not lock the screen or switch apps', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Exporting Video...', style: AppTypography.headerTitle),
+              const SizedBox(height: 6),
+              const Text('Please do not lock the screen or switch apps', style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
             const SizedBox(height: 24),
 
             // Circular Progress Indicator with Percent
@@ -317,8 +342,9 @@ class _ExportModalSheetState extends State<ExportModalSheet> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   void _showSuccessDialog(
     BuildContext context, {

@@ -31,7 +31,7 @@ class TopNavigationBar extends StatelessWidget {
             constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
             tooltip: 'Home & Drafts',
             onPressed: () async {
-              await viewModel.saveCurrentProject();
+              await viewModel.saveOrCleanupOnExit();
               if (context.mounted) {
                 Navigator.of(context).maybePop();
               }

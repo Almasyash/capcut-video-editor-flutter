@@ -227,6 +227,12 @@ class EditorViewModel extends ChangeNotifier {
   @visibleForTesting
   void handleVideoCompletionEvent(VideoPositionEvent event) => _handleVideoCompletionEvent(event);
 
+  @visibleForTesting
+  void setIsExportingForTesting(bool value) {
+    _isExporting = value;
+    notifyListeners();
+  }
+
   // --- Project & Persistence State ---
   late Project _currentProject;
   Timer? _autoSaveDebounceTimer;
@@ -653,6 +659,31 @@ class EditorViewModel extends ChangeNotifier {
       await ProjectStorageService.instance.saveProject(_currentProject);
     } catch (e, st) {
       debugPrint('[EditorViewModel] saveCurrentProject error: $e\n$st');
+    }
+  }
+
+  /// Returns true if this project has zero clips/overlays/text/audio and has zero undo history,
+  /// representing an untouched blank draft that should not clutter Recent Drafts on back navigation.
+  bool get isUntouchedBlankProject =>
+      _videoClips.isEmpty &&
+      _overlayClips.isEmpty &&
+      _stickerOverlays.isEmpty &&
+      _textOverlays.isEmpty &&
+      _audioTracks.isEmpty &&
+      !canUndo;
+
+  /// Saves the current project state to disk, or automatically cleans up and deletes
+  /// the draft if it is an untouched blank project (preventing empty draft clutter).
+  Future<void> saveOrCleanupOnExit() async {
+    if (isUntouchedBlankProject) {
+      try {
+        await ProjectStorageService.instance.deleteProject(_currentProject.id);
+        debugPrint('[EditorViewModel] Discarded untouched blank draft ${_currentProject.id} on exit');
+      } catch (e) {
+        debugPrint('[EditorViewModel] Error cleaning up untouched blank project: $e');
+      }
+    } else {
+      await saveCurrentProject();
     }
   }
 
