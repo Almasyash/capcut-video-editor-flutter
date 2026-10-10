@@ -9,6 +9,7 @@
 
 * **Current Phase**: v1.7.1 Release Hardening & Maintenance
 * **Active Working Branch**: `dev/v1.7.1-hardening`
+* **Current Git HEAD**: `dc4bce6` (on `dev/v1.7.1-hardening`)
 * **Base Commit SHA**: `c86738064e0bcc1b4101793baa96ab9297cabb79` (branched from `main`)
 * **Dual Remote States**:
   * **Primary Remote (`origin`)**: `c86738064e0bcc1b4101793baa96ab9297cabb79` (`origin/main`)
