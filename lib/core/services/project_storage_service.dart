@@ -93,6 +93,41 @@ class ProjectStorageService {
             }
           }
         }
+
+        // Crash recovery scan: check for any orphaned .tmp files whose main .json is missing or corrupted
+        for (final entity in entries) {
+          if (entity is File && entity.path.endsWith('.json.tmp')) {
+            final mainPath = entity.path.substring(0, entity.path.length - 4); // strip .tmp
+            final mainFile = File(mainPath);
+            bool needsRecovery = false;
+            try {
+              if (!await mainFile.exists() || (await mainFile.length()) == 0) {
+                needsRecovery = true;
+              }
+            } catch (_) {
+              needsRecovery = true;
+            }
+
+            if (needsRecovery) {
+              try {
+                final tmpJson = await entity.readAsString();
+                final dynamic decoded = jsonDecode(tmpJson);
+                if (decoded is Map<String, dynamic>) {
+                  final recovered = Project.fromJson(decoded);
+                  if (!projects.any((p) => p.id == recovered.id)) {
+                    await entity.copy(mainFile.path);
+                    await entity.delete();
+                    projects.add(recovered);
+                    _memoryCache[recovered.id] = recovered;
+                    debugPrint('[ProjectStorageService] Auto-recovered orphaned project ${recovered.id} from .tmp crash artifact');
+                  }
+                }
+              } catch (e) {
+                debugPrint('[ProjectStorageService] Failed to auto-recover .tmp artifact ${entity.path}: $e');
+              }
+            }
+          }
+        }
       }
     } catch (e) {
       debugPrint('[ProjectStorageService] Failed to load projects: $e');
@@ -110,6 +145,7 @@ class ProjectStorageService {
   }
 
   /// Retrieves a specific project by its unique ID.
+  /// Features crash recovery: if .json is missing or empty, recovers from .json.tmp if valid.
   /// Returns null safely if the project does not exist or is corrupted.
   Future<Project?> getProjectById(String id) async {
     if (_memoryCache.containsKey(id)) {
@@ -119,15 +155,38 @@ class ProjectStorageService {
     try {
       final dirPath = await getProjectsDirectoryPath();
       final file = File('$dirPath/$id.json');
-      if (await file.exists()) {
-        final jsonStr = await file.readAsString();
-        final dynamic decoded = jsonDecode(jsonStr);
-        if (decoded is Map<String, dynamic>) {
-          final project = Project.fromJson(decoded);
-          _memoryCache[project.id] = project;
-          return project;
-        } else {
-          debugPrint('[ProjectStorageService] Corrupted project $id: root is not a Map');
+      if (await file.exists() && (await file.length()) > 0) {
+        try {
+          final jsonStr = await file.readAsString();
+          final dynamic decoded = jsonDecode(jsonStr);
+          if (decoded is Map<String, dynamic>) {
+            final project = Project.fromJson(decoded);
+            _memoryCache[project.id] = project;
+            return project;
+          } else {
+            debugPrint('[ProjectStorageService] Corrupted project $id: root is not a Map');
+          }
+        } catch (e, st) {
+          debugPrint('[ProjectStorageService] Error parsing project $id: $e\n$st');
+        }
+      }
+
+      // Crash recovery: check for orphaned .tmp file if .json is missing or corrupted
+      final tmpFile = File('$dirPath/$id.json.tmp');
+      if (await tmpFile.exists()) {
+        try {
+          final tmpJson = await tmpFile.readAsString();
+          final dynamic decoded = jsonDecode(tmpJson);
+          if (decoded is Map<String, dynamic>) {
+            final recovered = Project.fromJson(decoded);
+            await tmpFile.copy(file.path);
+            await tmpFile.delete();
+            _memoryCache[recovered.id] = recovered;
+            debugPrint('[ProjectStorageService] Recovered project $id from .tmp crash artifact');
+            return recovered;
+          }
+        } catch (e) {
+          debugPrint('[ProjectStorageService] Failed to recover project $id from .tmp: $e');
         }
       }
     } catch (e, st) {

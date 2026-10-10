@@ -487,9 +487,10 @@ class VideoPlaybackService {
     }
   }
 
-  /// Disposes all active playback sessions.
+  /// Disposes all active playback sessions and native controllers.
   Future<void> disposeAll() async {
-    for (final textureId in _sessions.keys.toList()) {
+    final allTextureIds = {..._sessions.keys, ..._windowsControllers.keys}.toList();
+    for (final textureId in allTextureIds) {
       await disposeSession(textureId);
     }
   }

@@ -787,6 +787,7 @@ class EditorViewModel extends ChangeNotifier {
     _colorAdjustments = snapshot.colorAdjustments;
     _activeEffect = snapshot.activeEffect;
     _syncAudioPlayback(forceSeek: true);
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -834,6 +835,7 @@ class EditorViewModel extends ChangeNotifier {
     _colorAdjustments = snapshot.colorAdjustments;
     _activeEffect = snapshot.activeEffect;
     _syncAudioPlayback(forceSeek: true);
+    scheduleAutoSave();
     notifyListeners();
   }
 
@@ -1795,14 +1797,17 @@ class EditorViewModel extends ChangeNotifier {
     required List<Color> gradient,
     IconData icon = Icons.videocam_rounded,
   }) {
+    final effectiveDuration = duration <= Duration.zero
+        ? const Duration(seconds: 4)
+        : duration;
     _saveSnapshot();
     final newClip = VideoClip(
       id: 'clip_custom_${DateTime.now().microsecondsSinceEpoch}_${_videoClips.length}',
       assetId: assetId,
       title: title,
-      originalDuration: duration,
+      originalDuration: effectiveDuration,
       trimStart: Duration.zero,
-      trimEnd: duration,
+      trimEnd: effectiveDuration,
       previewGradient: gradient,
       previewIcon: icon,
     );
@@ -1818,7 +1823,10 @@ class EditorViewModel extends ChangeNotifier {
     if (!containsMediaAsset(asset)) {
       _mediaLibrary.add(asset);
     }
-    final duration = asset.duration ?? (asset.isPhoto ? const Duration(seconds: 4) : const Duration(seconds: 10));
+    final rawDuration = asset.duration;
+    final duration = (rawDuration != null && rawDuration > Duration.zero)
+        ? rawDuration
+        : (asset.isPhoto ? const Duration(seconds: 4) : const Duration(seconds: 10));
     final random = math.Random(asset.name.hashCode);
     final gradient = [
       Color(0xFF000000 | (random.nextInt(0xFFFFFF) | 0x444444)),
@@ -5239,6 +5247,7 @@ class EditorViewModel extends ChangeNotifier {
   }) async {
     if (_isExporting) return false;
     _isExporting = true;
+    _exportCancelled = false;
     _exportProgress = 0.0;
     pause();
     notifyListeners();
@@ -5256,10 +5265,19 @@ class EditorViewModel extends ChangeNotifier {
         assets: _mediaLibrary,
         outputFileName: exportFileName,
         onProgress: (progress) {
+          if (_exportCancelled || _isDisposed) return;
           _exportProgress = progress.clamp(0.0, 1.0);
           notifyListeners();
         },
       );
+
+      if (_exportCancelled || _isDisposed) {
+        _isExporting = false;
+        _exportProgress = 0.0;
+        notifyListeners();
+        onFinished(false, null);
+        return false;
+      }
 
       _lastExportResult = exportResult;
       final success = exportResult['success'] == true;
@@ -5297,20 +5315,36 @@ class EditorViewModel extends ChangeNotifier {
     );
   }
 
+  bool _exportCancelled = false;
+
   void cancelExport() {
+    _exportCancelled = true;
     _isExporting = false;
     _exportProgress = 0.0;
     _exportTimer?.cancel();
     _exportTimer = null;
+    DeviceMediaService.cancelExport();
     notifyListeners();
   }
 
   bool _isDisposed = false;
 
   @override
+  void notifyListeners() {
+    if (_isDisposed) return;
+    super.notifyListeners();
+  }
+
+  @override
   void dispose() {
     if (_isDisposed) return;
     _isDisposed = true;
+    if (_isExporting) {
+      _exportCancelled = true;
+      _isExporting = false;
+      _exportProgress = 0.0;
+      DeviceMediaService.cancelExport();
+    }
     _autoSaveDebounceTimer?.cancel();
     _playbackTimer?.cancel();
     _playbackTimer = null;

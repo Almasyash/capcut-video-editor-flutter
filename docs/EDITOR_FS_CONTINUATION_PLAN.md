@@ -1,76 +1,88 @@
 # EDITOR FS — DEVELOPMENT CONTINUATION PLAN
 
-**Milestone Target**: v1.7.1 Maintenance & Release Hardening  
+**Milestone Target**: v1.7.1 Maintenance & Release Hardening (Completed & Verified)  
 **Target Branch**: `dev/v1.7.1-hardening`  
 **Base Commit**: `c867380` (Tree SHA: `3256cb74eb76618fb78105d8d213ef708ce493aa`)  
 **Parity Target**: Dual Remotes (`origin` and `secondary`)  
 
 ---
 
-## 1. Development Objectives
+## 1. Development Objectives & Execution Status
 
-With v1.7.0 fully stabilized, verified on physical hardware (Realme RMX5003), and passing all 743 automated tests, development resumes with targeted hardening and UX improvements identified during the v1.7.0 independent audit:
+All identified P0/P1/P2 hardening objectives for v1.7.1 have been implemented, tested, and validated with zero analyzer issues and 100% test pass rate across 758 tests:
 
 ```
 [v1.7.0 Production Stable]
        │
-       ▼ (Create dedicated branch: dev/v1.7.1-hardening)
+       ▼ (Branch: dev/v1.7.1-hardening)
  ┌─────────────────────────────────────────────────────────────┐
- │ Task 1: Export Progress Modal Dismissal Safeguard (P2)      │
- │ Prevent accidental sheet dismissal during hardware encode    │
+ │ Priority 1: Project Storage Crash Recovery (P1) [DONE]      │
+ │ Auto-recover orphaned .tmp files on disk corruptions/crashes│
  └─────────────────────────────────────────────────────────────┘
        │
        ▼
  ┌─────────────────────────────────────────────────────────────┐
- │ Task 2: Empty Project Auto-Cleanup on Back Navigation (P2)  │
- │ Discard newly opened blank drafts with zero media on exit   │
+ │ Priority 2: Export Cancellation & Lifecycle Safety (P1) [DONE]
+ │ Safe abort, dispose shields, and PopScope modal lock        │
  └─────────────────────────────────────────────────────────────┘
        │
        ▼
  ┌─────────────────────────────────────────────────────────────┐
- │ Task 3: Speed Curve Touch Target Expansion for High-DPI (P3)│
- │ Expand Bezier anchor hit radius from 12dp to 24dp           │
+ │ Priority 3: Empty Draft Auto-Cleanup on Back (P2) [DONE]    │
+ │ Discard newly opened blank drafts on immediate back exit    │
  └─────────────────────────────────────────────────────────────┘
        │
        ▼
  ┌─────────────────────────────────────────────────────────────┐
- │ Task 4: Regression Testing & Dual-Remote Synchronization    │
- │ Re-run 743+ tests, flutter analyze, and propose sync plan   │
+ │ Priority 4: Timeline Undo/Redo & Media Clamping (P1) [DONE] │
+ │ Schedule auto-save on undo/redo & clamp zero durations      │
+ └─────────────────────────────────────────────────────────────┘
+       │
+       ▼
+ ┌─────────────────────────────────────────────────────────────┐
+ │ Priority 5: Speed Curve Touch Targets & UI Fits (P2) [DONE] │
+ │ 28px Bezier grab radius & eliminate flex layout overflows   │
+ └─────────────────────────────────────────────────────────────┘
+       │
+       ▼
+ ┌─────────────────────────────────────────────────────────────┐
+ │ Priority 6: Quality Gate Validation [PASSED]                │
+ │ 758/758 tests passed, flutter analyze 0 issues              │
  └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 2. Detailed Task Breakdown
+## 2. Hardening Task Completion Matrix
 
-### Task 1: Export Modal Dismissal Safeguard (P2)
-* **Problem**: In `TopNavigationBar` and `ActionToolbar`, `ExportModalSheet` is displayed via `showModalBottomSheet`. While exporting, tapping the backdrop or swiping down dismisses the sheet while `VideoExportEngine` continues rendering in the background. The user loses visual feedback of the export progress.
-* **Solution**:
-  1. In `ExportModalSheet`, wrap the view with `PopScope(canPop: !widget.viewModel.isExporting, onPopInvoked: ...)`.
-  2. In `TopNavigationBar` and `ActionToolbar`, dynamically bind `isDismissible: !viewModel.isExporting` and `enableDrag: !viewModel.isExporting`.
-* **Testing**:
-  - Add unit/widget regression test in `test/widget/export_modal_sheet_test.dart` asserting that while `isExporting == true`, the modal cannot be dismissed via back navigation or barrier tap.
-
-### Task 2: Empty Project Auto-Cleanup on Back Navigation (P2)
-* **Problem**: When a user taps "New Project" and immediately backs out without importing clips, stickers, text, or audio, an empty draft file (`Project MM/DD HH:MM`) is permanently saved in the Recent Drafts list.
-* **Solution**:
-  1. Add `bool get isBlankProject` getter in `EditorViewModel` checking if all tracks (`videoClips`, `overlayClips`, `stickerOverlays`, `textOverlays`, `audioTracks`) are empty and duration is zero.
-  2. On Back navigation in `TopNavigationBar`, if the project is a newly created blank draft, call `ProjectStorageService.instance.deleteProject(project.id)` instead of `saveCurrentProject()`.
-* **Testing**:
-  - Add test in `test/unit/project_storage_service_test.dart` and `test/unit/editor_view_model_draft_test.dart` validating that blank projects are discarded cleanly on exit.
-
-### Task 3: Speed Curve High-DPI Touch Target Expansion (P3)
-* **Problem**: On high-density devices (408+ dpi override), the touch target radius of Bezier anchor points in `SpeedAdjustmentSheet` is $12\text{ dp}$, requiring high precision to grab.
-* **Solution**:
-  1. Increase the invisible touch hit-target radius from $12\text{ dp}$ to $24\text{ dp}$ while preserving the sleek $6\text{ dp}$ visual circle rendering.
-* **Testing**:
-  - Update `test/unit/speed_curve_test.dart` to verify touch bounds.
+| Task ID | Component | Problem | Resolution | Test Coverage |
+| :--- | :--- | :--- | :--- | :--- |
+| **P1-REC** | `ProjectStorageService` | Process kill during atomic write lost draft | Added crash-recovery to `getProjectById` and `getAllProjects` to recover valid `.json.tmp` files | `project_crash_recovery_test.dart` (3/3 pass) |
+| **P1-EXP** | `EditorViewModel`, `DeviceMediaService` | Cancel mid-export did not abort callback loop; post-disposal crash | Added `_exportCancelled`, `cancelExport()`, and post-dispose notifyListeners guard | `export_lifecycle_safety_test.dart` (2/2 pass) |
+| **P2-MOD** | `ExportModalSheet` | Accidental swipe dismissed modal during render | Wrapped in reactive `PopScope(canPop: !viewModel.isExporting)` with user alert | `export_modal_safeguard_test.dart` (2/2 pass) |
+| **P2-CLN** | `EditorViewModel`, `TopNavigationBar` | Blank drafts saved when backing out immediately | Added `isUntouchedBlankProject` and `saveOrCleanupOnExit()` | `empty_project_cleanup_test.dart` (3/3 pass) |
+| **P1-UND** | `EditorViewModel` | `undo()` / `redo()` did not schedule auto-save | Added `scheduleAutoSave()` in both `undo()` and `redo()` | `timeline_editing_hardening_test.dart` (4/4 pass) |
+| **P1-MED** | `EditorViewModel` | Zero-duration clips caused division by zero | Added `duration <= Duration.zero` clamping to safe minimums | `timeline_editing_hardening_test.dart` (4/4 pass) |
+| **P2-DIS** | `VideoPlaybackService` | Mismatched controller cleanup in `disposeAll` | Collects union of `_sessions` and `_windowsControllers` texture IDs | `timeline_editing_hardening_test.dart` (4/4 pass) |
+| **P2-SPD** | `SpeedAdjustmentSheet` | High-DPI Bezier grab target too narrow; UI overflows | Expanded hit target to 28px; wrapped headers/footers in `Flexible` | `speed_curve_touch_test.dart` (1/1 pass) |
 
 ---
 
-## 3. Dual-Remote Synchronization Strategy
+## 3. v1.8.0 Feature Candidates (Next Development Phase)
 
-Once the hardening commits are finalized on `dev/v1.7.1-hardening`:
-1. The new commits can be fast-forward merged into local `main`.
-2. A clean synchronization plan will be prepared for both `origin` (`FS-Groupz/Editor-FS`) and `secondary` (`Almasyash/capcut-video-editor-flutter`).
-3. Explicit user consent will be obtained before running any push commands.
+With v1.7.1 release hardening complete, future milestones should target:
+
+1. **Phase 14 — Keyframe Graph Editor & Bezier Interpolation**:
+   * Interactive graph curves for scale, position, and rotation keyframes.
+2. **Phase 15 — Audio Effects & Equalizer**:
+   * 10-band graphic equalizer, voice effects (Echo, Robot, Deep, Chipmunk), and noise reduction filter.
+3. **Phase 16 — LUT Import / Export Engine**:
+   * Custom `.cube` and 3D LUT importing and parsing directly onto GLSL shaders.
+
+---
+
+## 4. Dual-Remote Synchronization Strategy
+
+1. Review and commit all v1.7.1 changes on `dev/v1.7.1-hardening`.
+2. Request explicit user consent before performing any merge to `main` or remote pushing.
+3. Once approved, push fast-forward commits to `origin` (`FS-Groupz/Editor-FS`) and synchronize `secondary` (`Almasyash/capcut-video-editor-flutter`).

@@ -267,6 +267,13 @@ class DeviceMediaService {
     }
   }
 
+  /// Cancels an in-flight video export operation
+  static Future<void> cancelExport() async {
+    try {
+      await _platform.invokeMethod('cancelExport');
+    } catch (_) {}
+  }
+
   /// Renders and exports the full project timeline with real transition effects,
   /// audio tracks, speed, and trim adjustments into an MP4 video file and registers
   /// it into the device MediaStore gallery.

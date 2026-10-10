@@ -187,11 +187,14 @@ class _SpeedAdjustmentSheetState extends State<SpeedAdjustmentSheet> with Single
             children: [
               const Icon(Icons.speed_rounded, color: AppColors.primary, size: 22),
               const SizedBox(width: 8),
-              const Text(
-                'Speed Control',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+              const Expanded(
+                child: Text(
+                  'Speed',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Container(
                 height: 32,
                 decoration: BoxDecoration(
@@ -211,7 +214,7 @@ class _SpeedAdjustmentSheetState extends State<SpeedAdjustmentSheet> with Single
                   labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                   tabs: const [
                     Tab(text: 'Normal'),
-                    Tab(text: 'Curve (Graphic)'),
+                    Tab(text: 'Curve'),
                   ],
                 ),
               ),
@@ -240,12 +243,16 @@ class _SpeedAdjustmentSheetState extends State<SpeedAdjustmentSheet> with Single
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              TextButton.icon(
-                icon: const Icon(Icons.refresh_rounded, size: 16, color: AppColors.textMuted),
-                label: const Text('Reset (1.0x)', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                onPressed: _onReset,
+              Flexible(
+                child: TextButton.icon(
+                  icon: const Icon(Icons.refresh_rounded, size: 16, color: AppColors.textMuted),
+                  label: const Text('Reset', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                  onPressed: _onReset,
+                ),
               ),
+              const SizedBox(width: 8),
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
@@ -256,11 +263,11 @@ class _SpeedAdjustmentSheetState extends State<SpeedAdjustmentSheet> with Single
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _onApply,
-                    child: const Text('Apply Speed', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
