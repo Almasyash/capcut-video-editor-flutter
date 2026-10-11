@@ -258,7 +258,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
             autofocus: true,
             onKeyEvent: _handleKeyEvent,
             child: PopScope(
-              canPop: activeDrawer == null,
+              canPop: false,
               onPopInvokedWithResult: (didPop, result) async {
                 if (didPop) return;
                 if (_viewModel.activeDrawer != null) {
@@ -266,7 +266,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
                 } else {
                   await _viewModel.saveOrCleanupOnExit();
                   if (context.mounted) {
-                    Navigator.of(context).maybePop();
+                    Navigator.of(context).pop();
                   }
                 }
               },
