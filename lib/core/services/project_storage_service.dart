@@ -21,6 +21,15 @@ class ProjectStorageService {
   final Map<String, Future<void>> _inFlightSaves = {};
   final Map<String, Project> _queuedProjects = {};
   final Set<String> _deletedProjectIds = {};
+  final Map<String, int> _projectGenerations = {};
+
+  @visibleForTesting
+  Future<void> Function(String projectId, File tempFile)? onTempFileWrittenForTesting;
+
+  int _currentGeneration(String id) => _projectGenerations[id] ?? 0;
+
+  @visibleForTesting
+  int getProjectGeneration(String id) => _currentGeneration(id);
 
   @visibleForTesting
   void overrideDirectoryForTesting(Directory? dir) {
@@ -29,6 +38,8 @@ class ProjectStorageService {
     _inFlightSaves.clear();
     _queuedProjects.clear();
     _deletedProjectIds.clear();
+    _projectGenerations.clear();
+    onTempFileWrittenForTesting = null;
   }
 
   /// Retrieves the persistent root directory path for saved projects
@@ -201,6 +212,7 @@ class ProjectStorageService {
   /// Non-blocking async project save with serialization queue and atomic swap.
   /// Prevents race conditions where rapid edits could cause an older save to overwrite a newer state.
   Future<void> saveProject(Project project) async {
+    final saveGen = _currentGeneration(project.id);
     // If project was explicitly deleted and not recreated, abort immediately
     if (_deletedProjectIds.contains(project.id)) {
       debugPrint('[ProjectStorageService] Aborting save for deleted project ${project.id}');
@@ -223,11 +235,16 @@ class ProjectStorageService {
     try {
       var toSave = updated;
       while (true) {
-        if (_deletedProjectIds.contains(updated.id)) {
+        if (_currentGeneration(toSave.id) != saveGen || _deletedProjectIds.contains(toSave.id)) {
+          debugPrint('[ProjectStorageService] Aborting save loop for stale/deleted project ${toSave.id}');
           break;
         }
 
-        await _writeProjectToDisk(toSave);
+        await _writeProjectToDisk(toSave, saveGen);
+
+        if (_currentGeneration(updated.id) != saveGen || _deletedProjectIds.contains(updated.id)) {
+          break;
+        }
 
         // If another edit was queued while writing to disk, process the latest one next
         if (_queuedProjects.containsKey(updated.id)) {
@@ -237,14 +254,16 @@ class ProjectStorageService {
         }
       }
     } finally {
-      _inFlightSaves.remove(updated.id);
+      if (_currentGeneration(updated.id) == saveGen) {
+        _inFlightSaves.remove(updated.id);
+      }
       completer.complete();
     }
   }
 
   /// Internal worker: writes project to a .tmp file first, flushes, then atomically swaps.
-  Future<void> _writeProjectToDisk(Project project) async {
-    if (_deletedProjectIds.contains(project.id)) {
+  Future<void> _writeProjectToDisk(Project project, int saveGen) async {
+    if (_currentGeneration(project.id) != saveGen || _deletedProjectIds.contains(project.id)) {
       return;
     }
 
@@ -257,11 +276,20 @@ class ProjectStorageService {
       final jsonMap = project.toJson();
       final jsonStr = const JsonEncoder.withIndent('  ').convert(jsonMap);
 
+      if (_currentGeneration(project.id) != saveGen || _deletedProjectIds.contains(project.id)) {
+        return;
+      }
+
       // 1. Write to temporary file with flush to guarantee on-disk persistence
       await tempFile.writeAsString(jsonStr, flush: true);
 
-      // Check again after I/O write in case project was deleted during writeAsString
-      if (_deletedProjectIds.contains(project.id)) {
+      // Controlled hook for deterministic testing of concurrency boundaries
+      if (onTempFileWrittenForTesting != null) {
+        await onTempFileWrittenForTesting!(project.id, tempFile);
+      }
+
+      // Check again after temp file write in case project was deleted/invalidated during write
+      if (_currentGeneration(project.id) != saveGen || _deletedProjectIds.contains(project.id)) {
         if (await tempFile.exists()) {
           try {
             await tempFile.delete();
@@ -283,12 +311,14 @@ class ProjectStorageService {
         if (await tempFile.exists()) {
           await tempFile.copy(targetFile.path);
           if (await tempFile.exists()) {
-            await tempFile.delete();
+            try {
+              await tempFile.delete();
+            } catch (_) {}
           }
         } else {
-          // If tempFile does not exist because project was deleted, ignore cleanly;
+          // If tempFile does not exist because project was deleted/invalidated, ignore cleanly;
           // otherwise rethrow if rename threw an unexpected genuine I/O failure
-          if (!_deletedProjectIds.contains(project.id)) {
+          if (_currentGeneration(project.id) == saveGen && !_deletedProjectIds.contains(project.id)) {
             rethrow;
           }
         }
@@ -302,21 +332,21 @@ class ProjectStorageService {
           await tempFile.delete();
         } catch (_) {}
       }
+      // Re-throw genuine I/O failures for valid, non-deleted, current-generation operations
+      if (_currentGeneration(project.id) == saveGen && !_deletedProjectIds.contains(project.id)) {
+        rethrow;
+      }
     }
   }
 
-  /// Deletes a project draft from disk, temporary artifacts, and memory cache
+  /// Deletes a project draft from disk, temporary artifacts, and memory cache.
+  /// Advances generation token to instantly invalidate any in-flight or queued writes.
   Future<void> deleteProject(String id) async {
+    _projectGenerations[id] = _currentGeneration(id) + 1;
     _deletedProjectIds.add(id);
     _memoryCache.remove(id);
     _queuedProjects.remove(id);
-
-    // If an async save is currently in-flight for this project, await it so no background write runs after deletion
-    if (_inFlightSaves.containsKey(id)) {
-      try {
-        await _inFlightSaves[id];
-      } catch (_) {}
-    }
+    _inFlightSaves.remove(id);
 
     try {
       final dirPath = await getProjectsDirectoryPath();
@@ -334,18 +364,24 @@ class ProjectStorageService {
     }
   }
 
+  /// Explicitly unmarks a project as deleted and advances its generation token for safe recreation.
+  void prepareForRecreation(String id) {
+    _deletedProjectIds.remove(id);
+    _projectGenerations[id] = _currentGeneration(id) + 1;
+  }
+
   /// Creates and saves a new blank project draft
-  Future<Project> createNewProject({String? name}) async {
+  Future<Project> createNewProject({String? id, String? name}) async {
     final now = DateTime.now();
     final dateStr = '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')}';
     final project = Project(
-      id: 'proj_${now.millisecondsSinceEpoch}',
+      id: id ?? 'proj_${now.millisecondsSinceEpoch}',
       name: name ?? 'Project $dateStr',
       createdAt: now,
       updatedAt: now,
     );
 
-    _deletedProjectIds.remove(project.id);
+    prepareForRecreation(project.id);
     await saveProject(project);
     return project;
   }

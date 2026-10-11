@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:capcut_video_editor/core/services/project_storage_service.dart';
+import 'package:capcut_video_editor/domain/models/project.dart';
 import 'package:capcut_video_editor/domain/models/video_clip.dart';
 import 'package:capcut_video_editor/ui/features/editor/view_models/editor_view_model.dart';
 
@@ -151,6 +153,67 @@ void main() {
       await viewModel.saveOrCleanupOnExit();
       expect(await projectFile.exists(), isTrue);
       viewModel.dispose();
+    });
+
+    test('6. Deterministic same-ID recreation race: stale in-flight save cannot overwrite recreated Project B', () async {
+      const sameId = 'proj_deterministic_race_456';
+      final projectA = Project(
+        id: sameId,
+        name: 'Project A (Old Data)',
+        createdAt: DateTime(2026, 1, 1),
+        updatedAt: DateTime(2026, 1, 1),
+      );
+
+      final projectB = Project(
+        id: sameId,
+        name: 'Project B (New Recreated Data)',
+        createdAt: DateTime(2026, 2, 1),
+        updatedAt: DateTime(2026, 2, 1),
+      );
+
+      final saveAPaused = Completer<void>();
+      final releaseSaveA = Completer<void>();
+
+      // Controlled filesystem boundary hook: pause Save A after temp file is written
+      ProjectStorageService.instance.onTempFileWrittenForTesting = (id, tempFile) async {
+        if (id == sameId && !saveAPaused.isCompleted) {
+          saveAPaused.complete();
+          await releaseSaveA.future;
+        }
+      };
+
+      // 1. Start an asynchronous save for Project A
+      final saveAFuture = ProjectStorageService.instance.saveProject(projectA);
+
+      // 2. Pause it at a controlled filesystem boundary
+      await saveAPaused.future;
+      final tmpFile = File('${testDir.path}/$sameId.json.tmp');
+      expect(await tmpFile.exists(), isTrue);
+
+      // 3. Delete Project A
+      await ProjectStorageService.instance.deleteProject(sameId);
+
+      // 4. Recreate Project B with the same project ID
+      ProjectStorageService.instance.prepareForRecreation(sameId);
+      await ProjectStorageService.instance.saveProject(projectB);
+      final targetFile = File('${testDir.path}/$sameId.json');
+      expect(await targetFile.exists(), isTrue);
+      final diskProjectBeforeRelease = await ProjectStorageService.instance.getProjectById(sameId);
+      expect(diskProjectBeforeRelease?.name, equals(projectB.name));
+
+      // 5. Release the old save
+      releaseSaveA.complete();
+      await saveAFuture;
+
+      // 6. Verify Project B remains intact and contains only its own data
+      ProjectStorageService.instance.clearMemoryCache();
+      final finalProject = await ProjectStorageService.instance.getProjectById(sameId);
+      expect(finalProject, isNotNull);
+      expect(finalProject!.id, equals(sameId));
+      expect(finalProject.name, equals('Project B (New Recreated Data)'));
+
+      // Cleanup hook
+      ProjectStorageService.instance.onTempFileWrittenForTesting = null;
     });
   });
 }
