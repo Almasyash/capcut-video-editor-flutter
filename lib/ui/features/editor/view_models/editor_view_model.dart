@@ -675,6 +675,7 @@ class EditorViewModel extends ChangeNotifier {
   /// Saves the current project state to disk, or automatically cleans up and deletes
   /// the draft if it is an untouched blank project (preventing empty draft clutter).
   Future<void> saveOrCleanupOnExit() async {
+    _autoSaveDebounceTimer?.cancel();
     if (isUntouchedBlankProject) {
       try {
         await ProjectStorageService.instance.deleteProject(_currentProject.id);
@@ -5358,7 +5359,9 @@ class EditorViewModel extends ChangeNotifier {
       AudioPlaybackService.instance.dispose();
     }
     VideoPlaybackService.instance.disposeAll();
-    saveCurrentProject();
+    if (!isUntouchedBlankProject) {
+      saveCurrentProject();
+    }
     playheadNotifier.dispose();
     drawerNotifier.dispose();
     super.dispose();

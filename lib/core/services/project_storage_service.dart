@@ -20,6 +20,7 @@ class ProjectStorageService {
   // Serialized save queuing per project ID to prevent race conditions and concurrent write conflicts
   final Map<String, Future<void>> _inFlightSaves = {};
   final Map<String, Project> _queuedProjects = {};
+  final Set<String> _deletedProjectIds = {};
 
   @visibleForTesting
   void overrideDirectoryForTesting(Directory? dir) {
@@ -27,6 +28,7 @@ class ProjectStorageService {
     _memoryCache.clear();
     _inFlightSaves.clear();
     _queuedProjects.clear();
+    _deletedProjectIds.clear();
   }
 
   /// Retrieves the persistent root directory path for saved projects
@@ -199,6 +201,12 @@ class ProjectStorageService {
   /// Non-blocking async project save with serialization queue and atomic swap.
   /// Prevents race conditions where rapid edits could cause an older save to overwrite a newer state.
   Future<void> saveProject(Project project) async {
+    // If project was explicitly deleted and not recreated, abort immediately
+    if (_deletedProjectIds.contains(project.id)) {
+      debugPrint('[ProjectStorageService] Aborting save for deleted project ${project.id}');
+      return;
+    }
+
     final updated = project.copyWith(updatedAt: DateTime.now());
     _memoryCache[updated.id] = updated;
 
@@ -215,6 +223,10 @@ class ProjectStorageService {
     try {
       var toSave = updated;
       while (true) {
+        if (_deletedProjectIds.contains(updated.id)) {
+          break;
+        }
+
         await _writeProjectToDisk(toSave);
 
         // If another edit was queued while writing to disk, process the latest one next
@@ -232,6 +244,10 @@ class ProjectStorageService {
 
   /// Internal worker: writes project to a .tmp file first, flushes, then atomically swaps.
   Future<void> _writeProjectToDisk(Project project) async {
+    if (_deletedProjectIds.contains(project.id)) {
+      return;
+    }
+
     File? tempFile;
     try {
       final dirPath = await getProjectsDirectoryPath();
@@ -244,17 +260,37 @@ class ProjectStorageService {
       // 1. Write to temporary file with flush to guarantee on-disk persistence
       await tempFile.writeAsString(jsonStr, flush: true);
 
+      // Check again after I/O write in case project was deleted during writeAsString
+      if (_deletedProjectIds.contains(project.id)) {
+        if (await tempFile.exists()) {
+          try {
+            await tempFile.delete();
+          } catch (_) {}
+        }
+        return;
+      }
+
       // 2. Atomically swap temp file to target file
       try {
         if (await targetFile.exists()) {
           await targetFile.delete();
         }
-        await tempFile.rename(targetFile.path);
-      } catch (_) {
-        // Fallback for filesystem environments with cross-link / rename restrictions
-        await tempFile.copy(targetFile.path);
         if (await tempFile.exists()) {
-          await tempFile.delete();
+          await tempFile.rename(targetFile.path);
+        }
+      } catch (renameError) {
+        // Fallback for filesystem environments with cross-link / rename restrictions
+        if (await tempFile.exists()) {
+          await tempFile.copy(targetFile.path);
+          if (await tempFile.exists()) {
+            await tempFile.delete();
+          }
+        } else {
+          // If tempFile does not exist because project was deleted, ignore cleanly;
+          // otherwise rethrow if rename threw an unexpected genuine I/O failure
+          if (!_deletedProjectIds.contains(project.id)) {
+            rethrow;
+          }
         }
       }
 
@@ -271,8 +307,16 @@ class ProjectStorageService {
 
   /// Deletes a project draft from disk, temporary artifacts, and memory cache
   Future<void> deleteProject(String id) async {
+    _deletedProjectIds.add(id);
     _memoryCache.remove(id);
     _queuedProjects.remove(id);
+
+    // If an async save is currently in-flight for this project, await it so no background write runs after deletion
+    if (_inFlightSaves.containsKey(id)) {
+      try {
+        await _inFlightSaves[id];
+      } catch (_) {}
+    }
 
     try {
       final dirPath = await getProjectsDirectoryPath();
@@ -301,6 +345,7 @@ class ProjectStorageService {
       updatedAt: now,
     );
 
+    _deletedProjectIds.remove(project.id);
     await saveProject(project);
     return project;
   }

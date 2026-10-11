@@ -64,7 +64,9 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
       if (AudioPlaybackService.instance.isPlaying) {
         AudioPlaybackService.instance.pause();
       }
-      _viewModel.saveCurrentProject();
+      if (!_viewModel.isUntouchedBlankProject) {
+        _viewModel.saveCurrentProject();
+      }
     }
   }
 
