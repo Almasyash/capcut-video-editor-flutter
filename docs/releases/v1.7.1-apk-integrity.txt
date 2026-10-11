@@ -1,0 +1,30 @@
+================================================================================
+EDITOR FS v1.7.1 — RELEASE ARTIFACT CRYPTOGRAPHIC INTEGRITY
+================================================================================
+
+Package Name:           com.example.capcut_video_editor
+Version Name:           1.7.1
+Version Code:           3101
+Target Platform:        Android (minSdk 24, targetSdk 34, compileSdk 35)
+Source Commit:          d806f860b3cab62e3c476da323334af05b058271
+Source Tree:            83222143f6fc8458ae7465bfd79cddb1e652096e
+Release Tag:            v1.7.1 (cbabc14d3cd4e187508adda2c0f56d567b6c5034)
+
+File Name:              Editor-FS-v1.7.1-android-release.apk
+File Size:              87344343 bytes (~83.3 MB)
+
+Hashes:
+  SHA-256:              21A7E47FBA7598E7D4C267DA656E2C3A82175C09E65E11F6803DD30001E6BC1E
+  MD5:                  DDC01FAD6384F6AA8DBAD8B82EE0C072
+
+Signing Certificate:
+  Signature Scheme:     APK Signature Scheme v2 (true), v3 (true)
+  Subject DN:           CN=Editor FS Release, OU=Mobile, O=FS-Groupz, L=Global, ST=Global, C=US
+  Cert SHA-256 Digest:  028D2AEDCE6EE6E8453A3245F7A3FB4C09E18E728396CAA7DBB867D4950FF246
+  Cert SHA-1 Digest:    1AB3A34C28D0148188C6991E2982727E66C0F625
+  Cert MD5 Digest:      78ADF59A4FB9EA7A713F69ADF8B60AA0
+  Key Algorithm:        RSA 2048 bits
+
+Verification Command:
+  apksigner verify --print-certs -v Editor-FS-v1.7.1-android-release.apk
+================================================================================

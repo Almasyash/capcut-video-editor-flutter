@@ -2,6 +2,39 @@
 
 All notable changes to **Editor FS** are documented in this file.
 
+## [1.7.1] - 2026-10-11
+
+### 🛡️ Stability, Persistence & Hardware Export Hardening Suite
+- **Autosave Concurrency & Generation Protection**: Resolved race conditions in `ProjectStorageService` during rapid edits; implemented generational tokens to prevent concurrent or interleaved write corruptions and preserve atomic file-swaps.
+- **Awaited Navigation Persistence**: Enhanced `PopScope` back-gesture handling in `EditorScreen` to strictly await `saveOrCleanupOnExit` before popping routes, ensuring no background write is severed mid-flight.
+- **Orphan Temporary File Recovery**: Implemented automated detection and recovery for orphaned temporary save files (`.tmp.json`) left behind by unexpected process terminations.
+- **Hardware Export Cancellation & GPU Cleanup**: Added responsive cancellation handling to the native MediaCodec/GLSL export pipeline (`VideoExportEngine`), preventing thread lockups, orphan files, or GPU resource leaks when cancelling render jobs.
+- **Undo/Redo Autosave Synchronization**: Harmonized undo/redo state mutations with debounce timers, ensuring every user action snapshot triggers a reliable background persistence cycle.
+- **Zero-Duration Media Handling**: Added defensive clamping for zero-duration audio and video asset imports, preventing divide-by-zero exceptions in timeline calculations.
+- **Playback Resource Disposal Safeguards**: Eliminated audio and video controller memory leaks on rapid route changes and project switches through deterministic player disposal.
+- **Bezier Control Touch Target Enhancements**: Expanded touch and drag boundaries for Bezier curve handles on high-DPI touchscreens, improving direct canvas interaction precision.
+- **Empty Draft Automatic Cleanup**: Automatically prunes unpopulated project drafts upon navigation exit, keeping the recent projects dashboard tidy.
+- **Release Version & Metadata Correction**: Aligned application versioning to `1.7.1+3101` across `pubspec.yaml` and Android Gradle configurations (`versionName=1.7.1`, `versionCode=3101`).
+- **Comprehensive Quality Gate**:
+  - `764 / 764` automated unit and widget tests passed with 100% success rate.
+  - Zero static analysis warnings or lint errors via `flutter analyze`.
+  - Physical hardware verification on Realme RMX5003 (Android 16 / API 36):
+    - Native hardware 1080P @ 30 FPS H.264 video export with AAC stereo audio.
+    - Verified text overlay composition and stream integrity via `ffprobe`.
+    - Mid-render cancellation verification with clean GPU release.
+    - Cold-boot project draft restoration and multi-track persistence.
+
+---
+
+## [1.7.0] - 2026-10-09
+
+### 🌟 Professional Masking & Compositing Production Milestone
+- **Full Masking Engine Suite**: Comprehensive multi-mask layering (Rectangle, Ellipse, Polygon, Linear, Radial), GPU soft feathering, expansion, and Boolean blending operations.
+- **OpenGL ES 2.0 Fragment Shaders**: High-performance analytical Signed Distance Field evaluation with custom GLSL shaders (`oesFS`, `tex2DFS`).
+- **MediaCodec Hardware Compositor**: Hardware-accelerated native Android rendering pipeline for professional multi-layer mask export.
+
+---
+
 ## [1.6.1] - 2026-10-09
 
 ### 🌟 Professional Masking & Compositing Hardening Suite (v1.6.0 Milestone Completion)
