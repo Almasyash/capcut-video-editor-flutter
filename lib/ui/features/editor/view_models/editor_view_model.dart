@@ -6258,9 +6258,136 @@ class EditorViewModel extends ChangeNotifier {
           );
         }
       }
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      final maxMs = (text.durationInSeconds * 1000).round();
+      final clampedNewMs = newTimeMs.clamp(0, maxMs);
+      final track = text.effectiveKeyframeTracks.tracks[property];
+      if (track != null) {
+        final kf = track.getKeyframeAt(oldTimeMs, toleranceMs: 80);
+        if (kf != null) {
+          var group = text.effectiveKeyframeTracks.removeKeyframeAtTime(oldTimeMs, toleranceMs: 80);
+          group = group.addKeyframe(property, clampedNewMs, kf.value, easing: kf.easing);
+          updateTextOverlay(
+            text.copyWith(
+              keyframeTracks: group,
+              keyframes: group.toVideoKeyframes(),
+            ),
+            saveSnapshot: false,
+            notify: true,
+          );
+        }
+      }
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final maxMs = (audio.durationInSeconds * 1000).round();
+      final clampedNewMs = newTimeMs.clamp(0, maxMs);
+      final track = audio.effectiveKeyframeTracks.tracks[property];
+      if (track != null) {
+        final kf = track.getKeyframeAt(oldTimeMs, toleranceMs: 80);
+        if (kf != null) {
+          var group = audio.effectiveKeyframeTracks.removeKeyframeAtTime(oldTimeMs, toleranceMs: 80);
+          group = group.addKeyframe(property, clampedNewMs, kf.value, easing: kf.easing);
+          final index = _audioTracks.indexWhere((a) => a.id == audio.id);
+          if (index != -1) {
+            _audioTracks[index] = audio.copyWith(keyframeTracks: group);
+          }
+        }
+      }
     }
     scheduleAutoSave();
     notifyListeners();
+  }
+
+  /// Updates keyframe value at target timestamp directly without moving playhead
+  void updateKeyframeValueAtTime(
+    AnimatableProperty property,
+    int timeMs,
+    double newValue, {
+    int toleranceMs = 80,
+  }) {
+    if (_selectedClipIndex != null) {
+      final clip = _videoClips[_selectedClipIndex!];
+      final updatedGroup = clip.effectiveKeyframeTracks.updateKeyframeValueAt(
+        property,
+        timeMs,
+        newValue,
+        toleranceMs: toleranceMs,
+      );
+      _videoClips[_selectedClipIndex!] = clip.copyWith(
+        keyframeTracks: updatedGroup,
+        keyframes: updatedGroup.toVideoKeyframes(),
+      );
+    } else if (_selectedOverlayIndex != null && _selectedOverlayIndex! < _overlayClips.length) {
+      final overlay = _overlayClips[_selectedOverlayIndex!];
+      final updatedGroup = overlay.effectiveKeyframeTracks.updateKeyframeValueAt(
+        property,
+        timeMs,
+        newValue,
+        toleranceMs: toleranceMs,
+      );
+      _overlayClips[_selectedOverlayIndex!] = overlay.copyWith(
+        keyframeTracks: updatedGroup,
+        keyframes: updatedGroup.toVideoKeyframes(),
+      );
+    } else if (selectedTextOverlay != null) {
+      final text = selectedTextOverlay!;
+      final updatedGroup = text.effectiveKeyframeTracks.updateKeyframeValueAt(
+        property,
+        timeMs,
+        newValue,
+        toleranceMs: toleranceMs,
+      );
+      updateTextOverlay(
+        text.copyWith(
+          keyframeTracks: updatedGroup,
+          keyframes: updatedGroup.toVideoKeyframes(),
+        ),
+        saveSnapshot: false,
+        notify: true,
+      );
+    } else if (selectedAudioTrack != null) {
+      final audio = selectedAudioTrack!;
+      final updatedGroup = audio.effectiveKeyframeTracks.updateKeyframeValueAt(
+        property,
+        timeMs,
+        newValue,
+        toleranceMs: toleranceMs,
+      );
+      final index = _audioTracks.indexWhere((a) => a.id == audio.id);
+      if (index != -1) {
+        _audioTracks[index] = audio.copyWith(keyframeTracks: updatedGroup);
+      }
+    }
+    scheduleAutoSave();
+    notifyListeners();
+  }
+
+  /// Updates cubic Bézier tangent handles (x1, y1, x2, y2) at target timestamp
+  void updateKeyframeBezierHandles(
+    AnimatableProperty property,
+    int timeMs,
+    double x1,
+    double y1,
+    double x2,
+    double y2, {
+    TangentMode tangentMode = TangentMode.autoSmooth,
+    bool syncAllTransformProperties = true,
+  }) {
+    final customCurve = EasingCurve.cubic(
+      x1,
+      y1,
+      x2,
+      y2,
+      label: 'Custom Bézier',
+      tangentMode: tangentMode,
+    );
+    updateKeyframeEasing(
+      property,
+      timeMs,
+      customCurve,
+      syncAllTransformProperties: syncAllTransformProperties,
+    );
   }
 
   /// Sets keyframe property value at current playhead relative time for selected layer
@@ -6370,8 +6497,13 @@ class EditorViewModel extends ChangeNotifier {
     required AnimatableProperty property,
     String? keyframeId,
     required double newValue,
+    int? timeMs,
   }) {
-    setKeyframePropertyValue(property, newValue);
+    if (timeMs != null) {
+      updateKeyframeValueAtTime(property, timeMs, newValue);
+    } else {
+      setKeyframePropertyValue(property, newValue);
+    }
   }
 
   /// Changes keyframe easing curve on the selected layer

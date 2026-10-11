@@ -11,6 +11,21 @@ enum InterpolationMode {
   cubicBezier,
 }
 
+/// Mode governing tangent handle synchronization across keyframe boundaries
+enum TangentMode {
+  /// Both tangent handles maintain symmetric collinear alignment (smooth C1 continuity)
+  autoSmooth('Auto Smooth'),
+
+  /// Tangent handles can move independently for sharp corners or bounces
+  broken('Broken Corner'),
+
+  /// Tangent handles are disabled (linear progression)
+  linear('Linear');
+
+  final String label;
+  const TangentMode(this.label);
+}
+
 /// Professional easing curve specification supporting standard presets and cubic Bézier math
 class EasingCurve {
   final InterpolationMode mode;
@@ -19,6 +34,7 @@ class EasingCurve {
   final double x2;
   final double y2;
   final String? label;
+  final TangentMode tangentMode;
 
   const EasingCurve({
     this.mode = InterpolationMode.easeInOut,
@@ -27,17 +43,25 @@ class EasingCurve {
     this.x2 = 0.58,
     this.y2 = 1.0,
     this.label,
+    this.tangentMode = TangentMode.autoSmooth,
   });
 
   String get displayName => label ?? mode.name;
 
-  static const linear = EasingCurve(mode: InterpolationMode.linear, label: 'Linear');
+  static const linear = EasingCurve(mode: InterpolationMode.linear, label: 'Linear', tangentMode: TangentMode.linear);
   static const hold = EasingCurve(mode: InterpolationMode.hold, label: 'Hold');
   static const easeIn = EasingCurve(mode: InterpolationMode.easeIn, x1: 0.42, y1: 0.0, x2: 1.0, y2: 1.0, label: 'Ease In');
   static const easeOut = EasingCurve(mode: InterpolationMode.easeOut, x1: 0.0, y1: 0.0, x2: 0.58, y2: 1.0, label: 'Ease Out');
   static const easeInOut = EasingCurve(mode: InterpolationMode.easeInOut, x1: 0.42, y1: 0.0, x2: 0.58, y2: 1.0, label: 'Ease In-Out');
 
-  factory EasingCurve.cubic(double x1, double y1, double x2, double y2, {String label = 'Custom Bézier'}) {
+  factory EasingCurve.cubic(
+    double x1,
+    double y1,
+    double x2,
+    double y2, {
+    String label = 'Custom Bézier',
+    TangentMode tangentMode = TangentMode.autoSmooth,
+  }) {
     return EasingCurve(
       mode: InterpolationMode.cubicBezier,
       x1: x1.clamp(0.0, 1.0),
@@ -45,6 +69,27 @@ class EasingCurve {
       x2: x2.clamp(0.0, 1.0),
       y2: y2,
       label: label,
+      tangentMode: tangentMode,
+    );
+  }
+
+  EasingCurve copyWith({
+    InterpolationMode? mode,
+    double? x1,
+    double? y1,
+    double? x2,
+    double? y2,
+    String? label,
+    TangentMode? tangentMode,
+  }) {
+    return EasingCurve(
+      mode: mode ?? this.mode,
+      x1: x1 ?? this.x1,
+      y1: y1 ?? this.y1,
+      x2: x2 ?? this.x2,
+      y2: y2 ?? this.y2,
+      label: label ?? this.label,
+      tangentMode: tangentMode ?? this.tangentMode,
     );
   }
 
@@ -69,11 +114,36 @@ class EasingCurve {
     }
   }
 
+  /// Evaluates instantaneous rate of change dy/dt given time progress [0.0, 1.0]
+  double evaluateDerivative(double t) {
+    final clampedT = t.clamp(0.0, 1.0);
+    switch (mode) {
+      case InterpolationMode.hold:
+        return 0.0;
+      case InterpolationMode.linear:
+        return 1.0;
+      case InterpolationMode.easeIn:
+        return 3.0 * clampedT * clampedT;
+      case InterpolationMode.easeOut:
+        final inv = 1.0 - clampedT;
+        return 3.0 * inv * inv;
+      case InterpolationMode.easeInOut:
+        if (clampedT < 0.5) {
+          return 12.0 * clampedT * clampedT;
+        } else {
+          final inv = 1.0 - clampedT;
+          return 12.0 * inv * inv;
+        }
+      case InterpolationMode.cubicBezier:
+        return _evaluateCubicBezierDerivative(clampedT);
+    }
+  }
+
   /// Alias for evaluate to match motion physics solvers
   double solve(double t) => evaluate(t);
 
-  /// Standard Newton-Raphson cubic Bézier solver with guaranteed binary subdivision fallback
-  double _evaluateCubicBezier(double t) {
+  /// Solves parametric cubic parameter s in [0.0, 1.0] where X(s) == t
+  double _solveCubicParameter(double t) {
     if (t <= 0.0) return 0.0;
     if (t >= 1.0) return 1.0;
 
@@ -82,7 +152,7 @@ class EasingCurve {
     for (int i = 0; i < 8; i++) {
       final currentX = _sampleCurveX(s) - t;
       if (currentX.abs() < 1e-6) {
-        return _sampleCurveY(s);
+        return s;
       }
       final dx = _sampleCurveDerivativeX(s);
       if (dx.abs() < 1e-6) break;
@@ -104,7 +174,24 @@ class EasingCurve {
       }
       s = (high + low) * 0.5;
     }
+    return s;
+  }
+
+  /// Standard Newton-Raphson cubic Bézier solver with guaranteed binary subdivision fallback
+  double _evaluateCubicBezier(double t) {
+    final s = _solveCubicParameter(t);
     return _sampleCurveY(s);
+  }
+
+  /// Computes dy/dx derivative for cubic Bézier at time t
+  double _evaluateCubicBezierDerivative(double t) {
+    final s = _solveCubicParameter(t);
+    final dx = _sampleCurveDerivativeX(s);
+    final dy = _sampleCurveDerivativeY(s);
+    if (dx.abs() < 1e-6) {
+      return dy >= 0 ? 100.0 : -100.0;
+    }
+    return (dy / dx).clamp(-100.0, 100.0);
   }
 
   double _sampleCurveX(double t) {
@@ -125,6 +212,12 @@ class EasingCurve {
            t * t * t;
   }
 
+  double _sampleCurveDerivativeY(double t) {
+    return 3.0 * (1.0 - t) * (1.0 - t) * y1 +
+           6.0 * (1.0 - t) * t * (y2 - y1) +
+           3.0 * t * t * (1.0 - y2);
+  }
+
   Map<String, dynamic> toJson() => {
     'mode': mode.name,
     'x1': x1,
@@ -132,6 +225,7 @@ class EasingCurve {
     'x2': x2,
     'y2': y2,
     'label': label,
+    'tangentMode': tangentMode.name,
   };
 
   factory EasingCurve.fromJson(Map<String, dynamic> json) {
@@ -140,6 +234,11 @@ class EasingCurve {
       (m) => m.name == modeName,
       orElse: () => InterpolationMode.easeInOut,
     );
+    final tangentModeName = json['tangentMode'] as String? ?? 'autoSmooth';
+    final tangentMode = TangentMode.values.firstWhere(
+      (m) => m.name == tangentModeName,
+      orElse: () => TangentMode.autoSmooth,
+    );
     return EasingCurve(
       mode: mode,
       x1: (json['x1'] as num?)?.toDouble() ?? 0.42,
@@ -147,6 +246,7 @@ class EasingCurve {
       x2: (json['x2'] as num?)?.toDouble() ?? 0.58,
       y2: (json['y2'] as num?)?.toDouble() ?? 1.0,
       label: json['label'] as String?,
+      tangentMode: tangentMode,
     );
   }
 
@@ -159,10 +259,17 @@ class EasingCurve {
           x1 == other.x1 &&
           y1 == other.y1 &&
           x2 == other.x2 &&
-          y2 == other.y2;
+          y2 == other.y2 &&
+          tangentMode == other.tangentMode;
 
   @override
-  int get hashCode => mode.hashCode ^ x1.hashCode ^ y1.hashCode ^ x2.hashCode ^ y2.hashCode;
+  int get hashCode =>
+      mode.hashCode ^
+      x1.hashCode ^
+      y1.hashCode ^
+      x2.hashCode ^
+      y2.hashCode ^
+      tangentMode.hashCode;
 }
 
 /// Easing interpolation curves for keyframe transitions (Legacy Enum with Enhanced Evaluation)
@@ -463,6 +570,64 @@ class KeyframeTrack {
     return property.sanitize(keyframes.last.value);
   }
 
+  /// Evaluates instantaneous rate of change (velocity) in property units per second
+  double evaluateDerivative(double timeInSeconds) {
+    if (keyframes.length <= 1) return 0.0;
+
+    final timeMs = (timeInSeconds * 1000).round();
+
+    // Outside keyframe range, velocity is zero (held value)
+    if (timeMs <= keyframes.first.timestampMs || timeMs >= keyframes.last.timestampMs) {
+      return 0.0;
+    }
+
+    // Binary search for bounding interval [k_i, k_{i+1}]
+    int low = 0;
+    int high = keyframes.length - 1;
+    while (low <= high) {
+      final mid = (low + high) >> 1;
+      if (keyframes[mid].timestampMs <= timeMs) {
+        if (mid == keyframes.length - 1 || keyframes[mid + 1].timestampMs > timeMs) {
+          final k1 = keyframes[mid];
+          final k2 = keyframes[mid + 1];
+          final durationSec = (k2.timestampMs - k1.timestampMs) / 1000.0;
+          if (durationSec <= 1e-4) return 0.0;
+
+          final progress = (timeMs - k1.timestampMs) / (k2.timestampMs - k1.timestampMs);
+          final deltaVal = k2.value - k1.value;
+          final easeDeriv = k1.easing.evaluateDerivative(progress);
+
+          return (deltaVal / durationSec) * easeDeriv;
+        }
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return 0.0;
+  }
+
+  /// Updates keyframe value at existing timestamp without changing easing or reordering
+  KeyframeTrack updateKeyframeValueAt(int timeMs, double value, {int toleranceMs = 80}) {
+    final sanitizedVal = property.sanitize(value);
+    final idx = keyframes.indexWhere((k) => (k.timestampMs - timeMs).abs() <= toleranceMs);
+    if (idx < 0) return this;
+
+    final updated = List<MotionKeyframe>.from(keyframes);
+    updated[idx] = updated[idx].copyWith(value: sanitizedVal);
+    return KeyframeTrack(property: property, keyframes: updated, defaultValue: defaultValue);
+  }
+
+  /// Updates keyframe easing at existing timestamp
+  KeyframeTrack updateKeyframeEasingAt(int timeMs, EasingCurve easing, {int toleranceMs = 80}) {
+    final idx = keyframes.indexWhere((k) => (k.timestampMs - timeMs).abs() <= toleranceMs);
+    if (idx < 0) return this;
+
+    final updated = List<MotionKeyframe>.from(keyframes);
+    updated[idx] = updated[idx].copyWith(easing: easing);
+    return KeyframeTrack(property: property, keyframes: updated, defaultValue: defaultValue);
+  }
+
   double _interpolate(double v1, double v2, double t) {
     if (property == AnimatableProperty.rotation) {
       // Continuous rotation interpolation preserving full multi-turn revolutions
@@ -644,6 +809,27 @@ class KeyframeTrackGroup {
     final track = tracks[property];
     if (track == null || track.isEmpty) return fallback ?? property.defaultValue;
     return track.evaluate(timeInSeconds);
+  }
+
+  /// Evaluates instantaneous velocity (rate of change) for a property at timeInSeconds
+  double evaluateDerivative(AnimatableProperty property, double timeInSeconds) {
+    final track = tracks[property];
+    if (track == null || track.isEmpty) return 0.0;
+    return track.evaluateDerivative(timeInSeconds);
+  }
+
+  /// Updates keyframe value at target timestamp for property without altering curve or timing
+  KeyframeTrackGroup updateKeyframeValueAt(
+    AnimatableProperty property,
+    int timeMs,
+    double value, {
+    int toleranceMs = 80,
+  }) {
+    final track = tracks[property];
+    if (track == null) return this;
+    final updatedTracks = Map<AnimatableProperty, KeyframeTrack>.from(tracks);
+    updatedTracks[property] = track.updateKeyframeValueAt(timeMs, value, toleranceMs: toleranceMs);
+    return KeyframeTrackGroup(tracks: updatedTracks);
   }
 
   /// Evaluates all configured tracks at timeInSeconds
