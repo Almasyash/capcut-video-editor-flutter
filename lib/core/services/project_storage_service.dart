@@ -249,12 +249,16 @@ class ProjectStorageService {
         if (await targetFile.exists()) {
           await targetFile.delete();
         }
-        await tempFile.rename(targetFile.path);
+        if (await tempFile.exists()) {
+          await tempFile.rename(targetFile.path);
+        }
       } catch (_) {
         // Fallback for filesystem environments with cross-link / rename restrictions
-        await tempFile.copy(targetFile.path);
         if (await tempFile.exists()) {
-          await tempFile.delete();
+          await tempFile.copy(targetFile.path);
+          if (await tempFile.exists()) {
+            await tempFile.delete();
+          }
         }
       }
 
