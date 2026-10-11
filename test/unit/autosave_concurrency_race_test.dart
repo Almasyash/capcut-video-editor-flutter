@@ -17,8 +17,15 @@ void main() {
 
   tearDown(() async {
     ProjectStorageService.instance.overrideDirectoryForTesting(null);
-    if (await testDir.exists()) {
-      await testDir.delete(recursive: true);
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (await testDir.exists()) {
+          await testDir.delete(recursive: true);
+        }
+        break;
+      } catch (_) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
     }
   });
 
