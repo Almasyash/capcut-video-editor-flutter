@@ -54,6 +54,36 @@ class EasingCurve {
   static const easeOut = EasingCurve(mode: InterpolationMode.easeOut, x1: 0.0, y1: 0.0, x2: 0.58, y2: 1.0, label: 'Ease Out');
   static const easeInOut = EasingCurve(mode: InterpolationMode.easeInOut, x1: 0.42, y1: 0.0, x2: 0.58, y2: 1.0, label: 'Ease In-Out');
 
+  // Industry Standard Cubic Bézier Animation Presets
+  static const easeInQuad = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.11, y1: 0.0, x2: 0.5, y2: 0.0, label: 'Ease In Quad');
+  static const easeOutQuad = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.5, y1: 1.0, x2: 0.89, y2: 1.0, label: 'Ease Out Quad');
+  static const easeInOutQuad = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.45, y1: 0.0, x2: 0.55, y2: 1.0, label: 'Ease In-Out Quad');
+
+  static const easeInCubic = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.32, y1: 0.0, x2: 0.67, y2: 0.0, label: 'Ease In Cubic');
+  static const easeOutCubic = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.33, y1: 1.0, x2: 0.68, y2: 1.0, label: 'Ease Out Cubic');
+  static const easeInOutCubic = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.65, y1: 0.0, x2: 0.35, y2: 1.0, label: 'Ease In-Out Cubic');
+
+  static const easeInBack = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.36, y1: 0.0, x2: 0.66, y2: -0.56, label: 'Ease In Back', tangentMode: TangentMode.broken);
+  static const easeOutBack = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.34, y1: 1.56, x2: 0.64, y2: 1.0, label: 'Ease Out Back', tangentMode: TangentMode.broken);
+  static const easeInOutBack = EasingCurve(mode: InterpolationMode.cubicBezier, x1: 0.68, y1: -0.6, x2: 0.32, y2: 1.6, label: 'Ease In-Out Back', tangentMode: TangentMode.broken);
+
+  static const List<EasingCurve> standardPresets = [
+    linear,
+    easeInOut,
+    easeIn,
+    easeOut,
+    easeInQuad,
+    easeOutQuad,
+    easeInOutQuad,
+    easeInCubic,
+    easeOutCubic,
+    easeInOutCubic,
+    easeInBack,
+    easeOutBack,
+    easeInOutBack,
+    hold,
+  ];
+
   factory EasingCurve.cubic(
     double x1,
     double y1,
@@ -759,6 +789,36 @@ class KeyframeTrack {
     return KeyframeTrack(property: property, keyframes: duplicated, defaultValue: defaultValue);
   }
 
+  /// Shifts all keyframes by offsetMs, ensuring timestamps do not drop below minTimeMs
+  KeyframeTrack shiftTime(int offsetMs, {int minTimeMs = 0}) {
+    if (keyframes.isEmpty || offsetMs == 0) return this;
+    final updated = keyframes.map((k) {
+      final newTime = (k.timestampMs + offsetMs).clamp(minTimeMs, 86400000);
+      return k.copyWith(timestampMs: newTime);
+    }).toList();
+    updated.sort((a, b) => a.timestampMs.compareTo(b.timestampMs));
+    return KeyframeTrack(property: property, keyframes: updated, defaultValue: defaultValue);
+  }
+
+  /// Scales keyframe spacing relative to originMs by a positive factor
+  KeyframeTrack scaleTime(double factor, {int originMs = 0}) {
+    if (keyframes.isEmpty || factor <= 0.0) return this;
+    final updated = keyframes.map((k) {
+      final dt = k.timestampMs - originMs;
+      final newTime = (originMs + (dt * factor).round()).clamp(0, 86400000);
+      return k.copyWith(timestampMs: newTime);
+    }).toList();
+    updated.sort((a, b) => a.timestampMs.compareTo(b.timestampMs));
+    return KeyframeTrack(property: property, keyframes: updated, defaultValue: defaultValue);
+  }
+
+  /// Applies a specified easing curve to all keyframes on this track
+  KeyframeTrack applyEasingToAll(EasingCurve easing) {
+    if (keyframes.isEmpty) return this;
+    final updated = keyframes.map((k) => k.copyWith(easing: easing)).toList();
+    return KeyframeTrack(property: property, keyframes: updated, defaultValue: defaultValue);
+  }
+
   Map<String, dynamic> toJson() => {
     'property': property.name,
     'defaultValue': defaultValue,
@@ -829,6 +889,33 @@ class KeyframeTrackGroup {
     if (track == null) return this;
     final updatedTracks = Map<AnimatableProperty, KeyframeTrack>.from(tracks);
     updatedTracks[property] = track.updateKeyframeValueAt(timeMs, value, toleranceMs: toleranceMs);
+    return KeyframeTrackGroup(tracks: updatedTracks);
+  }
+
+  /// Shifts all tracks by offsetMs
+  KeyframeTrackGroup shiftTime(int offsetMs, {int minTimeMs = 0}) {
+    final updatedTracks = <AnimatableProperty, KeyframeTrack>{};
+    for (final entry in tracks.entries) {
+      updatedTracks[entry.key] = entry.value.shiftTime(offsetMs, minTimeMs: minTimeMs);
+    }
+    return KeyframeTrackGroup(tracks: updatedTracks);
+  }
+
+  /// Scales all tracks relative to originMs
+  KeyframeTrackGroup scaleTime(double factor, {int originMs = 0}) {
+    final updatedTracks = <AnimatableProperty, KeyframeTrack>{};
+    for (final entry in tracks.entries) {
+      updatedTracks[entry.key] = entry.value.scaleTime(factor, originMs: originMs);
+    }
+    return KeyframeTrackGroup(tracks: updatedTracks);
+  }
+
+  /// Applies easing to a specific property's track
+  KeyframeTrackGroup applyEasingToProperty(AnimatableProperty property, EasingCurve easing) {
+    final track = tracks[property];
+    if (track == null) return this;
+    final updatedTracks = Map<AnimatableProperty, KeyframeTrack>.from(tracks);
+    updatedTracks[property] = track.applyEasingToAll(easing);
     return KeyframeTrackGroup(tracks: updatedTracks);
   }
 
